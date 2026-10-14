@@ -285,9 +285,30 @@ def label_resolved_risks(text: str) -> str:
     return _RESOLVED_RISKS.sub(sub, text)
 
 
+# An older summary's "Other targets evaluated: ..." sentence can name engines by raw id
+# (#544). Only that sentence is reworded. ``\.(?=\s|$)`` keeps "67.5%" from ending it early.
+_OTHER_TARGETS_SENTENCE = re.compile(r"Other targets evaluated: .*?\.(?=\s|$)")
+# Only ids in ENGINE_DISPLAY_NAMES are matched; an id without a display name (for example
+# ``timestream``) stays raw on purpose.
+_ENGINE_ID = re.compile(
+    r"\b("
+    + "|".join(re.escape(k) for k in sorted(ENGINE_DISPLAY_NAMES, key=len, reverse=True))
+    + r")\b"
+)
+
+
+def label_other_targets(text: str) -> str:
+    """``documentdb (consolidated into aurora_mysql ...)`` -> ``DocumentDB (consolidated ...)``."""
+
+    def sub(m: re.Match[str]) -> str:
+        return _ENGINE_ID.sub(lambda e: display_engine(e.group(1)), m.group(0))
+
+    return _OTHER_TARGETS_SENTENCE.sub(sub, text)
+
+
 def label_summary_counts(text: str, report: dict[str, Any] | None = None) -> str:
-    """Name what each count in the deterministic summary counts (#255, #258)."""
-    return label_resolved_risks(label_in_scope_access_patterns(text, report))
+    """Name what each count in the deterministic summary counts (#255, #258, #544)."""
+    return label_other_targets(label_resolved_risks(label_in_scope_access_patterns(text, report)))
 
 
 # #393/#536: four independent high-confidence checks can reject the generated

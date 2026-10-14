@@ -41,6 +41,7 @@ from src.shared.workload_fit_labels import WORKLOAD_FIT_DEFINITION
 from src.storage.parallel import map_parallel
 
 from . import escaping, renderers
+from .formatting import label_other_targets
 from .renderers import _cost_baseline_text, resolve_migration_waves
 
 logger = logging.getLogger(__name__)
@@ -899,6 +900,17 @@ def _interactive_cost_baseline_stats(tco: dict[str, Any]) -> tuple[str, str]:
     return cost_text, savings_text
 
 
+def _summary_text(synthesis: dict) -> str:
+    """The stored summary; a deterministic one from an older report.json is relabeled (#544).
+
+    A generated narrative is never rewritten, same rule as the decision report.
+    """
+    summary = synthesis.get("summary") or ""
+    if summary and summary == synthesis.get("summary_deterministic"):
+        summary = label_other_targets(summary)
+    return summary or "No summary available."
+
+
 def render_analysis_report_html(export_data: dict, filename: str = "") -> str:
     """Render the interactive analysis report from an assembled ``DATA`` object."""
     synthesis = (export_data.get("results") or {}).get("synthesis") or {}
@@ -1020,7 +1032,7 @@ def render_analysis_report_html(export_data: dict, filename: str = "") -> str:
         "__JOB_ID__": escaping.html_text(job_id),
         "__EXPORT_DATE__": escaping.html_text(exported_human),
         "__DATABASE_NAME__": escaping.html_text(str(database_name)),
-        "__SUMMARY__": escaping.html_text(synthesis.get("summary") or "No summary available."),
+        "__SUMMARY__": escaping.html_text(_summary_text(synthesis)),
         "__SUMMARY_FALLBACK_NOTE__": _summary_fallback_note(synthesis),
         "__ENGINE_BADGES__": _engine_badges(after, cache_overlay),
         "__PROJECTED_COST__": f"{projected:,.2f}",

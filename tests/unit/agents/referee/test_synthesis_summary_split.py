@@ -229,6 +229,22 @@ def test_an_engine_eliminated_only_by_a_later_customer_edit_gets_neutral_wording
     assert "by the reality check" not in text
 
 
+def test_consolidated_engine_is_named_by_display_name() -> None:
+    """#544: the summary names a consolidated engine and its absorber by display name
+    (``DocumentDB ... into DynamoDB``), never the raw ids the decision report used to show.
+
+    This is a guard on the producer and passes without the render-time fix; the relabeling of
+    older stored summaries is tested in ``tests/unit/report/test_other_targets_display_names.py``.
+    """
+    text = _summary(RANKING, {"documentdb": "dynamodb"})
+    assert (
+        "Other targets evaluated: DocumentDB (consolidated into DynamoDB by the reality check)."
+        in text
+    )
+    assert "documentdb" not in text
+    assert "dynamodb (" not in text
+
+
 def test_source_table_mapping_is_stated_once() -> None:
     text = _summary()
     assert text.count("source tables mapped") == 1
