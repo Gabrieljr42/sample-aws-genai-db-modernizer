@@ -22,8 +22,8 @@ from .facts import report_facts
 from .formatting import (
     _completed_designs,
     _cost_baseline_text,
-    _eliminated_engine_costs_text,
     _fmt_usd,
+    _retired_engine_savings_text,
     access_pattern_scope,
     clip,
     fmt_num,
@@ -423,12 +423,14 @@ def render_engineering_report_md(report: dict[str, Any], prov: dict[str, str] | 
             f"{escaping.md_text(_fmt_usd(tco.get('projected_monthly_cost')))}",
             f"- Savings: {escaping.md_text(savings_text)}",
         ]
-        eliminated_cost_text = _eliminated_engine_costs_text(tco)
-        if eliminated_cost_text:
+        # #949: only an engine the source runs today; a dropped candidate is no saving.
+        retired_text = _retired_engine_savings_text(tco)
+        if retired_text:
             out.append(
-                f"- Already removed from this comparison: "
-                f"{escaping.md_text(eliminated_cost_text)}, "
-                "retired before this projection (see Migration trade-offs below for why)."
+                f"- Retired by this plan: "
+                f"{escaping.md_text(retired_text)}, "
+                "running today and not in this projection (see Migration trade-offs below "
+                "for why)."
             )
         out.append("")
 

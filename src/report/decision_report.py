@@ -28,8 +28,8 @@ from .facts import report_facts
 from .formatting import (
     DASH,
     _cost_baseline_text,
-    _eliminated_engine_costs_text,
     _fmt_usd,
+    _retired_engine_savings_text,
     fallback_withheld_reason,
     fmt_num,
     label_summary_counts,
@@ -211,12 +211,13 @@ def render_decision_report_html(
         f'<div class="tile {_risk_tile_class(risk_level)}"><p>Overall risk</p><p class=val>{esc(risk_level)}</p></div>',
         "</div>",
     ]
-    eliminated_cost_text = _eliminated_engine_costs_text(tco)
-    if eliminated_cost_text:
+    # #949: only an engine the source runs today; a dropped candidate is no saving.
+    retired_text = _retired_engine_savings_text(tco)
+    if retired_text:
         out.append(
-            "<p class=note data-figure=eliminated-engines>Already removed from this comparison: "
-            f"{esc(eliminated_cost_text)}, "
-            "retired before this projection; see Engines not used below.</p>"
+            "<p class=note data-figure=retired-engines>Retired by this plan: "
+            f"{esc(retired_text)}, running today and not in this projection; "
+            "see Engines not used below.</p>"
         )
 
     summary = (

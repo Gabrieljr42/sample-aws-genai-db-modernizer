@@ -61,6 +61,7 @@ from src.contracts.reality_check_model_response import (
 from src.contracts.reality_check_output import RealityCheckOutputContract
 from src.shared.engine_elimination import eliminated_engines as settled_eliminated_engines
 from src.shared.engine_names import PLACEHOLDER_ENGINES
+from src.shared.engines_in_use import engines_in_use
 from src.shared.models import Role, build_bedrock_model, resolve_model_id
 from src.shared.skill_sections import skill_sections
 from src.storage.artifact_store import ArtifactStore
@@ -809,6 +810,7 @@ def _settle_records(result: dict) -> None:
         result["consolidations"],
         result.get("unique_value_assessment"),
         _engine_infra_cost(result.get("analysis_outputs")),
+        engines_in_use=engines_in_use(result.get("collector_output")),
     )
     refresh_patterns_and_recommendations(result)
 

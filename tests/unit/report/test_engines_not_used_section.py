@@ -1,7 +1,8 @@
 """The decision report's "Engines not used" section lists every dropped engine (#547).
 
-The "Already removed from this comparison: ... see Engines not used below"
-note pointed at a section that was only rendered when a trade-off line
+The "Retired by this plan: ... see Engines not used below" note (#949; "Already
+removed from this comparison" before, and only for an engine the source runs today
+since) pointed at a section that was only rendered when a trade-off line
 carried the "no in-scope X query remains" marker. On the wordpress sample
 DocumentDB's two consolidation lines carry no marker, so the pointer led
 nowhere. Found by the deliverable-figures e2e test (#573).
@@ -30,7 +31,7 @@ def _report(**overrides: Any) -> dict[str, Any]:
                 {"database": "aurora_mysql", "monthly_cost_usd": 318.8},
                 {"database": "dynamodb", "monthly_cost_usd": 98.41},
             ],
-            "eliminated_engine_costs": [{"database": "documentdb", "monthly_cost_usd": 367.39}],
+            "retired_engine_savings": [{"database": "documentdb", "monthly_cost_usd": 367.39}],
         },
         "trade_offs": [
             {
@@ -90,7 +91,7 @@ def test_engine_still_in_the_architecture_is_not_listed() -> None:
 
 def test_no_dropped_engine_no_section() -> None:
     report = _report(trade_offs=[])
-    report["tco_analysis"]["eliminated_engine_costs"] = None
+    report["tco_analysis"]["retired_engine_savings"] = None
     report["reality_check"] = {
         "consolidations": [],
         "before_distribution": {"aurora_mysql": 63, "dynamodb": 44},
@@ -103,7 +104,7 @@ def test_no_dropped_engine_no_section() -> None:
 
 def test_report_without_distributions_still_uses_the_marker() -> None:
     report = _report(reality_check={})
-    report["tco_analysis"]["eliminated_engine_costs"] = None
+    report["tco_analysis"]["retired_engine_savings"] = None
     report["trade_offs"] = [
         {
             "description": "Consolidated 4 queries from opensearch → aurora_mysql: 4 opensearch "

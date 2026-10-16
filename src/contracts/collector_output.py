@@ -1,7 +1,7 @@
 """
 CollectorOutputContract Pydantic Models
-Version: 3.1
-Last Modified: 2026-02-06
+Version: 3.2
+Last Modified: 2026-10-16
 Description: Output contract for all Collector agents with RDS-specific enhancements
 
 Version History:
@@ -10,8 +10,14 @@ Version History:
   NormalizedDataType.floating_point enum value - both backward-compatible
   additions (MINOR per docs/contracts/agent-contracts-spec.md: new optional
   field, new enum value).
+- 3.2 (2026-10-16, #949): Added optional ``Metadata.engines_in_use``: the AWS
+  database engines (engine ids such as ``elasticache``) the application already
+  runs today next to its source. Only these, and the source engine itself, can be
+  retired for a saving; an engine the plan analysed and dropped never is.
+  Backward compatible: defaults to empty (the source is the only engine running).
 """
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -199,6 +205,23 @@ class Metadata(BaseModel):
         None, ge=0, description="Time taken to collect data"
     )
     source_database: SourceDatabase = Field(..., description="Source database information")
+    engines_in_use: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Engine ids (e.g. elasticache, documentdb) of the AWS databases the application "
+            "already runs today next to the source. Only these and the source engine can be "
+            "retired for a saving (#949)."
+        ),
+    )
+
+    @field_validator("engines_in_use")
+    @classmethod
+    def validate_engines_in_use(cls, v: list[str]) -> list[str]:
+        out = [e.strip().lower() for e in v]
+        for e in out:
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", e):
+                raise ValueError(f"engines_in_use holds engine ids, got {e!r}")
+        return out
 
 
 class Parameter(BaseModel):
@@ -639,11 +662,11 @@ class Metrics(BaseModel):
 class CollectorOutputContract(BaseModel):
     """
     Output contract for all Collector agents with RDS-specific enhancements
-    Version: 3.1
+    Version: 3.2
     """
 
     contract_version: str = Field(
-        default="3.1",
+        default="3.2",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

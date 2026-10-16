@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.shared.engine_names import ENGINE_DISPLAY_NAMES, display_engine
+from src.shared.engines_in_use import retired_engine_savings
 
 
 def artifact_stem(
@@ -171,19 +172,17 @@ def _cost_baseline_text(tco: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def _eliminated_engine_costs_text(tco: dict[str, Any]) -> str:
-    """ "$271.80/mo (DocumentDB), $240.96/mo (OpenSearch)" or "" with none.
+def _retired_engine_savings_text(tco: dict[str, Any]) -> str:
+    """ "$271.80/mo (ElastiCache), $240.96/mo (OpenSearch)" or "" with none.
 
-    Makes a saving named for an eliminated engine elsewhere in the same
-    report (the reality check's own recommendation text, e.g. "Removes
-    $271.80/mo of infrastructure cost") traceable to this report's own TCO
-    facts, not just asserted in prose.
+    Only engines the source runs today that the plan retires
+    (``tco_analysis.retired_engine_savings``, #949), so a saving named for one
+    elsewhere in the same report (the reality check's own line, e.g. "Removes
+    $271.80/mo by retiring ElastiCache") is traceable to this report's own TCO
+    facts. A candidate engine the plan dropped is never listed: the legacy
+    ``eliminated_engine_costs`` is not read.
     """
-    rows = [
-        row
-        for row in (tco.get("eliminated_engine_costs") or [])
-        if isinstance(row, dict) and isinstance(row.get("monthly_cost_usd"), (int, float))
-    ]
+    rows = retired_engine_savings(tco)
     if not rows:
         return ""
     return ", ".join(

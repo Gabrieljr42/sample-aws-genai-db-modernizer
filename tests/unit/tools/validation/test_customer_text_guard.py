@@ -357,6 +357,13 @@ class TestScanJsonIdFieldPaths:
         report = {"tco_analysis": {"eliminated_engine_costs": [{"database": "opensearch"}]}}
         assert scan_json(report) == []
 
+    def test_949_retired_and_considered_engine_ids_are_excluded(self) -> None:
+        report = {
+            "tco_analysis": {"retired_engine_savings": [{"database": "elasticache"}]},
+            "considered_not_recommended": [{"engine": "documentdb", "absorbed_by": "dynamodb"}],
+        }
+        assert scan_json(report) == []
+
     def test_databases_service_is_excluded(self) -> None:
         report = {"recommended_architecture": {"databases": [{"service": "dynamodb"}]}}
         assert scan_json(report) == []

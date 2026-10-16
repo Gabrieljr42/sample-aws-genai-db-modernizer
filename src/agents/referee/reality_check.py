@@ -89,6 +89,7 @@ from src.agents.referee.reality_check_settle import (
 )
 from src.agents.referee.triage import SOURCE_ENGINE_TO_AURORA
 from src.shared.engine_names import without_placeholder_engines
+from src.shared.engines_in_use import engines_in_use
 
 # Names callers and tests import from this module; they live in the step modules.
 __all__ = [
@@ -397,6 +398,7 @@ def run_reality_check(
         consolidations,
         unique_value_assessment,
         _engine_infra_cost(analysis_outputs),
+        engines_in_use=engines_in_use(collector_output),
     )
 
     # Pass 3: Detect architectural patterns
@@ -410,6 +412,7 @@ def run_reality_check(
         engine_queries,
         _engine_infra_cost(analysis_outputs),
         unique_value_assessment,
+        engines_in_use=engines_in_use(collector_output),
     )
 
     return {

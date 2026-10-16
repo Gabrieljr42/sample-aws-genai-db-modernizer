@@ -1,8 +1,9 @@
 """The decision report and engineering report must show a known TCO baseline,
 or say it is unknown, instead of a bare $0.00 / 0% (#380 review).
 
-An eliminated engine's own analysed cost (``tco_analysis.eliminated_engine_costs``)
-must also be traceable wherever the deliverable states savings.
+A retired engine's own analysed cost (``tco_analysis.retired_engine_savings``, #949:
+an engine the source runs today) must also be traceable wherever the deliverable
+states savings.
 """
 
 from __future__ import annotations
@@ -89,14 +90,14 @@ class TestDecisionReportCostBaseline:
         assert "<p>Current monthly</p><p class=val>$0.00</p>" not in html
         assert "<p>Savings</p><p class=val>0%</p>" not in html
 
-    def test_eliminated_engine_costs_are_traceable(self) -> None:
+    def test_retired_engine_savings_are_traceable(self) -> None:
         tco = {
             "current_monthly_cost": 0.0,
             "current_cost_known": False,
             "projected_monthly_cost": 136.26,
             "savings_percent": 0,
             "cost_breakdown": [],
-            "eliminated_engine_costs": [
+            "retired_engine_savings": [
                 {"database": "documentdb", "monthly_cost_usd": 271.80},
                 {"database": "opensearch", "monthly_cost_usd": 240.96},
             ],
@@ -105,7 +106,7 @@ class TestDecisionReportCostBaseline:
         assert "$271.80/mo" in html
         assert "$240.96/mo" in html
 
-    def test_no_eliminated_engine_costs_adds_no_note(self) -> None:
+    def test_no_retired_engine_savings_adds_no_note(self) -> None:
         tco = {
             "current_monthly_cost": 100.0,
             "projected_monthly_cost": 50.0,
@@ -113,7 +114,7 @@ class TestDecisionReportCostBaseline:
             "cost_breakdown": [],
         }
         html = render_decision_report_html(_report(tco))
-        assert "Already removed from this comparison" not in html
+        assert "Retired by this plan" not in html
 
 
 class TestEngineeringReportCostBaseline:
@@ -141,14 +142,14 @@ class TestEngineeringReportCostBaseline:
         assert "$500.00" in md
         assert "75.8%" in md
 
-    def test_eliminated_engine_costs_are_traceable(self) -> None:
+    def test_retired_engine_savings_are_traceable(self) -> None:
         tco = {
             "current_monthly_cost": 0.0,
             "current_cost_known": False,
             "projected_monthly_cost": 136.26,
             "savings_percent": 0,
             "cost_breakdown": [],
-            "eliminated_engine_costs": [
+            "retired_engine_savings": [
                 {"database": "documentdb", "monthly_cost_usd": 271.80},
             ],
         }

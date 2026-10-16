@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import itertools
 from collections import defaultdict
+from collections.abc import Iterable
 from copy import deepcopy
 
 from src.agents.referee.reality_check_records import _queries
 from src.shared.engine_names import display_engine
+from src.shared.engines_in_use import engines_in_use as running_engines
 
 # ---------------------------------------------------------------------------
 # Architectural patterns
@@ -163,6 +165,7 @@ def refresh_patterns_and_recommendations(result: dict) -> None:
         {},
         _engine_infra_cost(result.get("analysis_outputs")),
         result.get("unique_value_assessment"),
+        engines_in_use=running_engines(result.get("collector_output")),
     )
 
 
@@ -218,6 +221,8 @@ def _build_recommendations(
     original_engine_queries: dict[str, list[dict]],
     engine_infra_cost: dict[str, float] | None = None,
     unique_value_assessment: dict[str, dict] | None = None,
+    *,
+    engines_in_use: Iterable[str] = (),
 ) -> list[str]:
     """Build human-readable recommendations.
 
@@ -251,9 +256,15 @@ def _build_recommendations(
     actually moved (``len(moved_queries(c, ...)) == c["query_count"]``,
     enforced in ``tests/unit/agents/referee/test_reality_check_llm_seam.py``),
     and a tie, by definition, moves none.
+
+    ``engines_in_use`` (#949, ``src.shared.engines_in_use``) is what the source runs
+    today. Removing an engine outside it -- a candidate the plan analysed and
+    dropped -- is never stated as a saving or a retirement: the customer never paid
+    for it.
     """
     recs = []
     engine_infra_cost = engine_infra_cost or {}
+    running = set(engines_in_use)
 
     # Consolidation recommendations
     for c in consolidations:
@@ -279,6 +290,17 @@ def _build_recommendations(
                 "-- none of its first-assignment queries clear the real-search-depth "
                 "plus traffic-or-result-size floor a standing deployment needs, so no "
                 "infrastructure cost was ever justified for it."
+            )
+        elif source not in running:
+            # #949: a candidate the plan considered and dropped; the customer does not
+            # run it today, so dropping it saves nothing. The first move says so, later
+            # moves of the same engine say it briefly.
+            first = next(r for r in consolidations if r["from_engine"] == source)
+            outcome = (
+                f"No saving is claimed: {source_name} does not run today; it was a "
+                "candidate this plan considered and does not recommend."
+                if c is first
+                else f"{source_name} does not run today, so no saving is claimed."
             )
         elif c.get("removal_saving_claimed", bool(saved)):
             real_cost = engine_infra_cost.get(source)

@@ -303,24 +303,27 @@ def test_dynamodb_check_costs_on_a_real_split_group(run: PipelineResult, tmp_pat
 def test_a_removed_engines_saving_is_its_analysed_cost_everywhere(run: PipelineResult) -> None:
     """#793: the consolidation records carry the same saving the TCO publishes.
 
-    Per removed engine the records sum to exactly ``tco_analysis.eliminated_engine_costs``
-    (wordpress: DocumentDB $367.39, counted once across its two moves), never the flat
-    $500 placeholder, and an engine the first assignment never justified claims nothing.
+    Per removed engine the records sum to exactly ``tco_analysis.retired_engine_savings``,
+    never the flat $500 placeholder, and an engine the first assignment never justified
+    claims nothing. #949: the bundled samples run no engine but their source, so no
+    removed engine is a saving (wordpress used to claim $367.39 for DocumentDB, a
+    candidate it never ran); ``test_pipeline_no_manufactured_saving.py`` covers a
+    collection that does run the engine it retires.
     """
     report = json.loads(
         sorted((run.job_dir() / "synthesis").glob("v*/report.json"))[-1].read_text()
     )
     records = report["reality_check"]["consolidations"]
-    eliminated = {
+    retired = {
         row["database"]: row["monthly_cost_usd"]
-        for row in report["tco_analysis"].get("eliminated_engine_costs") or []
+        for row in report["tco_analysis"].get("retired_engine_savings") or []
     }
     saved: dict[str, float] = {}
     for c in records:
         saved[c["from_engine"]] = saved.get(c["from_engine"], 0) + c["saved_cost_estimate"]
         assert c["saved_cost_estimate"] != 500.0
     for engine, total in saved.items():
-        assert round(total, 2) == round(eliminated.get(engine, 0), 2), (engine, total, eliminated)
+        assert round(total, 2) == round(retired.get(engine, 0), 2), (engine, total, retired)
     if run.db == "wordpress":
-        assert eliminated == {"documentdb": 367.39}
-        assert [c["saved_cost_estimate"] for c in records] == [367.39, 0.0]
+        assert retired == {}
+        assert [c["saved_cost_estimate"] for c in records] == [0.0, 0.0]

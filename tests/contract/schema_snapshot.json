@@ -3300,6 +3300,16 @@
                 "type": "string"
               }
             },
+            "engines_in_use": {
+              "required": false,
+              "schema": {
+                "items": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "kind": "array"
+              }
+            },
             "source_database": {
               "required": true,
               "schema": {
@@ -5738,8 +5748,8 @@
         }
       }
     },
-    "schema_hash": "ec7da18617b6165001024a097a7b65e1de1aa2cd77d65dc913d37dec3b4fc6a7",
-    "version": "3.1"
+    "schema_hash": "afc403dd2a0548447f54dbc23731bca2d7b24a7903fa0c1429cdb3af3895b579",
+    "version": "3.2"
   },
   "design_metrics.DesignMetricsContract": {
     "fields": {
@@ -12258,6 +12268,49 @@
           ]
         }
       },
+      "considered_not_recommended": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "items": {
+                "kind": "object",
+                "properties": {
+                  "absorbed_by": {
+                    "required": false,
+                    "schema": {
+                      "kind": "anyOf",
+                      "members": [
+                        {
+                          "kind": "scalar",
+                          "type": "null"
+                        },
+                        {
+                          "kind": "scalar",
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "engine": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "kind": "array"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
       "contract_version": {
         "required": false,
         "schema": {
@@ -16405,6 +16458,41 @@
                 "type": "number"
               }
             },
+            "retired_engine_savings": {
+              "required": false,
+              "schema": {
+                "kind": "anyOf",
+                "members": [
+                  {
+                    "items": {
+                      "kind": "object",
+                      "properties": {
+                        "database": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "monthly_cost_usd": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "minimum": 0,
+                            "type": "number"
+                          }
+                        }
+                      }
+                    },
+                    "kind": "array"
+                  },
+                  {
+                    "kind": "scalar",
+                    "type": "null"
+                  }
+                ]
+              }
+            },
             "savings_percent": {
               "required": true,
               "schema": {
@@ -16557,8 +16645,8 @@
         }
       }
     },
-    "schema_hash": "1a1ee1edaa32c1902a51aedc2e71e08b54233c1a9afd17bda9173d3253dd5aa1",
-    "version": "1.24"
+    "schema_hash": "e0289ed76c46ab62478cba22159c7a10fb2dead955a6db45b8db81d9c5821654",
+    "version": "1.25"
   },
   "triage_output.TriageOutputContract": {
     "fields": {

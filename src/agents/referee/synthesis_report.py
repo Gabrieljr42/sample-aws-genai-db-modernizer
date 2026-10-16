@@ -888,19 +888,20 @@ def build_query_groups(data: SynthesisData) -> list[dict]:
     return result
 
 
-def build_tco_analysis(
-    data: SynthesisData, eliminated_costs: dict[str, float] | None = None
-) -> dict:
+def build_tco_analysis(data: SynthesisData, retired_costs: dict[str, float] | None = None) -> dict:
     """Aggregate cost estimates from all analysis outputs.
 
-    ``eliminated_costs`` (#380) is each engine the reality check eliminated,
-    mapped to its own analysed ``cost_estimate.monthly_cost_usd`` -- the
-    figure a recommendation sentence names as a saving (e.g. "$271.80/mo")
-    when it recommends removing that engine's dedicated cluster. It is
-    carried into ``eliminated_engine_costs`` here so that figure is
-    traceable in the TCO facts the report publishes, not only in prose
-    elsewhere; omitted entirely (not an empty list) when there is nothing to
-    report, so a reader never sees a bare "[]" with no eliminated engine.
+    ``retired_costs`` (#380, #949) is each engine the source runs today that the
+    plan retires, mapped to its own analysed ``cost_estimate.monthly_cost_usd`` --
+    the figure a recommendation sentence names as a saving (e.g. "$271.80/mo")
+    when it recommends retiring that engine's cluster. It is carried into
+    ``retired_engine_savings`` here so that figure is traceable in the TCO facts
+    the report publishes, not only in prose elsewhere; omitted entirely (not an
+    empty list) when there is nothing to report. An engine the plan analysed as
+    a candidate and dropped is never in it: the customer does not run it, so
+    dropping it saves nothing (``considered_not_recommended`` names it instead).
+    ``eliminated_engine_costs``, which listed those candidates before contract
+    1.25, is no longer written.
     """
     target_costs = []
     total_projected = 0.0
@@ -951,10 +952,10 @@ def build_tco_analysis(
             "Does not include data transfer, backups, or global tables",
         ],
     }
-    if eliminated_costs:
-        result["eliminated_engine_costs"] = [
+    if retired_costs:
+        result["retired_engine_savings"] = [
             {"database": engine, "monthly_cost_usd": cost}
-            for engine, cost in sorted(eliminated_costs.items())
+            for engine, cost in sorted(retired_costs.items())
         ]
     return result
 
