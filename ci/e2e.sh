@@ -9,6 +9,15 @@
 #                       the copied-out deliverables land. Defaults to test-results/.
 #   E2E_REPORT_ARGS  - extra pytest args for the first invocation ONLY (below).
 #   E2E_UI_ARGS      - extra pytest args for the second invocation ONLY (below).
+#   E2E_SHARD        - run one CI shard instead of everything (#956): `wordpress`,
+#                       `discourse` or `trailgear` (the report checks whose test id
+#                       names that sample), `hashseed` (test_hashseed_determinism.py),
+#                       `determinism` (test_deliverable_determinism.py), `cross` (the
+#                       other report checks, tied to no sample), or `ui` (UI smoke +
+#                       help site, the only shard that builds the UI and the site).
+#                       Unset runs everything, as before. The six report shards' -k
+#                       expressions partition the report suite: each test lands in
+#                       exactly one of them (see e2e_shard_k).
 #
 # Runs pytest TWICE (see tests/e2e/test_ui.py's module docstring): pytest-playwright's
 # only_browser marker is a runtime skip, not a deselection, so under
@@ -36,27 +45,84 @@ source "$(dirname "$0")/lib.sh"
 export E2E_OUTPUT="${E2E_OUTPUT:-test-results}"
 export E2E_REPORT_ARGS="${E2E_REPORT_ARGS:-}"
 export E2E_UI_ARGS="${E2E_UI_ARGS:-}"
+export E2E_SHARD="${E2E_SHARD:-}"
 mkdir -p "$E2E_OUTPUT"
 
-log "install browsers"
-if [ "${CI:-}" = "true" ]; then
-  # --with-deps installs OS-level browser dependencies via apt and needs root/sudo.
-  # Fine on GitHub's Linux runners (CI=true is set automatically); on a developer's
-  # macOS machine it has nothing to install and fails looking for apt-get.
-  uv run playwright install --with-deps chromium webkit
-else
-  uv run playwright install chromium webkit
+# The -k expression for one report shard. Each test goes to the first rule it
+# matches: `hashseed` (test_hashseed_determinism.py) and `determinism`
+# (test_deliverable_determinism.py), the two slowest suites, which rerun samples
+# on purpose; then the first sample its id names, in the order wordpress,
+# discourse, trailgear; then `cross` for a test that names no sample. So the six
+# shards never overlap and never drop a test: `cross` takes everything the other
+# five do not.
+e2e_shard_k() {
+  local det="hashseed_determinism or deliverable_determinism"
+  case "$1" in
+    hashseed) echo "hashseed_determinism" ;;
+    determinism) echo "deliverable_determinism and not hashseed_determinism" ;;
+    wordpress) echo "wordpress and not ($det)" ;;
+    discourse) echo "discourse and not wordpress and not ($det)" ;;
+    trailgear) echo "trailgear and not wordpress and not discourse and not ($det)" ;;
+    cross) echo "not ($det) and not (wordpress or discourse or trailgear)" ;;
+    *) echo "error: unknown E2E_SHARD '$1' (wordpress, discourse, trailgear, hashseed, determinism, cross, ui)" >&2; return 2 ;;
+  esac
+}
+
+run_reports=1
+run_ui=1
+report_k=()
+browsers=(chromium webkit)
+case "$E2E_SHARD" in
+  "") ;;
+  ui) run_reports=0; browsers=(chromium) ;;
+  # The hash-seed suite runs the pipeline scripts in subprocesses and opens no
+  # browser page, so it skips the browser install (about 45s on CI).
+  hashseed) run_ui=0; browsers=(); report_k=(-k "$(e2e_shard_k "$E2E_SHARD")") ;;
+  *) run_ui=0; report_k=(-k "$(e2e_shard_k "$E2E_SHARD")") ;;
+esac
+
+# The UI build (about 90s on CI) does not depend on the browsers or the help
+# site, so it runs in the background while those install and build. Its output
+# goes to a log file, printed once it finishes, so the logs do not interleave.
+ui_pid=""
+ui_log="$E2E_OUTPUT/ui-build.log"
+if [ "$run_ui" = 1 ]; then
+  log "build UI in the background (log: $ui_log)"
+  build_ui > "$ui_log" 2>&1 &
+  ui_pid=$!
 fi
 
-build_ui
+if [ ${#browsers[@]} -gt 0 ]; then
+  log "install browsers (${browsers[*]})"
+  if [ "${CI:-}" = "true" ]; then
+    # --with-deps installs OS-level browser dependencies via apt and needs root/sudo.
+    # Fine on GitHub's Linux runners (CI=true is set automatically); on a developer's
+    # macOS machine it has nothing to install and fails looking for apt-get.
+    uv run playwright install --with-deps "${browsers[@]}"
+  else
+    uv run playwright install "${browsers[@]}"
+  fi
+fi
 
-log "build the help site (#325)"
-# tests/e2e/test_docs_site.py only serves and checks site/ -- same split as
-# build_ui/test_ui.py above. Needs the `docs` extra (mkdocs, mkdocs-material).
-uv run mkdocs build --strict
-uv run python scripts/build_docs_sample.py --site-dir site
+if [ "$run_ui" = 1 ]; then
+  log "build the help site (#325)"
+  # tests/e2e/test_docs_site.py only serves and checks site/ -- same split as
+  # build_ui/test_ui.py above. Needs the `docs` extra (mkdocs, mkdocs-material).
+  uv run mkdocs build --strict
+  uv run python scripts/build_docs_sample.py --site-dir site
 
-log "pipeline + report checks (chromium, webkit)"
+  log "wait for the UI build"
+  ui_rc=0
+  wait "$ui_pid" || ui_rc=$?
+  cat "$ui_log"
+  if [ "$ui_rc" -ne 0 ]; then
+    echo "error: the UI build failed (exit $ui_rc), see the log above" >&2
+    exit "$ui_rc"
+  fi
+fi
+
+if [ "$run_reports" = 1 ]; then
+log "pipeline + report checks (chromium, webkit${E2E_SHARD:+, shard $E2E_SHARD})"
 # --output is its own subdirectory, not $E2E_OUTPUT itself: pytest-playwright's
 # delete_output_dir autouse fixture rmtree()s whatever --output points at, at the
 # start of EVERY session. Pointing both invocations' --output straight at
@@ -66,10 +132,13 @@ uv run pytest tests/e2e --ignore=tests/e2e/test_ui.py --ignore=tests/e2e/test_do
   -m e2e -p no:xdist --fail-on-skip \
   --browser chromium --browser webkit \
   --output="$E2E_OUTPUT/pw-reports" --screenshot=only-on-failure --tracing=retain-on-failure \
-  --junitxml="$E2E_OUTPUT/e2e-reports-junit.xml" "$@" $E2E_REPORT_ARGS
+  --junitxml="$E2E_OUTPUT/e2e-reports-junit.xml" ${report_k[@]+"${report_k[@]}"} "$@" $E2E_REPORT_ARGS
+fi
 
+if [ "$run_ui" = 1 ]; then
 log "UI smoke + help site checks (chromium only)"
 uv run pytest tests/e2e/test_ui.py tests/e2e/test_docs_site.py -m e2e -p no:xdist --fail-on-skip \
   --browser chromium \
   --output="$E2E_OUTPUT/pw-ui" --screenshot=only-on-failure --tracing=retain-on-failure \
   --junitxml="$E2E_OUTPUT/e2e-ui-junit.xml" "$@" $E2E_UI_ARGS
+fi

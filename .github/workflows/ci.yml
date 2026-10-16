@@ -9,6 +9,9 @@ on:
   # queue's merge group too. None of the jobs below read pull request
   # context, so they run unchanged. Harmless while the queue is off.
   merge_group:
+  # Nightly: the full suite with the coverage gate (see the `test` job), on main.
+  schedule:
+    - cron: '23 4 * * *'
 
 permissions:
   contents: read
@@ -28,7 +31,12 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        # Caches uv's package cache across runs, keyed on uv.lock; one cache per
+        # set of extras so a job never restores another job's smaller set.
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-suffix: dev
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Pre-commit / CI version alignment
@@ -44,15 +52,33 @@ jobs:
       - name: Lint
         run: ./ci/lint.sh
 
-  test:
+  test-shard:
+    # The unit, contract, property and graph suite (ci/test.sh) split into four
+    # shards by recorded test durations (.test_durations, pytest-split; #956).
+    # The required check is the `test` job below, which waits for every shard.
+    name: test-shard (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      # Coverage costs time on every test, so it runs on pushes to main and the
+      # nightly run, where the `test` job combines the four shards' data and
+      # applies the same 65% gate to the whole suite.
+      COVERAGE: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && '1' || '' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        # Caches uv's package cache across runs, keyed on uv.lock; one cache per
+        # set of extras so a job never restores another job's smaller set.
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-suffix: dev
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Install AWS Transform SDK
@@ -64,6 +90,7 @@ jobs:
       - name: Run tests
         env:
           AWS_DEFAULT_REGION: us-east-1
+          TEST_SHARD: ${{ matrix.shard }}/4
         # Full suite (tests/), not just unit + contract. tests/graph, tests/integration
         # and tests/property previously never ran at PR time, which is how the ladybug
         # 0.20.4 binder break (tests/graph) reached the deploy pipeline unnoticed.
@@ -78,34 +105,122 @@ jobs:
         # --fail-on-skip: a skipped test fails the build. Combined with the marker,
         #   this means nothing in the gated run may silently skip — the failure mode
         #   behind issues #150 and the dead load-test tests.
-        run: ./ci/test.sh --cov=src --cov-report=term --cov-fail-under=65
+        # TEST_SHARD: this shard's share of the suite (see ci/test.sh).
+        run: |
+          if [ -n "$COVERAGE" ]; then
+            ./ci/test.sh --cov=src --cov-report=
+          else
+            ./ci/test.sh
+          fi
+      - name: Upload coverage data
+        if: env.COVERAGE == '1'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ matrix.shard }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
 
-  e2e:
+  test:
+    # The required `test` check: green only when every shard passed. `always()`
+    # makes it report (and fail) when a shard failed or was cancelled, rather
+    # than being skipped, which a required check would read as missing.
+    if: always()
+    needs: test-shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed
+        env:
+          RESULT: ${{ needs.test-shard.result }}
+        run: |
+          echo "test-shard result: $RESULT"
+          [ "$RESULT" = "success" ]
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-suffix: dev
+      - name: Install dependencies
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+        run: uv sync --locked --extra dev
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+        with:
+          pattern: coverage-*
+          path: coverage-data
+      - name: Coverage gate (whole suite, 65%)
+        # The same threshold the unsharded job enforced, over the four shards'
+        # combined data.
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+        run: |
+          uv run coverage combine coverage-data/coverage-*/.coverage
+          uv run coverage report --fail-under=65
+
+  e2e-shard:
+    # The deterministic end-to-end suite (ci/e2e.sh) split seven ways (#956): the
+    # report checks of each sample, the two determinism suites, the report checks
+    # tied to no sample, and the UI smoke + help site checks. Only the `ui` shard builds the UI and the help
+    # site; the report shards need neither. The required check is the `e2e` job
+    # below, which waits for every shard.
+    name: e2e-shard (${{ matrix.shard }})
     runs-on: ubuntu-latest
     # A normal run takes well under 30 minutes; the extra headroom absorbs slow
     # Ubuntu package mirrors (#443) so a slow install doesn't cancel passing tests.
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [wordpress, discourse, trailgear, hashseed, determinism, cross, ui]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: '3.12'
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        if: matrix.shard == 'ui'
         with:
           node-version: '22'
       - name: Install uv
-        run: pip install uv
+        # Caches uv's package cache across runs, keyed on uv.lock; one cache per
+        # set of extras so a job never restores another job's smaller set.
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-suffix: e2e
       - name: Install dependencies
         run: uv sync --locked --extra dev --extra e2e --extra docs
       - name: End-to-end
+        env:
+          E2E_SHARD: ${{ matrix.shard }}
         run: ./ci/e2e.sh
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-results
+          name: e2e-results-${{ matrix.shard }}
           path: test-results/
           retention-days: 14
+
+  e2e:
+    # The required `e2e` check: green only when every shard passed (see `test`).
+    if: always()
+    needs: e2e-shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed
+        env:
+          RESULT: ${{ needs.e2e-shard.result }}
+        run: |
+          echo "e2e-shard result: $RESULT"
+          [ "$RESULT" = "success" ]
 
   security:
     runs-on: ubuntu-latest
@@ -122,7 +237,12 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        # Caches uv's package cache across runs, keyed on uv.lock; one cache per
+        # set of extras so a job never restores another job's smaller set.
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-suffix: dev
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Bandit security scan
@@ -165,13 +285,19 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        # Caches uv's package cache across runs, keyed on uv.lock; one cache per
+        # set of extras so a job never restores another job's smaller set.
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-suffix: dev
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Validate contracts
+        # tests/contract/ (including the schema snapshot check) runs in the
+        # `test` shards; this job runs only the contract validation script,
+        # which no test covers (#956).
         run: uv run python scripts/validate_contracts.py src/contracts/*.py
-      - name: Contract tests
-        run: uv run pytest tests/contract/ -v
 
   ui-build:
     runs-on: ubuntu-latest

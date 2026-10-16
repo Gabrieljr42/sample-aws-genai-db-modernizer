@@ -60,11 +60,16 @@ which this script's prerequisites do not install), and
 anyone running this script with the `e2e` extra already installed. Plus
 `--fail-on-skip`, so nothing in this run may silently skip. No network, no
 credentials. Accepts extra pytest args, e.g. `./ci/test.sh --cov=src
---cov-report=term --cov-fail-under=65` for the coverage gate CI runs with.
+--cov-report=term --cov-fail-under=65` for the coverage gate (CI applies
+the same 65% gate to the combined shards, see Sharding below).
 
 Hypothesis profiles: `tests/conftest.py` loads the profile named by `HYPOTHESIS_PROFILE`, so it applies to every entry point, including a plain `uv run pytest tests/`. `default` (100 examples per property) is what runs when the variable is unset: locally, on main and nightly. `ci` (20 examples, and `tests/hypothesis_examples.scaled(n)` shrinks a test's own `max_examples` by the same share) is for pull requests: this script sets `HYPOTHESIS_PROFILE=ci` when `GITHUB_EVENT_NAME` is `pull_request`, unless the variable is already set. Any other CI system that calls pytest directly can set `HYPOTHESIS_PROFILE=ci` on its pull request runs the same way. To run a pull request's budget locally: `HYPOTHESIS_PROFILE=ci ./ci/test.sh`.
 
 Expensive sample runs are shared: `tests/shared_runs.py` builds each one (the deterministic wordpress pipeline, the `run_assessment.py` runs on discourse and wordpress) at most once per pytest session, across every xdist worker, under a file lock in the session's temporary directory. The cache never outlives the session. A test that writes to a shared job copies it first with `copy_run`.
+
+Sharding (#956): `TEST_SHARD=N/M ./ci/test.sh` runs only shard N of M, split by [pytest-split](https://github.com/jerry-git/pytest-split) (`--splits M --group N --splitting-algorithm least_duration`) from the per-test durations recorded in `.test_durations` at the repo root. The M shards together run exactly the tests an unsharded run does; a test missing from the file counts as the average duration, so new tests only make the balance a little worse, never drop a test. The GitHub `test-shard (N/4)` jobs run it with four shards, and the required `test` job passes only when all four did. Coverage (`--cov=src`) runs on pushes to main and in the nightly scheduled run, not on pull requests: each shard uploads its `.coverage` data and the `test` job combines them and applies the same 65% gate to the whole suite.
+
+Refresh the durations after adding, renaming or speeding up many tests (on any machine; only the relative times matter): `./ci/test.sh --store-durations --clean-durations`, then commit `.test_durations`. Record them with the variable unset (the full `default` Hypothesis profile, as main and nightly run); pull requests run the lighter `ci` profile, which shortens the property tests in every shard alike, so the balance holds. `--clean-durations` drops entries for tests that no longer exist. The file is about 1.9 MB, so it is excluded from the pre-commit large-file check, and from the end-of-file fixer because pytest-split writes it without a trailing newline.
 
 The raw-query large-server memory regression runs without a platform skip on
 Linux, macOS and Windows wherever this test command is run. The GitHub CI
@@ -130,6 +135,8 @@ other filter that only matches one suite's tests makes the other invocation
 collect zero items and exit 5. Use `E2E_REPORT_ARGS` / `E2E_UI_ARGS` to target
 extra args at only the first or second invocation respectively.
 
+Sharding (#956): `E2E_SHARD=<name> ./ci/e2e.sh` runs one of seven shards, the way the GitHub `e2e-shard (<name>)` jobs do; the required `e2e` job passes only when all seven did. `wordpress`, `discourse` and `trailgear` run the report checks (the first invocation) whose test id names that sample; `hashseed` runs `test_hashseed_determinism.py` and `determinism` runs `test_deliverable_determinism.py` (the two slowest suites, which rerun samples on purpose); `cross` runs the report checks that name no sample; and `ui` runs the second invocation (UI smoke + help site). The six report shards' `-k` expressions (`e2e_shard_k` in the script) assign each test to the first rule it matches, so together they select exactly the tests one unsharded run does. Only the `ui` shard builds the UI and the help site, and it installs only Chromium; `hashseed` opens no browser page and installs none. Whenever the script builds the UI (the `ui` shard or a full run), it does so in the background while the browsers install and the help site builds, writing its output to `$E2E_OUTPUT/ui-build.log` and printing it when done; a failed UI build still fails the script. Unset `E2E_SHARD` runs everything, as before.
+
 Env vars read:
 
 - `E2E_OUTPUT` — root directory for everything this script produces. Defaults
@@ -151,6 +158,8 @@ Env vars read:
     artifact, without the second run clobbering the first.
 - `E2E_REPORT_ARGS`, `E2E_UI_ARGS` — extra pytest args appended to only the
   first (report checks) or second (UI smoke) invocation, respectively.
+- `E2E_SHARD` — one shard name (`wordpress`, `discourse`, `trailgear`,
+  `hashseed`, `determinism`, `cross`, `ui`) to run instead of everything; see Sharding above.
 
 Installing browsers: `uv run playwright install --with-deps chromium webkit`
 in CI (`CI=true`, set automatically by GitHub Actions) — `--with-deps` pulls
