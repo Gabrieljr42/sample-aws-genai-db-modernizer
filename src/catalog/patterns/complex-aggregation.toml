@@ -4,8 +4,10 @@ detectors = [
     "src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases",
 ]
 triage_signal = "aggregations"
-# Penalty: Heavy penalty: better engines exist, but DynamoDB can pre-compute (complex_aggregation is the underscore spelling some analysis agents used).
-penalty = 50
+# Penalty basis: no server-side aggregation, so the result needs pre-computed aggregates
+# or another store (complex_aggregation is the underscore spelling some analysis agents used).
+penalty = 30
+penalty_basis = "needs_redesign"
 penalty_aliases = ["complex_aggregation"]
 
 # Detection signals: group_by_multiple_columns, having_clause, multi_table_aggregation
@@ -15,7 +17,7 @@ supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-ap-02"
 severity = 0.7
-why = "Complex GROUP BY / HAVING / multi-table aggregations. DynamoDB doesn't support server-side aggregation — these need to move to application layer, pre-computed aggregates, or a separate analytics store."
+why = "GROUP BY, HAVING or an aggregate over many rows. DynamoDB has no server-side aggregation: a Query or Scan can only count the items it reads (Select = COUNT), so a grouped result needs the application layer, pre-computed aggregates or a separate analytics store (Amazon DynamoDB API Reference, Query)."
 guidance = "Pre-compute aggregates on write (DynamoDB Streams + Lambda), or export to S3/Athena for analytics."
 
 [engines.documentdb]

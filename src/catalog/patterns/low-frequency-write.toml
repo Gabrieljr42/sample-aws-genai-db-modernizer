@@ -1,23 +1,17 @@
 # Pattern low-frequency-write. Fields: src/shared/catalog/patterns.py (ADR-031 Decision 8).
 id = "low-frequency-write"
-detectors = [
-    "src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases",
-]
+detectors = []
 triage_signal = "low_frequency_writes"
 penalty = 0
 
-# Detection signals: low_frequency_write, insert_update_delete, cps_below_threshold
+# Not a fit pattern (#920): how often a query runs (INSERT/UPDATE/DELETE below 0.5 calls/s) is not an access pattern.
+# It used to be DynamoDB's catch-all fit, matched by joins, aggregates and full scans
+# alike. That on-demand capacity suits sporadic traffic is cost evidence, for the cost
+# dimension (ADR-031 Decision 5, #494); the query is scored on its own access pattern.
 [engines.dynamodb]
-kind = "fit"
+kind = "unscored"
 supported = true
-catalog = "dynamodb"
-catalog_id = "dynamodb-08"
-score = 70
-why = "Infrequent write operations (INSERT/UPDATE/DELETE below 0.5 cps). Low frequency does not mean low importance — batch loads, admin operations, and periodic jobs are common. DynamoDB on-demand handles sporadic writes without provisioned capacity waste."
-concerns = [
-    "Verify these writes are not part of a larger transaction that spans multiple tables",
-    "Batch seed operations may benefit from BatchWriteItem (25 items per request)",
-]
+why = "Call rate is not an access pattern, so this is not a fit; that on-demand capacity suits sporadic traffic is cost evidence for the cost dimension (ADR-031 Decision 5, #494)."
 
 [engines.documentdb]
 kind = "unscored"

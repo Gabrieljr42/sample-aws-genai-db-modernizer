@@ -29,6 +29,10 @@ Pattern fields:
   (``query_scoring.ANTI_PATTERN_PENALTIES``; 0 means none). It lands on an engine whose
   own analysis reports it as an anti-pattern, and on every other engine when some engine
   reports it as a fit.
+- ``penalty_basis``: the consequence the engines' public documentation states for a query
+  showing the pattern, which sizes ``penalty`` (``PENALTY_POINTS``, one rule for every
+  engine, ADR-031 Decision 8 Amendment 6, #920). Required on a file that carries a penalty
+  or has an ``anti_pattern``, ``penalized``, ``scan`` or ``redesign`` entry.
 - ``penalty_aliases``: other spellings of the same penalty key.
 - ``exempt_note`` / ``redesign_note``: the decision-trace sentence for a ``native``
   exemption or a ``redesign`` penalty (``{engine}`` is the engine's display name).
@@ -102,6 +106,37 @@ CatalogName = Literal[
     "elasticache",
 ]
 Capability = Literal["acid_transactions", "text_search", "fuzzy_search", "substring_index"]
+PenaltyBasis = Literal[
+    "cannot_run",
+    "needs_redesign",
+    "reads_more_than_returns",
+    "workload_fit",
+    "bounded_limit",
+    "guidance_only",
+]
+
+# The one rule that sizes every penalty (ADR-031 Decision 8 Amendment 6, #920): the
+# points a query showing a pattern costs an engine follow from the consequence the
+# engine's public documentation states for it, never from which engine it is.
+PENALTY_POINTS: dict[str, int] = {
+    # The engine cannot run the pattern at all.
+    "cannot_run": 40,
+    # No server-side operation serves the access path: precompute, redesign the data
+    # model, or use another engine.
+    "needs_redesign": 30,
+    # The engine runs it, but reads more than it returns (a scan, a per-collection join
+    # stage), so the work grows with the data, not with the result.
+    "reads_more_than_returns": 20,
+    # The engine runs it natively, but the query uses none of what distinguishes the
+    # engine, and another candidate's documentation names this access path as its own.
+    "workload_fit": 20,
+    # The engine runs it within a documented bound the design must respect (a page
+    # size, an item count, a document size, a version or cluster type).
+    "bounded_limit": 10,
+    # The documentation sets no limit the query hits, or another pattern already prices
+    # the same fact: the entry is guidance only.
+    "guidance_only": 0,
+}
 Profile = Literal["search", "timeseries"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 
@@ -217,6 +252,7 @@ class PatternEntry(BaseModel):
     triage_signal: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
     capability: Capability | None = None
     penalty: int = Field(ge=0)
+    penalty_basis: PenaltyBasis | None = None
     penalty_aliases: tuple[str, ...] = ()
     exempt_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     redesign_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
@@ -230,6 +266,16 @@ class PatternEntry(BaseModel):
                 raise ValueError(f"detector {detector!r} is not module:function")
         kinds = {engine: e.kind for engine, e in self.engines.items()}
         has_fit = "fit" in kinds.values()
+        priced = bool(self.penalty) or bool(
+            set(kinds.values()) & {"anti_pattern", "penalized", "scan", "redesign"}
+        )
+        if priced and self.penalty_basis is None:
+            raise ValueError("a pattern that carries a penalty names its penalty_basis")
+        if self.penalty_basis is not None and self.penalty != penalty_points(self.penalty_basis):
+            raise ValueError(
+                f"penalty {self.penalty} is not the {self.penalty_basis!r} penalty_basis's "
+                f"{penalty_points(self.penalty_basis)} points"
+            )
         for engine, kind in kinds.items():
             if kind in ("native", "redesign", "scan") and self.capability is None:
                 raise ValueError(f"{engine}: a {kind} entry needs the pattern's capability")
@@ -262,6 +308,11 @@ class PatternEntry(BaseModel):
         if has_scan and not self.penalty:
             raise ValueError("a scan entry needs the pattern's penalty")
         return self
+
+
+def penalty_points(basis: PenaltyBasis) -> int:
+    """The points ``basis`` costs, the same for every engine (``PENALTY_POINTS``)."""
+    return PENALTY_POINTS[basis]
 
 
 def load_pattern_catalog(directory: Path = PATTERNS_DIR) -> tuple[PatternEntry, ...]:

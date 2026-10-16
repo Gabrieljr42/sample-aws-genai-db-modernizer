@@ -270,15 +270,24 @@ class TestWordpressRequestCarriesWhatTheCommandUses:
 
 class TestAFlagOnWordpressNeverBringsBackDocumentDB:
     """#712 review repro, maintainer decision 2026-10-14: the wordpress reality
-    check removes DocumentDB and moves its 7 queries (2 to Aurora MySQL, 5 to
-    DynamoDB). One flag on a DynamoDB move re-routes that query among the KEPT
-    engines only: DocumentDB stays removed and the other 6 moves stand.
+    check removes DocumentDB and moves its queries. One flag on a DynamoDB move
+    re-routes that query among the KEPT engines only: DocumentDB stays removed
+    and the other moves stand.
+
+    #920: DocumentDB's variant-attribute patterns now need a key-anchored read of
+    an entity with variable attributes, so DocumentDB first-assigns 6 wordpress
+    queries, not 7, and the check moves 3 to Aurora MySQL and 3 to DynamoDB. The query
+    this test used to flag (``d72966f8``, a ``REPLACE INTO wp_wc_product_meta_lookup``)
+    no longer reaches DocumentDB: its wide table was product-catalog by column count
+    alone, and DynamoDB's call-rate fit is gone, so it stays on Aurora MySQL. The flag
+    now goes on ``b05af520`` (an ``INSERT INTO wp_actionscheduler_logs``), a DynamoDB
+    move before and after #920.
 
     #714: ``SELECT FOUND_ROWS()`` (``aa03c203``, on the pseudo-table
     ``unknown``) no longer takes aurora-anti-06's penalty, so it is on Aurora
     MySQL from the first assignment and is no longer one of DocumentDB's moves."""
 
-    FLAGGED = "d72966f8"
+    FLAGGED = "b05af520"
 
     def test_one_flag_goes_to_the_best_kept_engine(self, tmp_path, tmp_path_factory):
         shared = _shared_external_run("wordpress", tmp_path_factory)
@@ -290,8 +299,8 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
             if c["from_engine"] == "documentdb"
         ]
         moved = {q["query_id"]: c["to_engine"] for c in from_documentdb for q in c["moved_queries"]}
-        assert sorted(moved.values()).count("dynamodb") == 5
-        assert sorted(moved.values()).count("aurora_mysql") == 2
+        assert sorted(moved.values()).count("dynamodb") == 3
+        assert sorted(moved.values()).count("aurora_mysql") == 3
         flagged = next(q for q in moved if q.startswith(self.FLAGGED))
         assert moved[flagged] == "dynamodb"
 
@@ -333,7 +342,9 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
         (decision,) = output["flag_decisions"]
         assert decision["outcome"] == "moved"
         assert decision["destination_engine"] == "aurora_mysql"
-        assert decision["score_after"] == 54
+        # Aurora MySQL's 47 less 20: no-relational-need and single-access-pattern-table
+        # (both workload_fit, the biggest penalty applies) on wp_actionscheduler_logs.
+        assert decision["score_after"] == 27
         assert engine_of[flagged] == "aurora_mysql"
         for qid, target in moved.items():
             if qid != flagged:

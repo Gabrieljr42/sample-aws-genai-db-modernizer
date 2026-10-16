@@ -97,11 +97,16 @@ def test_aurora_choice_is_a_close_call_tipped_by_workload_features(
     function), which take the all-tables average. No T-SQL statement favours a
     MySQL-only pattern (``ON DUPLICATE KEY``, ``GROUP_CONCAT``, ``CALL``, MySQL's
     ``UPDATE a JOIN b``), so the higher total and the features now agree; the
-    margin is what is pinned."""
+    margin is what is pinned.
+
+    #920: 7300 to 7320. The one penalty rule moves both totals by the same 15
+    points (the shared Aurora entries: high-frequency-pk-lookup 30 -> 20 on one
+    query, simple-cache-read 25 -> 20 on another), so the 20-point lead is
+    unchanged."""
     choice = _assignment(trailgear_run, 1)["aurora_engine_choice"]
     assert choice["source_engine"] == "sqlserver"
     mysql, pg = choice["totals"]["aurora_mysql"], choice["totals"]["aurora_postgresql"]
-    assert (mysql, pg) == (7285.0, 7305.0)
+    assert (mysql, pg) == (7300.0, 7320.0)
     assert abs(pg - mysql) <= 0.05 * max(mysql, pg), "close enough for features to decide"
     assert choice["margin"] == round(pg - mysql, 2)
     assert choice["engine"] == "aurora_postgresql"
@@ -148,86 +153,87 @@ def test_every_deliverable_source_carries_the_same_choice(trailgear_run: Pipelin
 
 
 # ---------------------------------------------------------------------------
-# Ties: a co-dependency group tie, and an individual tie that survives the
-# reality check (ADR-031 Decision 2/12)
+# Ties (ADR-031 Decision 2/12): the individual ties the reality check resolves.
+# Since #920 the sample no longer reaches a co-dependency group tie or a tie that
+# survives the reality check; the two tests below pin what happens instead.
 # ---------------------------------------------------------------------------
 
 
-def test_category_group_ties_and_no_rule_decides_it(trailgear_run: PipelineResult) -> None:
+def test_category_group_scores_documentdb_below_aurora(trailgear_run: PipelineResult) -> None:
     """The two self-join aggregates on ProductCategory form one co-dependency
-    group whose Aurora PostgreSQL and DocumentDB group scores tie. SQL Server
-    has no source-compatible engine, so the tie is reported as unresolved.
-
-    This expectation assumes #656 is answered "no" (the chosen target Aurora
-    engine is not source-compatible). If #656 decides otherwise, this tie
-    resolves onto Aurora PostgreSQL and the expected outcome here changes --
-    that is a test change, not a generator retune."""
+    group. Until #920 its Aurora PostgreSQL and DocumentDB group scores tied
+    (82 each) and, with no source-compatible engine for SQL Server, the tie was
+    reported as unresolved. Since #920 DocumentDB's graph-traversal-hierarchy
+    anti-pattern (a self-referential join: ``$graphLookup`` runs only on 8.0
+    instance-based clusters) costs its ``bounded_limit`` 10 points instead of 0,
+    so the group goes to Aurora PostgreSQL, 82 to 72, with no tie. The sample no
+    longer reaches the co-dependency tie path; restoring it is a generator retune,
+    recorded on the #920 PR."""
     snapshot = measure(trailgear_run.job_dir())["queries"]
     members = [
         _qid(trailgear_run, "COUNT(c.[CategoryID]) AS [Children]"),
         _qid(trailgear_run, "COUNT(*) AS [Subcategories]"),
     ]
     first = [snapshot[q]["f"] for q in members]
-    assert {f["c"] for f in first} == {"co_dependency_tie"}
-    assert {f["tie"] for f in first} == {"tie_unresolved"}
+    assert {f["c"] for f in first} == {"co_dependency_group"}
+    assert {f["e"] for f in first} == {"aurora_postgresql"}
     group = first[0]["grp"]
     assert first[1]["grp"] == group, "both queries are one group"
-    top = max(group["scores"].values())
-    assert sorted(e for e, s in group["scores"].items() if s == top) == [
-        "aurora_postgresql",
-        "documentdb",
-    ]
+    assert (group["scores"]["aurora_postgresql"], group["scores"]["documentdb"]) == (82.0, 72.0)
     v1 = _by_id(_assignment(trailgear_run, 1))
     for q in members:
-        assert v1[q]["tied_engines"] == ["aurora_postgresql", "documentdb"]
-        assert "no routing rule decides between them" in v1[q]["assignment_reason"]
+        assert v1[q]["tied_engines"] == []
 
 
-def test_an_unresolved_tie_reaches_the_deliverables(trailgear_run: PipelineResult) -> None:
-    """The shipment queries tie Aurora PostgreSQL with DynamoDB. Both engines
-    survive the reality check, so the tie is still open in the final assignment
-    and every deliverable lists it as pending the customer's choice.
-
-    This expectation assumes #656 is answered "no" (the chosen target Aurora
-    engine is not source-compatible). If #656 decides otherwise, the tie
-    resolves onto Aurora PostgreSQL and the expected outcome here changes --
-    that is a test change, not a generator retune."""
+def test_the_shipment_queries_no_longer_tie(trailgear_run: PipelineResult) -> None:
+    """The shipment queries tied Aurora PostgreSQL, DocumentDB and DynamoDB at 76
+    until #920, and the tie between the two surviving engines reached every
+    deliverable as pending the customer's choice. Since #920 DynamoDB scores
+    dbo.Shipment 77 (its call-rate fits no longer average its table score down)
+    and DocumentDB 74 (its column-shape fits are gone), so all three go to
+    DynamoDB with no tie, and no deliverable lists a pending choice. The sample
+    no longer reaches the unresolved-tie-in-the-deliverables path; the rendering
+    of a tie stays covered by ``tests/unit/report/test_tied_queries_deliverables.py``,
+    and restoring the e2e path is a generator retune, recorded on the #920 PR."""
     shipment = [
         _qid(trailgear_run, "FROM [Shipment] WHERE [TrackingNumber] = @TrackingNumber"),
         _qid(trailgear_run, "INSERT INTO [Shipment]"),
         _qid(trailgear_run, "UPDATE [Shipment] SET [DeliveredDate]"),
     ]
+    snapshot = measure(trailgear_run.job_dir())["queries"]
     final = _by_id(_assignment(trailgear_run, _final_version(trailgear_run)))
     for q in shipment:
-        assert final[q]["tied_engines"] == ["aurora_postgresql", "dynamodb"], q
-        assert "pending your choice" in final[q]["assignment_reason"]
+        scores = snapshot[q]["s"]
+        assert (scores["dynamodb"], scores["aurora_postgresql"], scores["documentdb"]) == (
+            77,
+            76,
+            74,
+        ), q
+        assert final[q]["assigned_engine"] == "dynamodb", q
+        assert final[q]["tied_engines"] == [], q
 
     report = _json(trailgear_run.artifact_root / trailgear_run.report["report"])
-    assert sorted(t["query_id"] for t in report["tied_queries"]) == sorted(shipment)
+    assert report["tied_queries"] == []
     decision = trailgear_run.html("decision-report").read_text()
-    engineering = next(
-        Path(p)
-        for p in trailgear_run.report["paths"]
-        if "_engineering-report_" in p and p.endswith(".md")
-    ).read_text()
-    for q in shipment:
-        assert q in decision and q in engineering
-    assert "Pending engine choices (3 queries)" in decision
-    assert "## Unresolved engine ties (3 queries)" in engineering
+    assert "Pending engine choices" not in decision
 
 
 def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineResult) -> None:
     """DocumentDB does not survive the reality check, so every tie between it
-    and Aurora PostgreSQL alone (the category group's included) is resolved
-    onto Aurora PostgreSQL, and the reason says why. The shipment ties also
-    included DocumentDB; they stay open between the two surviving engines."""
+    and Aurora PostgreSQL alone is resolved onto Aurora PostgreSQL, and the
+    reason says why. Since #920 those are two individual key reads (a
+    ProductCategory row and a Supplier row); the category group no longer ties."""
     v1 = _by_id(_assignment(trailgear_run, 1))
     final = _by_id(_assignment(trailgear_run, _final_version(trailgear_run)))
     resolved = [
         q for q, qa in v1.items() if qa.get("tied_engines") == ["aurora_postgresql", "documentdb"]
     ]
-    assert _qid(trailgear_run, "COUNT(*) AS [Subcategories]") in resolved
-    assert len(resolved) >= 3
+    assert sorted(resolved) == sorted(
+        [
+            _qid(trailgear_run, "[ParentCategoryID], [Name], [Slug] FROM [ProductCategory]"),
+            _qid(trailgear_run, "FROM [Supplier] WHERE [SupplierID]"),
+        ]
+    )
     for q in resolved:
         assert final[q]["assigned_engine"] == "aurora_postgresql"
         assert final[q]["tied_engines"] == []

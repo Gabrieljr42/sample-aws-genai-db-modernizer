@@ -3,12 +3,17 @@
 The deterministic wordpress pipeline runs to the approved assignment (v2), the
 customer approves it, DynamoDB gets a design (a stand-in designer that designs
 exactly the engine's assigned queries), and DynamoDB's PE review flags
-``d72966f8...``. The post-schema router moves it to Aurora MySQL (54 against 69)
-and writes v3. Then synthesis and the reports run on v3, and every deliverable
+``b05af520...`` (an ``INSERT INTO wp_actionscheduler_logs``). The post-schema router
+moves it to Aurora MySQL (27 against 30) and writes v3. Then synthesis and the reports run on v3, and every deliverable
 must agree with the v3 assignment: the moved query appears once, on Aurora
 MySQL; DynamoDB's counts match its own v3 queries; the move is listed as made
 after approval, with the override path; and v3 never claims the customer
 approved it.
+
+#920: the query this test used to flag, ``d72966f8`` (a ``REPLACE INTO
+wp_wc_product_meta_lookup``), is no longer on DynamoDB: DocumentDB's product-catalog
+fired on its wide table by column count alone, and DynamoDB's call-rate fit is gone,
+so it stays on Aurora MySQL from the first assignment.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ from tests.e2e.pipeline import REPO, PipelineResult, _run, run_pipeline
 from tests.shared_runs import cached_run, copy_run
 
 DB, JOB = "wordpress", "job-reroute"
-FLAGGED = "d72966f8"
+FLAGGED = "b05af520"
 TEMPLATE = json.loads(
     (
         REPO / "docs/examples/wordpress/load-test-results/schema-dynamodb/v2/schema_output.json"
@@ -129,7 +134,7 @@ class TestTheRerouteOnWordpress:
         }
         assert engine_of[rerouted["flagged"]] == "aurora_mysql"
         (reroute,) = rerouted["v3"]["post_schema_reroutes"]
-        assert (reroute["score_before"], reroute["score_after"]) == (69, 54)
+        assert (reroute["score_before"], reroute["score_after"]) == (30, 27)
 
     def test_the_rerouted_version_never_claims_customer_approval(self, rerouted):
         assert rerouted["v2"]["status"] == "customer_approved"

@@ -1,7 +1,8 @@
 # Pattern unbounded-array-growth. Fields: src/shared/catalog/patterns.py (ADR-031 Decision 8).
 id = "unbounded-array-growth"
 detectors = []
-penalty = 0
+penalty = 10
+penalty_basis = "bounded_limit"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -15,7 +16,7 @@ supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-anti-02"
 severity = 0.7
-why = "Embedded arrays that grow without limit hit the 16MB document size limit."
+why = "Embedded arrays that grow without limit hit the 16 MB document size limit (Amazon DocumentDB Developer Guide, Quotas and limits)."
 guidance = "Use Bucket Pattern (bounded arrays) or Reference Pattern for unbounded relationships."
 
 [engines.opensearch]

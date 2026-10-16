@@ -4,6 +4,7 @@ detectors = [
     "src.tools.analysis.documentdb_analysis_tools:analyze_documentdb_use_cases",
 ]
 penalty = 0
+penalty_basis = "guidance_only"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -17,7 +18,7 @@ supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-anti-05"
 severity = 0.4
-why = "Queries with NOT IN, <>, !=, NOT EXISTS. These map to $ne/$nin/$nor which cause full collection scans in DocumentDB (no index usage)."
+why = "Queries with NOT IN, <>, !=, NOT EXISTS, which map to $ne/$nin/$nor. Query planner version 2 and later use indexes for $ne, $nin and $not, so a negation is no worse on DocumentDB than on an engine where it is rarely index-selective (Amazon DocumentDB Developer Guide, Query planner)."
 guidance = "Redesign hot query paths to use positive equality operators ($eq, $in)."
 
 [engines.opensearch]

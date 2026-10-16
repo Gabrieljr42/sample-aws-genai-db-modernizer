@@ -4,6 +4,7 @@ detectors = [
     "src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases",
 ]
 penalty = 0
+penalty_basis = "guidance_only"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -32,7 +33,7 @@ supported = true
 catalog = "aurora_common"
 catalog_id = "aurora-anti-03"
 severity = 0.6
-why = "Full-text search patterns using LIKE '%term%' or similar constructs."
+why = "Full-text search patterns using LIKE '%term%' or similar constructs. Guidance only: the scan an unindexed substring match needs is priced once, as its own pattern, and a word search is not penalised (PostgreSQL documentation, pg_trgm)."
 engine_hint = "OpenSearch provides purpose-built inverted indexes with relevance scoring, tokenization, and stemming."
 guidance = "Offload full-text search to OpenSearch for better relevance ranking and scalability. Keep Aurora as source of truth with async sync."
 guidance_names_engine = true
@@ -44,7 +45,7 @@ supported = true
 catalog = "aurora_common"
 catalog_id = "aurora-anti-03"
 severity = 0.6
-why = "Full-text search patterns using LIKE '%term%' or similar constructs."
+why = "Full-text search patterns using LIKE '%term%' or similar constructs. Guidance only: the scan an unindexed substring match needs is priced once, as its own pattern, and a word search is not penalised (PostgreSQL documentation, pg_trgm)."
 engine_hint = "OpenSearch provides purpose-built inverted indexes with relevance scoring, tokenization, and stemming."
 guidance = "Offload full-text search to OpenSearch for better relevance ranking and scalability. Keep Aurora as source of truth with async sync."
 guidance_names_engine = true

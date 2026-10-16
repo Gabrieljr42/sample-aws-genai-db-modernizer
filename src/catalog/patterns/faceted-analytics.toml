@@ -4,6 +4,7 @@ detectors = [
     "src.tools.analysis.documentdb_analysis_tools:analyze_documentdb_use_cases",
 ]
 penalty = 0
+penalty_basis = "guidance_only"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -17,7 +18,7 @@ supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-anti-06"
 severity = 0.5
-why = "Multi-dimensional analytics queries. $facet needs DocumentDB 8.0.2+ on an instance-based cluster (not 5.0 or earlier, not elastic clusters)."
+why = "GROUP BY over several columns with an aggregate. $group with a compound _id serves it natively; real faceting ($facet, several groupings of one filtered set) needs DocumentDB 8.0.2 or later on an instance-based cluster, and this detector does not find it (Amazon DocumentDB Developer Guide, Supported MongoDB APIs, operations, and data types)."
 guidance = "Run multiple aggregation pipelines in parallel at application layer."
 
 [engines.opensearch]

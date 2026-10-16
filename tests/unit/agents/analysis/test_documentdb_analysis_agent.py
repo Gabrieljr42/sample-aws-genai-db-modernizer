@@ -140,8 +140,9 @@ class TestGracefulDegradation:
         fixture = get_content_management_fixture()
         fixture["queries"]["query_patterns"] = []
         _, _, result, _ = _run(fixture)
-        assert len(result.table_recommendations) == 1
-        assert result.table_recommendations[0].confidence_score >= 0
+        # One recommendation per collected table (the content table and its attribute rows).
+        assert len(result.table_recommendations) == len(fixture["database_schema"]["tables"])
+        assert all(r.confidence_score >= 0 for r in result.table_recommendations)
 
     def test_zero_tables(self):
         fixture = get_content_management_fixture()

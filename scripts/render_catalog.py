@@ -29,7 +29,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.report.escaping import md_cell, md_text  # noqa: E402
 from src.shared.catalog import ACTIVE, CatalogError, EngineEntry, engine_ids, engines  # noqa: E402
-from src.shared.catalog.patterns import EngineSupport, PatternEntry, patterns  # noqa: E402
+from src.shared.catalog.patterns import (  # noqa: E402
+    PENALTY_POINTS,
+    EngineSupport,
+    PatternEntry,
+    patterns,
+)
 
 JS_OUT = REPO_ROOT / "src" / "ui" / "src" / "utils" / "engineCatalog.generated.js"
 MD_OUT = REPO_ROOT / "docs" / "architecture" / "rule-catalog.md"
@@ -150,7 +155,11 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
         "`future` (a future-enhancement placeholder: not modelled yet, never a routing "
         "candidate). "
         "Penalty is the points lost on an engine that reports it as an anti-pattern, or "
-        "on every other engine when one reports it as a fit.",
+        "on every other engine when one reports it as a fit. One rule sizes it (ADR-031 "
+        "Decision 8 Amendment 6): the penalty basis, the consequence the engines' public "
+        "documentation states for the pattern, fixes the points ("
+        + ", ".join(f"`{basis}` {points}" for basis, points in PENALTY_POINTS.items())
+        + ").",
         "",
         "| Pattern | "
         + " | ".join(
@@ -162,6 +171,8 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
     for p in pattern_entries:
         cells = [_cell(p.engines.get(e.id)) for e in columns]
         penalty = str(p.penalty) if p.penalty else "-"
+        if p.penalty_basis:
+            penalty += f" `{p.penalty_basis}`"
         if p.penalty_aliases:
             penalty += " (also " + ", ".join(f"`{a}`" for a in p.penalty_aliases) + ")"
         out.append(

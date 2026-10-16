@@ -712,9 +712,10 @@ class TestCapabilityScopedCrossEnginePenalty:
         result = resolver.resolve(triage, analysis, collector)
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         # OpenSearch has no transaction capability, so its own self-detected
-        # anti-pattern still applies in full: 78 - 20 = 58, still above dynamodb's 10.
+        # anti-pattern still applies in full: 78 - 40 (the cannot_run basis, #920) = 38,
+        # still above dynamodb's 10.
         assert q1.assigned_engine == "opensearch"
-        assert q1.confidence == 58
+        assert q1.confidence == 38
 
     def test_acid_transactions_penalizes_elasticache_in_full(self):
         """ElastiCache has no transactions and no redesign path -- full penalty stands.
@@ -783,9 +784,10 @@ class TestCapabilityScopedCrossEnginePenalty:
         """A bigger, unscoped penalty on the same query always wins (#477).
 
         DynamoDB's own analysis flags the same query as both
-        ``acid-transactions`` (capability-scoped, reduced to 10) and
-        ``complex-aggregation`` (not a capability key, full 50) -- the max()
-        in ``build_anti_pattern_map`` must pick the bigger, unscoped 50 and
+        ``acid-transactions`` (capability-scoped: native, so 0) and
+        ``complex-aggregation`` (not a capability key, its full 30, the
+        needs_redesign basis, #920) -- the max() in ``build_anti_pattern_map``
+        must pick the bigger, unscoped 30 and
         drop the redesign note, regardless of which anti-pattern is listed
         first.
         """
@@ -811,7 +813,7 @@ class TestCapabilityScopedCrossEnginePenalty:
             result = resolver.resolve(triage, analysis, collector)
             q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
             assert q1.assigned_engine == "dynamodb"
-            assert q1.confidence == 40, f"order={order}"  # 90 - 50, not 90 - 10
+            assert q1.confidence == 60, f"order={order}"  # 90 - 30, not 90 - 0
             assert "redesign" not in q1.assignment_reason, f"order={order}"
 
     def test_redesign_note_is_absent_when_dynamodb_loses(self):
@@ -1080,8 +1082,9 @@ class TestTextSearchCapabilityScopedPenalty:
 
         Aurora PostgreSQL's own analysis flags the same query as both
         ``wildcard-search`` (capability-scoped, exempt -- 0) and
-        ``high-frequency-pk-lookup`` (not a capability key, full 30): the
-        max() in ``build_anti_pattern_map`` must pick the unscoped 30 and
+        ``high-frequency-pk-lookup`` (not a capability key, its full 20, the
+        workload_fit basis, #920): the max() in ``build_anti_pattern_map`` must
+        pick the unscoped 20 and
         must not show the exempt note, regardless of which pattern is listed
         first.
         """
@@ -1107,7 +1110,7 @@ class TestTextSearchCapabilityScopedPenalty:
             result = resolver.resolve(triage, analysis, collector)
             q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
             assert q1.assigned_engine == "aurora_postgresql"
-            assert q1.confidence == 60, f"order={order}"  # 90 - 30, not 90 - 0
+            assert q1.confidence == 70, f"order={order}"  # 90 - 20, not 90 - 0
             assert "runs this search pattern natively" not in q1.assignment_reason, f"order={order}"
 
     def test_documentdb_is_no_longer_hard_excluded_from_a_leading_wildcard_like(self):

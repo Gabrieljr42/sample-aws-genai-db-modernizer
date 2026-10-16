@@ -38,6 +38,12 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
+from src.tools.analysis.variant_attributes import (
+    ATTRIBUTE_ROWS,
+    ENTITY_WITH_ATTRIBUTE_ROWS,
+    TYPED_DOCUMENT,
+    VariantAttributeSchema,
+)
 from src.tools.sql.query_facts import query_facts, source_engine_of
 
 # ---------------------------------------------------------------------------
@@ -339,8 +345,6 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
     # Build lookup structures
     table_row_counts: dict[str, int] = {}
-    table_col_counts: dict[str, int] = {}
-    table_nullable_ratio: dict[str, float] = {}
     table_has_json: dict[str, bool] = {}
     table_fk_count: dict[str, int] = {}
     self_ref_tables: set[str] = set()
@@ -349,9 +353,6 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         tid = t.get("table_id", "")
         table_row_counts[tid] = t.get("row_count") or 0
         cols = t.get("columns") or []
-        table_col_counts[tid] = len(cols)
-        nullable = sum(1 for c in cols if c.get("nullable", False))
-        table_nullable_ratio[tid] = nullable / max(len(cols), 1)
         table_has_json[tid] = any(
             (c.get("data_type") or "").lower() in ("json", "jsonb") for c in cols
         )
@@ -361,7 +362,9 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             if fk.get("referenced_table", "") in (tid, t.get("table_name", "")):
                 self_ref_tables.add(tid)
 
-    polymorphic = set(detect_polymorphic_tables(collector_output))
+    # The variable-attribute reads (#920): an engine-neutral fact about the query's own
+    # access pattern, never a column count or nullability.
+    variant = VariantAttributeSchema.from_collector(collector_output)
 
     # Pattern accumulators
     content_mgmt: list[dict] = []
@@ -391,23 +394,18 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
         # --- Pattern matching (if, not elif — multi-match) ---
 
-        # content-management: polymorphic table access
-        for tid in accessed:
-            if tid in polymorphic and table_col_counts.get(tid, 0) > 8:
-                content_mgmt.append(q)
-                break
-
-        # product-catalog: many columns, many nullable, or JSON
-        for tid in accessed:
-            if table_col_counts.get(tid, 0) > 15 or table_has_json.get(tid, False):
-                product_catalog.append(q)
-                break
-
-        # polymorphic-data: EAV or sparse columns
-        for tid in accessed:
-            if table_nullable_ratio.get(tid, 0) > 0.3:
-                polymorphic_qs.append(q)
-                break
+        # The variable-attribute patterns test the read their catalog entry describes:
+        # a key-anchored read of an entity with variable attributes (#920).
+        reads = variant.reads(q, source_engine)
+        # content-management: a typed entity read with its attribute rows
+        if ENTITY_WITH_ATTRIBUTE_ROWS in reads:
+            content_mgmt.append(q)
+        # product-catalog: a typed entity whose variable attributes are a JSON column
+        if TYPED_DOCUMENT in reads:
+            product_catalog.append(q)
+        # polymorphic-data: one entity's attribute rows (an entity-attribute-value table)
+        if ATTRIBUTE_ROWS in reads:
+            polymorphic_qs.append(q)
 
         # nested-document: simple FK join (1-2 tables), bounded child
         if has_joins and join_count <= 2 and qt == "SELECT":

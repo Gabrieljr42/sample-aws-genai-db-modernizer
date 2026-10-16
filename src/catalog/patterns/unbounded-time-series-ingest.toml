@@ -4,6 +4,7 @@ detectors = [
     "src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases",
 ]
 penalty = 0
+penalty_basis = "guidance_only"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -37,7 +38,7 @@ supported = true
 catalog = "aurora_common"
 catalog_id = "aurora-anti-04"
 severity = 0.4
-why = "Append-only table: 10 or more INSERTs per second and no join or aggregate reads, so rows accumulate unread and the table grows without bound unless old rows expire."
+why = "Append-only table: 10 or more INSERTs per second and no join or aggregate reads, so rows accumulate unread and the table grows without bound unless old rows expire. Guidance only: Aurora sustains the rate, and dropping old partitions is a data-lifecycle task (PostgreSQL documentation, Table Partitioning)."
 engine_hint = "DynamoDB TTL or OpenSearch index lifecycle policies expire old rows automatically."
 guidance = "Set a retention rule for this table: expire old rows with DynamoDB TTL or OpenSearch index lifecycle policies, or keep it on Aurora with time partitions that are dropped or archived to Amazon S3."
 guidance_names_engine = true
@@ -54,7 +55,7 @@ supported = true
 catalog = "aurora_common"
 catalog_id = "aurora-anti-04"
 severity = 0.4
-why = "Append-only table: 10 or more INSERTs per second and no join or aggregate reads, so rows accumulate unread and the table grows without bound unless old rows expire."
+why = "Append-only table: 10 or more INSERTs per second and no join or aggregate reads, so rows accumulate unread and the table grows without bound unless old rows expire. Guidance only: Aurora sustains the rate, and dropping old partitions is a data-lifecycle task (PostgreSQL documentation, Table Partitioning)."
 engine_hint = "DynamoDB TTL or OpenSearch index lifecycle policies expire old rows automatically."
 guidance = "Set a retention rule for this table: expire old rows with DynamoDB TTL or OpenSearch index lifecycle policies, or keep it on Aurora with time partitions that are dropped or archived to Amazon S3."
 guidance_names_engine = true

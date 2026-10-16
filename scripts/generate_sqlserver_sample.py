@@ -20,6 +20,10 @@ the routing paths only a heterogeneous source can reach:
 - an individual tie that survives the reality check (the ``dbo.Shipment``
   queries: Aurora PostgreSQL and DynamoDB, both kept), so every deliverable
   lists it as pending the customer's choice;
+- (since #920's catalog accuracy fixes, neither tie above is reached: DocumentDB's
+  self-join penalty and DynamoDB's table scores break them by 10 and 1 points, and
+  the call rates do not restore them; ``tests/e2e/test_sqlserver_sample.py`` pins
+  the new outcome until the workload is retuned for them);
 - hot, bounded reads the cache overlay fronts (``HOT_READS`` and a few
   lookups), which the e2e suite also overrides as a customer would;
 - T-SQL shapes: ``TOP``, ``WITH (NOLOCK)``, bracket-quoted names, ``EXEC`` of
