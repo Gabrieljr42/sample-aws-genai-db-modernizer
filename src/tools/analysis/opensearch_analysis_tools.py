@@ -51,7 +51,12 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts, source_engine_of
+from src.tools.sql.query_facts import (
+    ColumnTypes,
+    query_facts,
+    source_engine_of,
+    timestamp_column_trace,
+)
 
 # ==========================================================================
 # WorkloadType enum
@@ -138,6 +143,7 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
     total_query_count = len(queries)
     source_engine = source_engine_of(collector_output)
+    column_types = ColumnTypes.from_collector(collector_output)
 
     # --- Accumulators for patterns (query_ids, table_ids, cps) ---
     # Search patterns
@@ -224,7 +230,7 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # ---- Time-series pattern detection ----
 
         # os-05 time-range-query: a timestamp column and a range predicate
-        if facts.timestamp_column and facts.range_predicate:
+        if facts.timestamp_column(column_types) and facts.range_predicate:
             tr_query_ids.append(qid)
             tr_table_ids.extend(tables)
             tr_cps += cps
@@ -257,7 +263,7 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
         # os-ap-03 audit-columns-only tracking
         # A timestamp column in the query; classify as range or equality
-        if facts.timestamp_column:
+        if facts.timestamp_column(column_types):
             has_range = facts.range_predicate
             for tid in tables:
                 if tid not in ts_usage:
@@ -857,6 +863,7 @@ def build_opensearch_decision_trace(
     """
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
     source_engine = source_engine_of(collector_output)
+    column_types = ColumnTypes.from_collector(collector_output)
 
     # Build per-query match lookup
     query_pattern_map: dict[str, list[str]] = {}
@@ -882,7 +889,7 @@ def build_opensearch_decision_trace(
         # Add structural signals
         if q.get("has_joins") and (q.get("join_count") or 0) >= 2:
             signals.append("multi_table_join")
-        if facts.timestamp_column and facts.range_predicate:
+        if facts.timestamp_column(column_types) and facts.range_predicate:
             signals.append("timestamp_range_filter")
         return signals
 
@@ -1026,4 +1033,6 @@ def build_opensearch_decision_trace(
         "pattern_summaries": pattern_summaries,
         "workload_classifications": workload_classifications,
         "recommendation_derivations": derivations,
+        # How the timestamp-column fact was read (#935): by type, or by name and why.
+        "timestamp_columns": timestamp_column_trace(collector_output),
     }

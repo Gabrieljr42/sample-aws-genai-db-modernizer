@@ -17,7 +17,7 @@ import pytest
 from src.agents.referee.capability_registry import detect_required_capabilities
 from src.agents.referee.engine_exclusions import check_exclusions
 from src.tools.sql import query_facts as query_facts_module
-from src.tools.sql.query_facts import QueryFacts, query_facts
+from src.tools.sql.query_facts import ColumnTypes, QueryFacts, query_facts
 from tests.unit.tools.sql._timing import assert_cost_ratio
 
 _REPO = Path(__file__).resolve().parents[4]
@@ -226,9 +226,6 @@ class TestFacts:
             ("SELECT * FROM t JOIN LATERAL (SELECT 1) x ON true", "lateral_join"),
             ("INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING", "on_conflict_or_returning"),
             ("INSERT INTO t VALUES (1) RETURNING id", "on_conflict_or_returning"),
-            ("SELECT * FROM t WHERE created_at > ?", "timestamp_column"),
-            ("SELECT * FROM t WHERE last_seen_at > ?", "timestamp_column"),
-            ("INSERT INTO t (id, event_date) VALUES (?, ?)", "timestamp_column"),
             ("SELECT * FROM t WHERE a BETWEEN 1 AND 2 ORDER BY a", "range_predicate"),
             ("SELECT * FROM t WHERE a >= 1 ORDER BY a", "range_predicate"),  # spaced (#933)
             ("SELECT * FROM t WHERE a < ?", "range_predicate"),
@@ -236,7 +233,6 @@ class TestFacts:
             ("SELECT * FROM t WHERE a NOT IN (1)", "negation_word"),
             ("SELECT * FROM t WHERE a!=b", "negation_word"),
             ("SELECT (SELECT 1 FROM u WHERE u.id = t.uid) FROM t", "correlated_subquery_shape"),
-            ("SELECT * FROM t WHERE event_time >= ?", "timestamp_column"),
             ("SELECT * FROM t WHERE event_time > ?", "range_predicate"),  # #933: not only >=/<=
             ("SELECT date_trunc('day', ts) FROM t", "time_function_keyword"),
             ("SELECT * FROM t ORDER BY a", "order_by"),
@@ -311,9 +307,6 @@ class TestFacts:
             ("SELECT * FROM t WHERE a <> 1", "range_predicate"),
             ("SELECT CASE WHEN a > 1 THEN 1 END FROM t", "range_predicate"),  # not a filter
             ("SELECT * FROM t WHERE doc->>'a' = ?", "range_predicate"),  # JSON, no range
-            ("SELECT * FROM t WHERE mydate_x = ?", "timestamp_column"),
-            ("UPDATE t SET a = 1 WHERE id = ?", "timestamp_column"),  # "update" holds "date"
-            ("SELECT CAST(a AS DATE) FROM t", "timestamp_column"),  # a type, not a column
             ("SELECT * FROM t WHERE credit_limit > 5", "row_limit"),
             ("SELECT ROW_NUMBER() OVER (ORDER BY a) FROM t", "order_by"),  # a window's
             ("SELECT * FROM t WHERE a != 1", "negation_word"),  # space before !=
@@ -428,6 +421,25 @@ def _read_non_documentdb_facts(text: str) -> None:
     for name in _fact_names():
         if name not in _DOCUMENTDB_ONLY_FACTS:
             getattr(facts, name)
+    facts.timestamp_column(_COLUMN_TYPES)  # read with the collection's types, as readers do
+
+
+# The collection the long queries read: ``t`` and its typed columns (#935).
+_COLUMN_TYPES = ColumnTypes.from_collector(
+    {
+        "database_schema": {
+            "tables": [
+                {
+                    "table_id": "app.t",
+                    "table_name": "t",
+                    "columns": [
+                        {"column_name": name, "data_type": "int"} for name in ("a", "c", "x")
+                    ],
+                }
+            ]
+        }
+    }
+)
 
 
 # Read by the DocumentDB analysis alone.

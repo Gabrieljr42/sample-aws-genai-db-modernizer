@@ -359,6 +359,11 @@ REVIEWED_DETERMINISTIC_IMPORTS: dict[str, str] = {
     "src/shared/contract_versioning.py": (
         "checks and stamps contract_version only; never changes what a model is given"
     ),
+    "src/tools/sql/query_facts.py": (
+        "the ElastiCache agent imports its timestamp-column trace helper (#935); the facts "
+        "reach analysis.json through the analysis tools, which are in E2E_LLM, so gating the "
+        "whole facts module would pull every routing-only facts PR into e2e-llm"
+    ),
 }
 
 

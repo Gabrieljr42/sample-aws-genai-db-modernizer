@@ -26,6 +26,12 @@ Each fact has one definition, and every reader uses it (#893; the guard is
 - Text facts are a regex scan on the text: the ones no parse gives yet (a
   session key, a write statement, a computed join key, ...), each moved here
   from its detector by #491.
+- The timestamp column (#935) is the one fact that also reads the schema: a
+  column is a timestamp when the collection says its type is one
+  (:func:`is_timestamp_type`), whatever its name. The facade's columns
+  (``SqlFacts.columns``) are resolved to their tables through the collection's
+  table names (:class:`ColumnTypes`), so a reader passes the collection's types
+  (``facts.timestamp_column(types)``); the name list is read when it has none.
 
 A reader passes the collector's source engine
 (``metadata.source_database.engine``, :func:`source_engine_of`); a reader with
@@ -48,15 +54,18 @@ from __future__ import annotations
 
 import re
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from functools import cached_property, lru_cache
+from typing import TYPE_CHECKING
 
 from src.shared.sql_comments import strip_leading_comments
 from src.shared.unsupported_pattern import is_dedup_only_group_by, strip_comments_and_literals
-from src.tools.sql.facade import AccessFacts, SqlFacts, query_readings
+from src.tools.sql.facade import AccessFacts, ColumnUse, SqlFacts, TableRef, query_readings
 from src.tools.sql.regex_facts import (
     EXISTS_CONDITION_RE,
     SELECT_WORD_RE,
+    TIMESTAMP_COLUMN_NAME_RE,
     WildcardLike,
     has_match_against,
     regex_range_predicate,
@@ -64,7 +73,20 @@ from src.tools.sql.regex_facts import (
 )
 from src.tools.sql.stored_facts import readings_from_stored
 
-__all__ = ["QueryFacts", "WildcardLike", "query_facts", "scan_sql", "source_engine_of"]
+if TYPE_CHECKING:
+    from src.agents.referee.table_resolution import TableNameResolver
+
+__all__ = [
+    "ColumnTypes",
+    "QueryFacts",
+    "TimestampColumnReading",
+    "WildcardLike",
+    "is_timestamp_type",
+    "query_facts",
+    "scan_sql",
+    "source_engine_of",
+    "timestamp_column_trace",
+]
 
 # ---------------------------------------------------------------------------
 # Parsed facts (#893). Each is the sqlglot facade's reading (``SqlFacts``),
@@ -100,7 +122,8 @@ _JOIN_HINTS = ("join", ",", "apply")
 _FULLTEXT_HINTS = ("match", "@@", "tsvector", "tsquery", "ts_rank", "contains", "freetext")
 _PATTERN_MATCH_HINTS = ("regexp", "rlike", "~", "similar")
 _ROW_LIMIT_HINTS = ("limit", "fetch", "top")
-# The timestamp column names (``regex_facts.TIMESTAMP_COLUMN_NAMES``) each hold one.
+# The timestamp column names (``regex_facts.TIMESTAMP_COLUMN_NAMES``) each hold one;
+# a parse is skipped on them only when the collection has no column types.
 _TIMESTAMP_HINTS = ("_at", "time", "date", "ttl")
 _JSON_HINTS = ("json", "->", "#>", "@>")
 # A comparison, or a prefix LIKE (a range on the column).
@@ -614,6 +637,7 @@ class QueryFacts:
     def __init__(self, text: str, source_engine: str = "") -> None:
         self._text = text
         self._source_engine = source_engine
+        self._timestamp_kept: tuple[ColumnTypes | None, TimestampColumnReading] | None = None
 
     @cached_property
     def _lower(self) -> str:
@@ -793,12 +817,29 @@ class QueryFacts:
         """
         return self.order_by and self.row_limit and self._parsed.top_n
 
-    @cached_property
-    def timestamp_column(self) -> bool:
-        """A column named as a timestamp (``created_at``, ``updated_at``, ``timestamp``,
-        ``event_time``, ``*_date``, ``last_*_at``, ...; ``SqlFacts.timestamp_column``).
+    def timestamp_column(self, column_types: ColumnTypes | None) -> TimestampColumnReading:
+        """A timestamp column: one whose collected type is a timestamp
+        (:func:`is_timestamp_type`), resolved to its table from the facade's columns
+        (``SqlFacts.columns``) and the collection's tables (#935). With no column
+        types (``None``), and for a column whose table can't be told, its name is
+        read instead (``regex_facts.TIMESTAMP_COLUMN_NAMES``: ``created_at``,
+        ``event_time``, ``*_date``, ``last_*_at``, ...), and the reading says so.
+        Kept for the last ``column_types`` asked for; not parsed when the text holds
+        neither a timestamp name nor a timestamp-typed column's name.
         """
-        return self._has(*_TIMESTAMP_HINTS) and self._parsed.timestamp_column
+        kept = self._timestamp_kept
+        if kept is not None and kept[0] is column_types:
+            return kept[1]
+        # A column is read only by a name the text holds: a timestamp name's hint, or
+        # the name of one of the collection's timestamp-typed columns.
+        if not self._has(*_TIMESTAMP_HINTS) and (
+            column_types is None or not self._has(*column_types.timestamp_names)
+        ):
+            reading = _NO_TIMESTAMP_BY_NAME if column_types is None else _NO_TIMESTAMP
+        else:
+            reading = read_timestamp_column(self._parsed.columns, column_types)
+        self._timestamp_kept = (column_types, reading)
+        return reading
 
     @cached_property
     def multi_table_write(self) -> bool:
@@ -1021,6 +1062,200 @@ class QueryFacts:
         if self.window_function or self.found_rows:
             return True
         return self.aggregation and not self.dedup_only_group_by
+
+
+# ---------------------------------------------------------------------------
+# The timestamp column, by collected type (#935)
+#
+# A DBA tells a timestamp column by its type in the schema, not its name: a
+# ``posted`` DATETIME is one, a ``created_at`` VARCHAR is not. Each dialect's
+# point-in-time types, after the collector's normalized type when it set one: an
+# Oracle DATE holds a time of day too; SQL Server's ``timestamp`` is a row version
+# (``rowversion``), never a point in time, whatever an offline normalization said.
+# A time of day (``time``), an interval or a year is not a point in time.
+# ---------------------------------------------------------------------------
+
+_TIMESTAMP_NORMALIZED_TYPES = frozenset({"date", "datetime", "timestamp"})
+_TIMESTAMP_NATIVE_TYPES = frozenset(
+    {
+        "date",
+        "datetime",
+        "datetime2",
+        "smalldatetime",
+        "datetimeoffset",
+        "timestamp",
+        "timestamptz",
+        "timestamp with time zone",
+        "timestamp without time zone",
+        "timestamp with local time zone",
+    }
+)
+_SQLSERVER_ROW_VERSION_TYPES = frozenset({"timestamp", "rowversion"})
+# A type's arguments, ``(6)`` in ``TIMESTAMP(6) WITH TIME ZONE``.
+_TYPE_ARGUMENTS_RE = re.compile(r"\s*\([^)]*\)")
+
+
+def is_timestamp_type(column: Mapping, source_engine: str = "") -> bool:
+    """Whether a collected column's type is a point in time (date, datetime or
+    timestamp, in any dialect's spelling); its name is not read."""
+    native = " ".join(
+        _TYPE_ARGUMENTS_RE.sub("", str(column.get("data_type") or "")).lower().split()
+    )
+    if (source_engine or "").strip().lower() == "sqlserver" and native in (
+        _SQLSERVER_ROW_VERSION_TYPES
+    ):
+        return False
+    normalized = column.get("normalized_data_type")
+    normalized = str(getattr(normalized, "value", normalized) or "").lower()
+    if normalized:
+        return normalized in _TIMESTAMP_NORMALIZED_TYPES
+    return native in _TIMESTAMP_NATIVE_TYPES
+
+
+@dataclass(frozen=True, eq=False)
+class ColumnTypes:
+    """A collection's column types: each collected table's columns (lower-case name ->
+    the name as collected, and whether its type is a timestamp), and the resolver from
+    a written table name to its ``table_id`` (``table_resolution.TableNameResolver``)."""
+
+    resolver: TableNameResolver
+    columns: Mapping[str, Mapping[str, tuple[str, bool]]]
+    # The lower-case names of the timestamp-typed columns, in any table.
+    timestamp_names: tuple[str, ...] = ()
+
+    @classmethod
+    def from_collector(cls, collector_output: Mapping | None) -> ColumnTypes | None:
+        """The collection's column types, or None when no collected column has a type
+        (the timestamp-column fact then reads the name list)."""
+        from src.agents.referee.table_resolution import TableNameResolver  # import cycle
+
+        engine = source_engine_of(collector_output)
+        schema = (collector_output or {}).get("database_schema") or {}
+        columns: dict[str, dict[str, tuple[str, bool]]] = {}
+        typed = False
+        for table in schema.get("tables") or []:
+            table_id = str(table.get("table_id") or "")
+            if not table_id:
+                continue
+            own = columns.setdefault(table_id, {})
+            for column in table.get("columns") or []:
+                name = str(column.get("column_name") or "")
+                if not name:
+                    continue
+                typed = typed or bool(column.get("data_type") or column.get("normalized_data_type"))
+                own[name.lower()] = (name, is_timestamp_type(column, engine))
+        resolver = TableNameResolver.from_collector(collector_output or {})
+        if not typed or resolver is None:
+            return None
+        names = {n for own in columns.values() for n, (_, ts) in own.items() if ts}
+        return cls(resolver=resolver, columns=columns, timestamp_names=tuple(sorted(names)))
+
+    def _table_id(self, ref: TableRef) -> str | None:
+        return self.resolver.resolve(ref.written) or self.resolver.resolve(ref.name)
+
+    def owner(self, use: ColumnUse) -> tuple[tuple[str, str, bool] | None, str]:
+        """``((table_id, column, is_timestamp), "")`` for the collected column ``use``
+        names, or ``(None, why)`` when its table can't be told."""
+        if use.from_regex:
+            return None, "statement not parsed"
+        name = use.name.lower()
+        for level in use.scopes:
+            holders: dict[str, tuple[str, bool]] = {}
+            unknown: list[str] = []
+            for ref in level:
+                table_id = self._table_id(ref)
+                if table_id is None:
+                    unknown.append(ref.written)
+                elif name in self.columns.get(table_id, {}):
+                    holders[table_id] = self.columns[table_id][name]
+            if len(holders) == 1:
+                table_id, (written, timestamp) = holders.popitem()
+                return (table_id, written, timestamp), ""
+            if holders:
+                return None, "ambiguous: " + ", ".join(sorted(holders))
+            if unknown:
+                return None, "no collected table " + ", ".join(unknown)
+        return None, "no collected table holds it"
+
+
+@dataclass(frozen=True)
+class TimestampColumnReading:
+    """The timestamp-column fact of one query (``QueryFacts.timestamp_column``), true
+    when ``found``. ``by_type``: the timestamp-typed columns (``table_id.column``).
+    ``by_name``: the timestamp-named columns read by name. ``fallbacks``: each column
+    read by name although the collection has types, with why (``column: ambiguous:
+    ...``, ``column: no collected table ...``, ``column: statement not parsed``), when
+    it could be a timestamp: a timestamp name, or a timestamp-typed column's name.
+    ``no_types``: the collection has no column types, so every name was read."""
+
+    found: bool
+    by_type: tuple[str, ...] = ()
+    by_name: tuple[str, ...] = ()
+    fallbacks: tuple[str, ...] = ()
+    no_types: bool = False
+
+    def __bool__(self) -> bool:
+        return self.found
+
+    @property
+    def read_by_name(self) -> bool:
+        """The fact holds only because of a column read by name."""
+        return self.found and not self.by_type
+
+
+_NO_TIMESTAMP_BY_NAME = TimestampColumnReading(found=False, no_types=True)
+_NO_TIMESTAMP = TimestampColumnReading(found=False)
+
+
+def read_timestamp_column(
+    columns: Iterable[ColumnUse], column_types: ColumnTypes | None
+) -> TimestampColumnReading:
+    """The timestamp-column fact of a statement's columns (``SqlFacts.columns``):
+    each column's collected type when its table can be told, else its name."""
+    by_type: list[str] = []
+    by_name: list[str] = []
+    fallbacks: list[str] = []
+    for use in columns:
+        if column_types is not None:
+            owner, why = column_types.owner(use)
+            if owner is not None:
+                if owner[2]:
+                    by_type.append(f"{owner[0]}.{owner[1]}")
+                continue
+        named = bool(TIMESTAMP_COLUMN_NAME_RE.fullmatch(use.name))
+        if column_types is not None and (named or use.name.lower() in column_types.timestamp_names):
+            fallbacks.append(f"{use.name}: {why}")
+        if named:
+            by_name.append(use.name)
+    return TimestampColumnReading(
+        found=bool(by_type or by_name),
+        by_type=tuple(dict.fromkeys(by_type)),
+        by_name=tuple(dict.fromkeys(by_name)),
+        fallbacks=tuple(dict.fromkeys(fallbacks)),
+        no_types=column_types is None,
+    )
+
+
+def timestamp_column_trace(collector_output: Mapping) -> dict:
+    """How an analysis read the timestamp-column fact, for its decision trace: by
+    column type, or by name when the collection has none; and each query on which
+    some column was read by name although the collection has types (#935)."""
+    types = ColumnTypes.from_collector(collector_output)
+    if types is None:
+        return {"read_by": "column name (the collection has no column types)", "name_fallbacks": []}
+    engine = source_engine_of(collector_output)
+    fallbacks = []
+    for q in (collector_output.get("queries") or {}).get("query_patterns") or []:
+        reading = query_facts(q.get("query_text") or "", engine).timestamp_column(types)
+        if reading.fallbacks:
+            fallbacks.append(
+                {
+                    "query_id": q.get("query_id", ""),
+                    "timestamp_column": reading.found,
+                    "read_by_name": list(reading.fallbacks),
+                }
+            )
+    return {"read_by": "column type", "name_fallbacks": fallbacks}
 
 
 def _has_computed_join_key(text: str) -> bool:

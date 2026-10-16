@@ -19,6 +19,7 @@ made each one definition. These guards keep it that way:
 from __future__ import annotations
 
 import ast
+import inspect
 import itertools
 import re
 from functools import cached_property
@@ -28,7 +29,7 @@ import pytest
 
 from src.tools.database.offline_parser import detect_source_engine, parse_offline_collection
 from src.tools.sql.facade import SqlFacts, access_facts, sql_facts
-from src.tools.sql.query_facts import QueryFacts, query_facts
+from src.tools.sql.query_facts import QueryFacts, query_facts, read_timestamp_column
 from src.tools.sql.regex_facts import regex_range_predicate
 from tests.unit.tools.sql.table_refs_snapshot import SAMPLES, load_sample
 
@@ -378,12 +379,41 @@ def _parsed_fields_read(member: ast.FunctionDef) -> set[str]:
     }
 
 
+# Facts that also read the collection's schema: a method taking its column types
+# (#935). The corpus has no column types, so each reads its no-types answer here.
+SCHEMA_FACTS: dict[str, str] = {
+    "timestamp_column": (
+        "a column whose collected type is a timestamp, its table resolved from the facade's "
+        "columns; with no column types, a timestamp-named one"
+    ),
+}
+
+
 def _public_facts() -> list[str]:
     return [
         name
         for name, value in vars(QueryFacts).items()
         if isinstance(value, cached_property | property) and not name.startswith("_")
-    ]
+    ] + list(SCHEMA_FACTS)
+
+
+def _fact(facts: QueryFacts, name: str) -> object:
+    """A fact's value; a schema fact's with no column types, as a bool."""
+    value = getattr(facts, name)
+    return bool(value(None)) if name in SCHEMA_FACTS else value
+
+
+def test_every_schema_fact_is_declared():
+    """A public method of ``QueryFacts`` that takes the collection's column types is a
+    fact that reads the schema: declared above, so the guards below read it too."""
+    methods = {
+        name
+        for name, value in vars(QueryFacts).items()
+        if callable(value)
+        and not name.startswith("_")
+        and "column_types" in inspect.signature(value).parameters
+    }
+    assert methods == set(SCHEMA_FACTS)
 
 
 def _parsed_fact_fields() -> dict[str, str]:
@@ -540,7 +570,10 @@ def test_the_hints_that_skip_a_parse_never_change_a_fact(corpus):
     for text, engine in corpus:
         facts, parsed = query_facts(text, engine), sql_facts(text, engine)
         for fact, field_name in fields.items():
-            assert getattr(facts, fact) == getattr(parsed, field_name), (fact, text[:80])
+            expected = getattr(parsed, field_name)
+            if fact in SCHEMA_FACTS:
+                expected = bool(read_timestamp_column(expected, None))
+            assert _fact(facts, fact) == expected, (fact, text[:80])
         assert facts.aggregation is parsed.has_aggregation, text[:80]
         access = access_facts(text, engine)
         ranges = (
@@ -554,7 +587,7 @@ def test_the_hints_that_skip_a_parse_never_change_a_fact(corpus):
 def _truths(corpus: list[tuple[str, str]]) -> dict[str, frozenset[int]]:
     return {
         name: frozenset(
-            i for i, (text, engine) in enumerate(corpus) if getattr(query_facts(text, engine), name)
+            i for i, (text, engine) in enumerate(corpus) if _fact(query_facts(text, engine), name)
         )
         for name in _public_facts()
     }

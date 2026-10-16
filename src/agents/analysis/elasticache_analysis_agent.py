@@ -18,6 +18,7 @@ from src.tools.analysis.redis_analysis_tools import (
     analyze_redis_use_cases,
     estimate_redis_costs,
 )
+from src.tools.sql.query_facts import timestamp_column_trace
 
 
 def analyze_for_elasticache(
@@ -62,6 +63,8 @@ def analyze_for_elasticache(
         "anti_patterns_detected": len(workload_analysis.anti_patterns_detected or []),
         "tables_analyzed": len(tables),
         "recommendations_generated": len(table_recommendations),
+        # How the timestamp-column fact was read (#935): by type, or by name and why.
+        "timestamp_columns": timestamp_column_trace(collector_output),
     }
 
     return output, decision_trace, None
