@@ -5,14 +5,15 @@ detectors = [
 ]
 penalty = 0
 
-# Detection signals: simple_fk_join, parent_child_relationship, bounded_child_count
+# Detection (#920): a key-anchored join of two tables (every table reached by key from a
+# pinned one, ADR-031 Decision 14 Amendment 5), not any one-join query.
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-07a"
 score = 75
-why = "Parent-child relationship where the cardinality can be reasoned about at design time. DynamoDB supports millions of items per partition — the bound is domain-driven (e.g., order → items, user → addresses), not a DynamoDB limitation. Large item collections may need creative sort key design for efficient range queries."
+why = "Parent-child relationship where the cardinality can be reasoned about at design time. A partition key value's item collection has no size limit unless the table has a local secondary index (then 10 GB) — the bound is domain-driven (e.g., order → items, user → addresses) (Amazon DynamoDB Developer Guide, Local secondary indexes). Large item collections may need creative sort key design for efficient range queries."
 concerns = [
     "Requires access pattern analysis to determine embedding vs. item collection",
     "Large item collections need sort key design for efficient range queries",

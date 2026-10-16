@@ -59,7 +59,7 @@ Each cell is what a query showing the pattern gets on that engine: `fit N` (the 
 | [`high-volume-text-search`](#high-volume-text-search) | - | - | - | - | anti 0.7 | anti 0.7 | future | future | 20 `reads_more_than_returns` | - | - | 1 |
 | [`json-document-query`](#json-document-query) | - | - | - | - | - | fit 85 | future | future | - | - | - | 1 |
 | [`jsonb-operations`](#jsonb-operations) | - | - | - | - | fit 85 | - | future | future | - | - | - | 1 |
-| [`key-value-lookup`](#key-value-lookup) | fit 100 | - | - | - | - | - | future | future | - | - | key_value_lookups | 1 |
+| [`key-value-lookup`](#key-value-lookup) | fit 100 | - | - | - | fit 80 | fit 80 | future | future | - | - | key_value_lookups | 2 |
 | [`large-result-sets`](#large-result-sets) | - | - | - | anti 0.5 | - | - | future | future | 10 `bounded_limit` | - | - | 1 |
 | [`lateral-join`](#lateral-join) | - | - | - | - | fit 85 | - | future | future | - | - | - | 1 |
 | [`leaderboard`](#leaderboard) | - | - | - | fit (medium) | - | - | future | future | - | - | leaderboard_pattern | 1 |
@@ -73,6 +73,7 @@ Each cell is what a query showing the pattern gets on that engine: `fit N` (the 
 | [`negation-heavy-queries`](#negation-heavy-queries) | - | anti 0.4 | - | - | - | - | future | future | - `guidance_only` | - | - | 1 |
 | [`nested-document`](#nested-document) | - | fit 85 | - | - | - | - | future | future | - | - | - | 1 |
 | [`no-relational-need`](#no-relational-need) | - | - | - | - | anti 0.6 | anti 0.6 | future | future | 20 `workload_fit` | - | - | 1 |
+| [`ordered-scan`](#ordered-scan) | anti 0.5 | - | - | - | - | - | future | future | 20 `reads_more_than_returns` | - | - | 1 |
 | [`pagination`](#pagination) | - | - | - | - | fit 85 | fit 85 | future | future | - | - | - | 1 |
 | [`polymorphic-data`](#polymorphic-data) | - | fit 80 | - | - | - | - | future | future | - | - | - | 1 |
 | [`product-catalog`](#product-catalog) | - | fit 85 | - | - | - | - | future | future | - | - | - | 1 |
@@ -174,7 +175,7 @@ Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_comm
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
 
-- DynamoDB, fit 75 (dynamodb-07a): Parent-child relationship where the cardinality can be reasoned about at design time. DynamoDB supports millions of items per partition — the bound is domain-driven \(e.g., order → items, user → addresses\), not a DynamoDB limitation. Large item collections may need creative sort key design for efficient range queries.
+- DynamoDB, fit 75 (dynamodb-07a): Parent-child relationship where the cardinality can be reasoned about at design time. A partition key value's item collection has no size limit unless the table has a local secondary index \(then 10 GB\) — the bound is domain-driven \(e.g., order → items, user → addresses\) \(Amazon DynamoDB Developer Guide, Local secondary indexes\). Large item collections may need creative sort key design for efficient range queries.
 - No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
@@ -190,7 +191,7 @@ Detected by `src.tools.analysis.redis_analysis_tools:analyze_redis_use_cases`.
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
 
-- DynamoDB, fit 70 (dynamodb-07c): Tables frequently accessed together in the same queries \(co-access frequency &gt; 50 calls/hour\). Strong signal for denormalization into a single DynamoDB table.
+- DynamoDB, fit 70 (dynamodb-07c): Tables frequently accessed together in the same queries \(co-access frequency &gt; 50 calls/hour\). Strong signal for denormalization into one item collection that a single Query returns \(Amazon DynamoDB Developer Guide, Best practices for modeling relational data\).
 - No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
@@ -411,10 +412,12 @@ Detected by `src.tools.analysis.aurora_pg_analysis_tools:detect_pg_specific_feat
 
 ### key-value-lookup
 
-Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
+Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`, `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases`.
 
-- DynamoDB, fit 100 (dynamodb-01): Single-item lookups by primary key.
-- No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
+- DynamoDB, fit 100 (dynamodb-01): Single-item reads by the full primary key: GetItem, or BatchGetItem for up to 100 keys and 16 MB, at single-digit-millisecond latency at any scale \(Amazon DynamoDB Developer Guide, Working with items; Amazon DynamoDB API Reference, BatchGetItem\).
+- Aurora PostgreSQL, fit 80 (aurora-common-12): A read of one row, or an IN-list batch, by its full primary or unique key: a B-tree index point read, served from memory once cached, with read replicas to scale the reads \(PostgreSQL documentation, Index Types; MySQL Reference Manual, Comparison of B-Tree and Hash Indexes\).
+- Aurora MySQL, fit 80 (aurora-common-12): A read of one row, or an IN-list batch, by its full primary or unique key: a B-tree index point read, served from memory once cached, with read replicas to scale the reads \(PostgreSQL documentation, Index Types; MySQL Reference Manual, Comparison of B-Tree and Hash Indexes\).
+- No effect on: DocumentDB, OpenSearch, ElastiCache.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
 ### large-result-sets
@@ -459,7 +462,7 @@ No analysis reports this pattern today.
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
 
-- DynamoDB, fit 65 (dynamodb-07b): Many-to-many relationship via a junction table with composite PK of two FK columns. Needs GSI or adjacency list pattern in DynamoDB — more design work required.
+- DynamoDB, fit 65 (dynamodb-07b): Many-to-many relationship via a junction table with composite PK of two FK columns. Needs a GSI or the adjacency list pattern in DynamoDB — more design work required \(Amazon DynamoDB Developer Guide, Best practices for managing many-to-many relationships\).
 - No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
@@ -467,7 +470,7 @@ Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cas
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
 
-- DynamoDB, fit 90 (dynamodb-05): Small reference tables with frequent reads. Also valid for high read+write metadata stores \(e.g., feature flags, config, lookup tables\). DynamoDB DAX or on-demand with low RCU cost.
+- DynamoDB, fit 90 (dynamodb-05): Small, rarely written reference tables read by key \(feature flags, config, lookup tables\): GetItem or BatchGetItem on the key, with DynamoDB Accelerator for microsecond reads at an extra node cost \(Amazon DynamoDB Developer Guide, Working with items; In-memory acceleration with DAX\).
 - No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
@@ -521,6 +524,14 @@ Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_comm
 - No effect on: DynamoDB, DocumentDB, OpenSearch, ElastiCache.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
+### ordered-scan
+
+Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
+
+- DynamoDB, anti 0.5 (dynamodb-ap-05): The first rows of a whole table in some order \(ORDER BY with a row limit and no key value\). A DynamoDB Scan returns items in no particular order, so the first rows by any order need every item read and sorted by the application \(Amazon DynamoDB Developer Guide, Scanning tables\).
+- No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
+- Not modelled yet (future enhancement): Neptune, Keyspaces.
+
 ### pagination
 
 Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases`.
@@ -550,7 +561,7 @@ Detected by `src.tools.analysis.documentdb_analysis_tools:analyze_documentdb_use
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
 
-- DynamoDB, fit 90 (dynamodb-02): Queries that filter on a partition key with a range condition on a sort key. Maps directly to DynamoDB Query with KeyConditionExpression.
+- DynamoDB, fit 90 (dynamodb-02): Queries that pin a partition key value and bound a sort key by a range: a DynamoDB Query with a KeyConditionExpression, returned in sort-key order, at most 1 MB per page; with a local secondary index an item collection is limited to 10 GB \(Amazon DynamoDB API Reference, Query; Amazon DynamoDB Developer Guide, Local secondary indexes\).
 - No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
@@ -596,7 +607,7 @@ No analysis reports this pattern today.
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`, `src.tools.analysis.redis_analysis_tools:analyze_redis_use_cases`.
 
-- DynamoDB, fit 90 (dynamodb-06): User session data with high read/write throughput per user. TTL-based expiry is common but not required — manual deletes or application-managed cleanup are also valid patterns.
+- DynamoDB, fit 90 (dynamodb-06): User session data read and written by its session or user key at high throughput: GetItem and PutItem on the key, with Time to Live to expire old sessions, though manual or application-managed cleanup also works \(Amazon DynamoDB Developer Guide, Time to Live\).
 - ElastiCache, fit (medium) (redis-session-001): Detected session or user lookup patterns
 - No effect on: DocumentDB, OpenSearch, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
@@ -684,7 +695,7 @@ Detected by `src.tools.analysis.opensearch_analysis_tools:analyze_opensearch_use
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
 
-- DynamoDB, fit 85 (dynamodb-04): Time-ordered data with timestamp-based range reads. Maps to DynamoDB with entity ID as partition key and timestamp as sort key. TTL for automatic expiry.
+- DynamoDB, fit 85 (dynamodb-04): Time-ordered data with timestamp-based range reads. Maps to DynamoDB with entity ID as partition key and timestamp as sort key. TTL for automatic expiry \(Amazon DynamoDB Developer Guide, Time to Live\).
 - No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 

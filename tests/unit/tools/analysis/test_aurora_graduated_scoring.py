@@ -8,6 +8,7 @@ def _make_input(tables, queries):
     return AnalysisInput(
         job_id="test-job",
         collector_output={
+            "metadata": {"source_database": {"engine": "postgresql"}},
             "database_schema": {"tables": tables},
             "queries": {"query_patterns": queries},
         },
@@ -28,7 +29,7 @@ class TestGraduatedScoringDifferentiation:
                     {"column_name": "id", "data_type": "uuid"},
                     {"column_name": "data", "data_type": "jsonb"},
                 ],
-                "primary_key": {"columns": ["id"]},
+                "primary_key": ["id"],
                 "foreign_keys": [],
                 "row_count": 100000,
                 "size_mb": 50.0,
@@ -41,7 +42,7 @@ class TestGraduatedScoringDifferentiation:
                     {"column_name": "customer_id", "data_type": "integer"},
                     {"column_name": "product_id", "data_type": "integer"},
                 ],
-                "primary_key": {"columns": ["id"]},
+                "primary_key": ["id"],
                 "foreign_keys": [
                     {"referenced_table": "customers", "columns": ["customer_id"]},
                     {"referenced_table": "products", "columns": ["product_id"]},
@@ -54,7 +55,7 @@ class TestGraduatedScoringDifferentiation:
                 "table_id": "customers",
                 "table_name": "customers",
                 "columns": [{"column_name": "id", "data_type": "integer"}],
-                "primary_key": {"columns": ["id"]},
+                "primary_key": ["id"],
                 "foreign_keys": [],
                 "row_count": 50000,
                 "size_mb": 10.0,
@@ -97,8 +98,11 @@ class TestGraduatedScoringDifferentiation:
         sessions_rec = next(r for r in result.table_recommendations if r.table_id == "sessions")
         orders_rec = next(r for r in result.table_recommendations if r.table_id == "orders")
 
-        # The key assertion: orders should score meaningfully higher than sessions
-        assert orders_rec.confidence_score > sessions_rec.confidence_score + 15, (
+        # The key assertion: orders should score meaningfully higher than sessions.
+        # #920: a primary-key read is Aurora's own key-value-lookup fit (80, a B-tree
+        # point read) instead of standard-crud's 60, so the KV table now scores 72
+        # against the join table's 85; the 13-point gap is the honest difference.
+        assert orders_rec.confidence_score > sessions_rec.confidence_score + 10, (
             f"Expected meaningful gap: orders={orders_rec.confidence_score}, "
             f"sessions={sessions_rec.confidence_score}"
         )
@@ -114,7 +118,7 @@ class TestGraduatedScoringDifferentiation:
                         {"column_name": "key", "data_type": "varchar"},
                         {"column_name": "value", "data_type": "text"},
                     ],
-                    "primary_key": {"columns": ["key"]},
+                    "primary_key": ["key"],
                     "foreign_keys": [],
                     "row_count": 1000,
                     "size_mb": 0.5,

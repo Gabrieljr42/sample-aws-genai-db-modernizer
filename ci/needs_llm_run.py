@@ -58,6 +58,7 @@ E2E_LLM: tuple[str, ...] = (
     "src/tools/analysis/pattern_catalog_base.py",
     "src/tools/analysis/scoring.py",
     "src/tools/analysis/variant_attributes.py",
+    "src/tools/analysis/key_access.py",
     # Decide which queries and numbers the designer sees (prepare_schema_design_input).
     "src/tools/schema/design_metrics.py",
     "src/agents/referee/table_resolution.py",

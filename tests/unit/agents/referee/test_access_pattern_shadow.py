@@ -53,9 +53,11 @@ class TestClassScoresComeFromThePatternCatalog:
         Pinned so a catalog change that moves a class score shows up here.
         """
         assert class_engine_scores() == {
+            # #920: Aurora's own key-value-lookup fit (80, a B-tree point read), not
+            # standard-crud's borrowed 60.
             KEY_LOOKUP: {
-                "aurora_mysql": 60,
-                "aurora_postgresql": 60,
+                "aurora_mysql": 80,
+                "aurora_postgresql": 80,
                 "documentdb": 60,
                 "dynamodb": 100,
                 "elasticache": 0,
@@ -569,8 +571,9 @@ class TestTheShadowArtifact:
         assert q1["shadow"]["scores"]["dynamodb"] == int(
             100 * 0.6 + 80 * 0.2 + 60 * 0.05 + 70 * 0.15
         )
+        # #920: Aurora's key-lookup class score is its own key-value-lookup fit, 80.
         assert q1["shadow"]["scores"]["aurora_postgresql"] == int(
-            60 * 0.4 + 80 * 0.3 + 60 * 0.2 + 70 * 0.1
+            80 * 0.4 + 80 * 0.3 + 60 * 0.2 + 70 * 0.1
         )
         assert q1["current"]["scores"]["dynamodb"] == int(
             80 * 0.6 + 80 * 0.2 + 60 * 0.05 + 70 * 0.15

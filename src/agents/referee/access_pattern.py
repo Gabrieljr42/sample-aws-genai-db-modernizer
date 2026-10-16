@@ -454,13 +454,17 @@ class ScopeColumns:
 
     ``tables``: the stored tables the scope reads (a table outside the collected schema,
     a derived table or a row function is left out). ``pinned``: per table, the columns
-    the scope pins to a value. ``joined``: the scope's ``col = col`` join terms as
-    ``(table, column, table, column)``.
+    the scope pins to a value. ``ranged``: per table, the columns the scope bounds by a
+    range (the facade's ``ranges``, the one range definition). ``joined``: the scope's
+    ``col = col`` join terms as ``(table, column, table, column)``. ``key_columns``: per
+    table, its key columns (the module docstring's definition).
     """
 
     tables: frozenset[str]
     pinned: Mapping[str, frozenset[str]]
     joined: frozenset[tuple[str, str, str, str]]
+    ranged: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    key_columns: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -479,6 +483,12 @@ def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
         table_id = scope.ids.get(owner) if owner is not None else None
         if table_id:
             pinned.setdefault(table_id, set()).add(column.name)
+    ranged: dict[str, set[str]] = {}
+    for column in facts.ranges:
+        owner = scope.owner(column)
+        table_id = scope.ids.get(owner) if owner is not None else None
+        if table_id:
+            ranged.setdefault(table_id, set()).add(column.name)
     joined: set[tuple[str, str, str, str]] = set()
     for left, right in facts.joins:
         a, b = scope.owner(left), scope.owner(right)
@@ -495,6 +505,8 @@ def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
         tables=tables,
         pinned={t: frozenset(c) for t, c in pinned.items()},
         joined=frozenset(joined),
+        ranged={t: frozenset(c) for t, c in ranged.items()},
+        key_columns={t: keys.tables[t].key_columns for t in tables if t in keys.tables},
     )
 
 

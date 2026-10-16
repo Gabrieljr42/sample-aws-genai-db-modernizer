@@ -385,10 +385,13 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # wp_wc_product_meta_lookup`` (``d72966f8...``) is first-assigned to Aurora MySQL,
     # not DocumentDB -- documentdb -1, aurora_mysql +1 (the full per-query drift is in
     # the #920 PR).
+    # #920 catalog PR B: DynamoDB's key detectors read the key from the SQL facts and
+    # Aurora scores a key lookup from its own B-tree point read -- dynamodb +2,
+    # aurora_mysql -4, documentdb +2 (per-query drift in the PR B pull request).
     assert rc["before_distribution"] == {
-        "dynamodb": 37,
-        "aurora_mysql": 64,
-        "documentdb": 6,
+        "dynamodb": 39,
+        "aurora_mysql": 60,
+        "documentdb": 8,
     }
     assert sum(rc["before_distribution"].values()) == sum(rc["after_distribution"].values())
     assert "opensearch" not in rc["after_distribution"]  # consolidated away

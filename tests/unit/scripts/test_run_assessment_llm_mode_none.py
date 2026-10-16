@@ -179,10 +179,11 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     # Aurora MySQL (its COUNT(*) query means the table has a relational need).
     # 63% since #920: ``REPLACE INTO wp_wc_product_meta_lookup`` and the
     # wp_commentmeta read by comment_id, which DynamoDB took after the reality check,
-    # stay on Aurora MySQL (67 of 107 queries).
+    # stay on Aurora MySQL (67 of 107 queries). 61% again after #920's catalog PR B
+    # (65 of 107): the keyed DynamoDB detectors move 7 queries to DynamoDB and 5 back.
     assert arch["rationale"] == (
         "Hybrid architecture: Aurora MySQL retained as the relational core "
-        "(63% of queries); DynamoDB for key-value access; ElastiCache for "
+        "(61% of queries); DynamoDB for key-value access; ElastiCache for "
         "caching hot data. Schema design was not run, so no tables are "
         "allocated yet."
     )

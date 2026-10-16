@@ -14,14 +14,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from src.agents.referee.access_pattern import (
-    KEY_LOOKUP,
-    KEY_SCOPED,
-    UNPARSED,
-    UTILITY,
-    SchemaKeys,
-    query_access,
-)
+from src.agents.referee.access_pattern import UNPARSED, UTILITY
 from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.transaction_shape import transaction_shape
 from src.contracts.analysis_output import (
@@ -43,6 +36,7 @@ from src.tools.analysis.dynamodb_pattern_catalog import (
     CatalogAntiPattern,
     CatalogPattern,
 )
+from src.tools.analysis.key_access import KeyAccessReader
 from src.tools.analysis.llm_advisor_base import LlmAdvisorBase
 from src.tools.analysis.scoring import (
     TableProfile,
@@ -234,26 +228,8 @@ class LlmAdvisor(LlmAdvisorBase):
 # ``src.tools.sql.query_facts`` (#491).
 
 
-# A write that addresses its items by key: an INSERT, or an UPDATE/DELETE pinning a key.
-_KEYED_CLASSES = frozenset({KEY_LOOKUP, KEY_SCOPED})
 # Statements with no parsed access facts: nothing is known about their predicates.
 _UNREAD_CLASSES = frozenset({UNPARSED, UTILITY})
-
-
-def _is_single_row_pk_lookup(q: dict, pk_columns: set[str]) -> bool:
-    """Detect single-row lookups by primary key equality."""
-    if q.get("query_type", "").upper() != "SELECT":
-        return False
-    rows_avg = q.get("rows_returned_avg", 0)
-    if rows_avg > 2:
-        return False
-    # Check if filter columns include a PK column
-    filters = q.get("filter_columns") or []
-    return bool(pk_columns & {f.lower() for f in filters})
-
-
-def _has_range_condition(q: dict, source_engine: str = "") -> bool:
-    return query_facts(q.get("query_text", ""), source_engine).range_with_order_by
 
 
 def _is_write_query(q: dict) -> bool:
@@ -942,7 +918,6 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     tables = collector_output.get("database_schema", {}).get("tables", [])
     source_engine = source_engine_of(collector_output)
     scope = SourceScope.from_collector(collector_output)
-    schema_keys = SchemaKeys.from_collector(collector_output)
 
     if not tables:
         return WorkloadAnalysis(patterns_detected=[], anti_patterns_detected=None)
@@ -951,19 +926,12 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # No queries — return empty patterns. Scoring will rely on structural signals only.
         return WorkloadAnalysis(patterns_detected=[], anti_patterns_detected=None)
 
-    # Build PK column lookup per table
-    pk_columns_by_table: dict[str, set[str]] = {}
-    table_row_counts: dict[str, int] = {}
-    for t in tables:
-        tid = t.get("table_id", "")
-        pk = t.get("primary_key") or []
-        pk_columns_by_table[tid] = {c.lower() for c in pk}
-        table_row_counts[tid] = t.get("row_count", 0)
-
-    # All PK columns across all tables (for queries that don't specify table)
-    all_pk_columns = set()
-    for pks in pk_columns_by_table.values():
-        all_pk_columns |= pks
+    table_row_counts: dict[str, int] = {
+        t.get("table_id", ""): t.get("row_count", 0) or 0 for t in tables
+    }
+    # How each query reaches its rows by key, from the SQL facts (#920): the
+    # collector's filter_columns is empty on every bundled sample query.
+    reader = KeyAccessReader.from_collector(collector_output, source_engine)
 
     # Per-pattern query accumulators
     kv_queries: list[dict] = []
@@ -981,6 +949,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
     # Anti-pattern accumulators
     frequent_scan_queries: list[dict] = []
+    ordered_scan_queries: list[dict] = []
     complex_agg_queries: list[dict] = []
     unbounded_queries: list[dict] = []
     wide_transaction_queries: list[dict] = []
@@ -991,72 +960,66 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         tables_accessed = q.get("tables_accessed") or []
         rows_avg = q.get("rows_returned_avg", 0)
         cps = q.get("calls_per_second") or 0
-
-        # Resolve PK columns for this query's tables
-        query_pk_cols = set()
-        for tid in tables_accessed:
-            query_pk_cols |= pk_columns_by_table.get(tid, set())
-        if not query_pk_cols:
-            query_pk_cols = all_pk_columns
+        access = reader.access(q)
 
         # --- Pattern matching (use if, not elif — queries can match multiple) ---
 
-        # Key-value lookup
-        if _is_single_row_pk_lookup(q, query_pk_cols):
+        # Key-value lookup: a read by a full primary or unique key (GetItem, or
+        # BatchGetItem for an IN-list of keys).
+        if access.key_lookup_read:
             kv_queries.append(q)
 
-        # Range query
-        if qt == "SELECT" and _has_range_condition(q, source_engine):
+        # Range query: a partition-key equality plus a range on another column of the
+        # same table (Query with a KeyConditionExpression), not any range.
+        if qt == "SELECT" and access.partition_range:
             range_queries.append(q)
-
-        access = query_access(q, schema_keys, source_engine)
 
         # Write-heavy: a frequent write that addresses its items by key (PutItem,
         # UpdateItem, DeleteItem). A frequent write alone is a call rate, not an access
         # pattern (#920): an unkeyed or joined write is not this pattern.
-        if (
-            _is_write_query(q)
-            and _is_high_frequency(q, threshold=0.5)
-            and access.classification.name in _KEYED_CLASSES
-        ):
+        if _is_write_query(q) and _is_high_frequency(q, threshold=0.5) and access.keyed:
             write_queries.append(q)
 
-        # Time-series / event log
+        # Time-series / event log: an INSERT into a table the workload only appends
+        # to, or an entity-anchored time range read (a partition key plus a range).
         if facts.timestamp_column and (
-            qt == "INSERT" or (qt == "SELECT" and _has_range_condition(q, source_engine))
+            (qt == "INSERT" and all(reader.append_only(t) for t in tables_accessed))
+            or (qt == "SELECT" and access.partition_range)
         ):
             timeseries_queries.append(q)
 
-        # Metadata/config store — small table, high reads, low writes
-        if qt == "SELECT" and rows_avg <= 10 and cps >= 0.1:
-            for tid in tables_accessed:
-                if table_row_counts.get(tid, 0) <= 10000:
-                    metadata_queries.append(q)
-                    break
+        # Metadata/config store: a keyed read, with no aggregate, of a small table the
+        # workload reads far more often than it writes.
+        if (
+            qt == "SELECT"
+            and access.keyed
+            and not facts.aggregation
+            and rows_avg <= 10
+            and cps >= 0.1
+            and tables_accessed
+            and all(
+                table_row_counts.get(t, 0) <= 10000 and reader.read_mostly(t)
+                for t in tables_accessed
+            )
+        ):
+            metadata_queries.append(q)
 
-        # Session store
-        if facts.session_key:
+        # Session store: a session or token statement that addresses its item by key
+        # (GetItem/PutItem on the session key), not any statement naming a token (#920).
+        if facts.session_key and access.keyed:
             session_queries.append(q)
 
-        # Denormalization sub-type detection (replaces single denormalizable-join)
-        # These are coarse signal accumulators — the actual sub-type classification
-        # happens in detect_denormalization_subtypes() using FK structure analysis.
-        # A query can contribute to multiple accumulators here.
-        if q.get("has_joins") and q.get("join_count", 0) <= 2:
-            # Classify into sub-types based on query and table characteristics
-            query_tables = q.get("tables_accessed") or []
-
-            # Check for co-accessed tables (any multi-table query)
-            if len(query_tables) > 1:
-                co_accessed_tables_queries.append(q)
-
-            # Check for bounded parent-child (simple FK join)
-            if q.get("has_joins") and q.get("join_count", 0) == 1:
+        # Denormalization sub-types: a key-anchored join (every table reached by key
+        # from a pinned one), not a join count. detect_denormalization_subtypes() then
+        # classifies them from the FK structure.
+        if access.anchored_join:
+            joined = set(tables_accessed)
+            if len(joined) == 2:
                 bounded_parent_child_queries.append(q)
-
-        # Many-to-many junction: queries accessing 3+ tables (junction + 2 referenced)
-        if q.get("has_joins") and q.get("join_count", 0) >= 2:
-            many_to_many_junction_queries.append(q)
+            if 2 <= len(joined) <= 3 and cps * 3600 >= CO_ACCESS_FREQUENCY_THRESHOLD:
+                co_accessed_tables_queries.append(q)
+            if any(reader.is_junction(t) for t in joined) and len(joined) >= 3:
+                many_to_many_junction_queries.append(q)
 
         # Adjacency-list: self-join or hierarchical query patterns
         if q.get("has_joins") and q.get("tables_accessed"):
@@ -1071,11 +1034,14 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # partition key value can address it whatever the key design (a Scan), run more
         # than once a minute. Read from the SQL facts, not the collector's filter_columns
         # (#920); a statement the facade cannot parse is not called a scan.
-        pins_nothing = access.classification.name not in _UNREAD_CLASSES and not any(
-            scope.pinned for scope in access.scopes
-        )
+        pins_nothing = access.access_class not in _UNREAD_CLASSES and not access.pins_value
         if qt == "SELECT" and pins_nothing and _scan_frequency_per_minute(q) > 1:
             frequent_scan_queries.append(q)
+
+        # Ordered scan: the first rows of a whole table in some order, at any call rate.
+        # A Scan returns no order, so the application reads and sorts every item (#920).
+        if qt == "SELECT" and pins_nothing and facts.top_n:
+            ordered_scan_queries.append(q)
 
         # Complex aggregation — any GROUP BY or aggregate function (COUNT(*)
         # included, #893) is an anti-pattern for DynamoDB regardless of joins.
@@ -1115,6 +1081,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     anti_patterns = _build_anti_patterns_from_matches(
         [
             (DYNAMODB_ANTI_PATTERNS[0], frequent_scan_queries),  # frequent-full-scan
+            (ANTI_PATTERN_BY_ID["dynamodb-ap-05"], ordered_scan_queries),
             (DYNAMODB_ANTI_PATTERNS[1], complex_agg_queries),  # complex-aggregation
             (DYNAMODB_ANTI_PATTERNS[2], unbounded_queries),  # unbounded-result-set
             (ANTI_PATTERN_BY_ID["dynamodb-ap-04"], wide_transaction_queries),

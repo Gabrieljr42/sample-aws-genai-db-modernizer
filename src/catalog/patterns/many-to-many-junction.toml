@@ -6,14 +6,16 @@ detectors = [
 triage_signal = "junction_tables"
 penalty = 0
 
-# Detection signals: junction_table, composite_fk_pk, many_to_many_relationship
+# Detection (#920): a key-anchored join of three or more tables through a junction table (two
+# or more foreign keys and a composite primary key, key_access.is_junction_table), not any
+# query with two joins.
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-07b"
 score = 65
-why = "Many-to-many relationship via a junction table with composite PK of two FK columns. Needs GSI or adjacency list pattern in DynamoDB — more design work required."
+why = "Many-to-many relationship via a junction table with composite PK of two FK columns. Needs a GSI or the adjacency list pattern in DynamoDB — more design work required (Amazon DynamoDB Developer Guide, Best practices for managing many-to-many relationships)."
 concerns = [
     "Requires GSI or adjacency list pattern for bidirectional access",
     "May need data duplication for efficient queries from both sides",
