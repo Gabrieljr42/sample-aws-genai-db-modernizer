@@ -40,7 +40,9 @@ def test_every_regex_difference_on_the_samples_is_a_known_correction():
 
 def test_the_facts_893_added_differ_from_their_fallback_only_where_it_misreads():
     """The regex aggregate count counts the words (a ``count`` column, ``COUNT``
-    in a comment). No other fact #893 added differs from its fallback on the samples."""
+    in a comment); the regex timestamp column reads ``CAST(... AS date)`` or a word in
+    a literal as a column. No other fact #893 added differs from its fallback on the
+    samples."""
     added = _differs(None)
     names = {f for facts in added.values() for f in facts} - _FACTS_796
-    assert names == {"aggregate_function_count"}
+    assert names == {"aggregate_function_count", "timestamp_column"}

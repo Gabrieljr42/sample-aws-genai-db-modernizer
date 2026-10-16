@@ -421,7 +421,7 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             agg_pipeline.append(q)
 
         # flexible-schema: JSON columns or JSON_EXTRACT
-        if facts.json_extract_word:
+        if facts.json_access:
             flexible_schema.append(q)
         else:
             for tid in accessed:

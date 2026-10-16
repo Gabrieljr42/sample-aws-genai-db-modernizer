@@ -15,7 +15,8 @@ Each fact has one definition, and every reader uses it (#893; the guard is
 - Parsed facts -- join count, ``GROUP BY``, aggregate functions, the text
   searches (leading-wildcard and parameterised ``LIKE``, full-text,
   regular-expression and similarity matches), the window functions, a
-  recursive CTE -- are the sqlglot facade's (:class:`src.tools.sql.facade.SqlFacts`),
+  recursive CTE, ``ORDER BY``, the row limit and top-N shape, a timestamp
+  column and JSON access -- are the sqlglot facade's (:class:`src.tools.sql.facade.SqlFacts`),
   read in the source engine's dialect, so a comment, a string literal or a
   column name (``count``, ``rank``) is never read as SQL. When sqlglot can't
   read a statement, each is its regex fallback
@@ -23,7 +24,7 @@ Each fact has one definition, and every reader uses it (#893; the guard is
   query pattern (``has_joins``, ``join_count``, ``has_aggregations``,
   ``has_subqueries``, #796), the same facts read once.
 - Text facts are a regex scan on the text: the ones no parse gives yet (a
-  timestamp column, a session key, a write statement, ...), each moved here
+  session key, a write statement, a computed join key, ...), each moved here
   from its detector by #491.
 
 A reader passes the collector's source engine
@@ -44,7 +45,7 @@ from functools import cached_property, lru_cache
 
 from src.shared.sql_comments import strip_leading_comments
 from src.shared.unsupported_pattern import is_dedup_only_group_by
-from src.tools.sql.facade import SqlFacts, sql_facts
+from src.tools.sql.facade import AccessFacts, SqlFacts, query_readings
 from src.tools.sql.regex_facts import scan_sql
 
 __all__ = ["QueryFacts", "query_facts", "scan_sql", "source_engine_of"]
@@ -82,6 +83,10 @@ _AGGREGATE_WORD_HINTS = (
 _JOIN_HINTS = ("join", ",", "apply")
 _FULLTEXT_HINTS = ("match", "@@", "tsvector", "tsquery", "ts_rank", "contains", "freetext")
 _PATTERN_MATCH_HINTS = ("regexp", "rlike", "~", "similar")
+_ROW_LIMIT_HINTS = ("limit", "fetch", "top")
+# The timestamp column names (``regex_facts.TIMESTAMP_COLUMN_NAMES``) each hold one.
+_TIMESTAMP_HINTS = ("_at", "time", "date", "ttl")
+_JSON_HINTS = ("json", "->", "#>", "@>")
 
 # ---------------------------------------------------------------------------
 # Aggregation (#338, #336)
@@ -179,13 +184,6 @@ _EXISTS_OR_IN_SUBQUERY_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-PAGINATION_KEYWORDS: tuple[str, ...] = (
-    "limit",
-    "offset",
-    "fetch first",
-    "fetch next",
-)
-
 IN_LIST_KEYWORDS: tuple[str, ...] = (
     " in (",
     " in(",
@@ -195,17 +193,6 @@ IN_LIST_KEYWORDS: tuple[str, ...] = (
 # MySQL syntax (the Aurora MySQL analysis's detectors, moved here from
 # ``aurora_mysql_pattern_catalog``): case-insensitive substring checks.
 # ---------------------------------------------------------------------------
-
-JSON_FUNCTION_KEYWORDS: tuple[str, ...] = (
-    "json_extract(",
-    "json_contains(",
-    "json_value(",
-    "json_set(",
-    "json_array(",
-    "json_object(",
-    "->>",
-    "->",
-)
 
 DUPLICATE_KEY_KEYWORDS: tuple[str, ...] = ("on duplicate key", "replace into")
 
@@ -222,25 +209,6 @@ STORED_ROUTINE_KEYWORDS: tuple[str, ...] = (
 # PostgreSQL syntax (the Aurora PostgreSQL analysis's detectors, moved here
 # from ``aurora_pg_pattern_catalog``).
 # ---------------------------------------------------------------------------
-
-# JSONB operations:
-#   - ->> operator
-#   - jsonb_* function names
-#   - ::jsonb cast
-#   - @> followed by a JSON object/string literal (single-quoted, NOT ARRAY)
-_JSONB_OPERATION_RE = re.compile(
-    r"""
-    ->>
-    |
-    \bjsonb_(?:agg|build_object|build_array|each|each_text|array_elements|array_elements_text|
-               populate_record|typeof|strip|pretty|set|insert|delete|path_exists|path_query)\s*\(
-    |
-    ::jsonb\b
-    |
-    @>\s*'
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
 
 # Array operations:
 #   - ANY(ARRAY[...])
@@ -290,46 +258,24 @@ _ON_CONFLICT_OR_RETURNING_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# Key-value access shape (the DynamoDB analysis's detectors, moved here from
-# ``dynamodb_analysis_tools``).
-# ---------------------------------------------------------------------------
-
-# A column name that looks like a timestamp (created_at, ttl, last_seen_at, ...).
-_TIMESTAMP_COLUMN_RE = re.compile(
-    r"\b(created_at|updated_at|timestamp|date|time|expires?_at|ttl|last_\w+_at)\b", re.I
-)
-# A word that looks like session or auth data.
-_SESSION_WORD_RE = re.compile(r"\b(session|token|sess_id|session_id|login|auth)\b", re.I)
-# BETWEEN, or < / <= / > / >= with a word character before them (``a>=1``,
-# not ``a >= 1``), read on the lower-cased text.
-_RANGE_OPERATOR_WORD_RE = re.compile(r"\b(between|>=?|<=?)\b")
-
-
-# ---------------------------------------------------------------------------
 # Document shapes (the DocumentDB analysis's detectors, moved here from
 # ``documentdb_analysis_tools``).
 # ---------------------------------------------------------------------------
 
+# BETWEEN, or < / <= / > / >= with a word character before them (``a>=1``,
+# not ``a >= 1``), read on the lower-cased text (DynamoDB's and triage's range
+# reading; one definition of a range predicate is #893's last group).
+_RANGE_OPERATOR_WORD_RE = re.compile(r"\b(between|>=?|<=?)\b")
 _NEGATION_WORD_RE = re.compile(r"\b(not\s+in|not\s+exists|<>|!=)\b", re.I)
 _CORRELATED_SUBQUERY_SHAPE_RE = re.compile(
     r"\(\s*select\b.*?\bwhere\b.*?\b\w+\.\w+\s*=\s*\w+\.\w+", re.I | re.S
 )
-_JSON_EXTRACT_WORD_RE = re.compile(r"\b(json_extract|json_unquote|json_value|->>|->)\b", re.I)
 
 
 # ---------------------------------------------------------------------------
 # Search and time-series keywords (the OpenSearch analysis's detectors, moved
 # here from ``opensearch_pattern_catalog``): case-insensitive substring checks.
 # ---------------------------------------------------------------------------
-
-TIMESTAMP_KEYWORDS: tuple[str, ...] = (
-    "timestamp",
-    "created_at",
-    "updated_at",
-    "event_time",
-    "log_time",
-    "ingested_at",
-)
 
 TIME_RANGE_KEYWORDS: tuple[str, ...] = (
     "between",
@@ -350,8 +296,6 @@ TIME_AGG_KEYWORDS: tuple[str, ...] = (
 # ``redis_analysis_tools``): case-insensitive substring checks.
 # ---------------------------------------------------------------------------
 
-SESSION_OR_USER_KEYWORDS: tuple[str, ...] = ("session", "user_id")
-TIMESTAMP_OR_DATE_KEYWORDS: tuple[str, ...] = ("timestamp", "created_at", "updated_at", "date")
 # Spatial SQL functions or coordinate columns.
 GEOSPATIAL_KEYWORDS: tuple[str, ...] = (
     "st_distance",
@@ -375,32 +319,20 @@ _MIN_MAX_CALL_RE = re.compile(r"\b(max|min)\s*\(")
 _STATUS_EQUALS_VALUE_RE = re.compile(r"\bstatus\s*=\s*[\?'\"]")
 _IS_NULL_RE = re.compile(r"\bis\s+null\b")
 _COUNT_STAR_OR_ONE_RE = re.compile(r"\bcount\s*\(\s*[\*1]\s*\)")
-_EVENT_TIMESTAMP_WORD_RE = re.compile(
-    r"\b(created_at|updated_at|timestamp|event_time|open_date|close_date|"
-    r"created_date|modified_date|log_time|event_date)\b",
-    re.IGNORECASE,
-)
 
 
 # ---------------------------------------------------------------------------
-# Top-N and session-key shapes (moved here from ``src.agents.referee.cache_overlay``,
-# #296/#663). Triage and the cache overlay read the same facts.
+# Session keys (moved here from ``src.agents.referee.cache_overlay``, #296/#663):
+# the one session fact triage, the cache overlay and the DynamoDB and ElastiCache
+# analyses read (#893). The top-N shape is the facade's ``top_n`` now.
 # ---------------------------------------------------------------------------
 
-# A top-N read: ``ORDER BY ... LIMIT n``, or its T-SQL and ANSI spellings (#663),
-# ``SELECT TOP (n) ... ORDER BY`` and ``ORDER BY ... [OFFSET ...] FETCH {FIRST|NEXT}``.
-# TOP takes a number, a ``(expression)`` or a variable, so a column named ``top``
-# is not one; TOP with no ORDER BY returns arbitrary rows and is not a top-N.
-_TOP_N_RE = re.compile(
-    r"order\s+by\b.*\b(?:limit|fetch\s+(?:first|next))\b|\btop\s*(?:\(|\d|@).*\border\s+by\b",
-    re.IGNORECASE | re.DOTALL,
-)
 # Same keywords for triage's session_store signal and the cache overlay (``session_key``).
 _SESSION_RE = re.compile(r"\b(session|token|sess_id|session_id|csrf)\b", re.IGNORECASE)
 # The parts of a PascalCase / camelCase name: ``SessionToken`` -> Session, Token;
 # ``CSRFToken`` -> CSRF, Token; ``sessionId`` -> session, Id; ``SessionID`` -> Session, ID.
 _NAME_PART_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
-_IDENTIFIER_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
+_IDENTIFIER_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 # The two-part session-store key names a PascalCase or camelCase schema uses
 # (#663, kept narrow after review: ``session_store`` alone selects analysis
 # agents). ``<prefix>Token`` for these prefixes, or ``Session{Id,Key,Token}``.
@@ -445,8 +377,9 @@ _WHERE_CLAUSE_RE = re.compile(r"\bwhere\b(.*)", re.IGNORECASE | re.DOTALL)
 
 
 def _is_session_key_name(name: str) -> bool:
-    """Whether a PascalCase/camelCase ``name`` is a two-part session or token key."""
-    parts = [p.lower() for p in _NAME_PART_RE.findall(name)]
+    """Whether a PascalCase, camelCase or snake_case ``name`` is a two-part session or
+    token key (``SessionToken``, ``sessionId``, ``session_token``, ``auth_token``)."""
+    parts = [p.lower() for chunk in name.split("_") for p in _NAME_PART_RE.findall(chunk)]
     if len(parts) != 2:
         return False
     head, tail = parts
@@ -460,18 +393,22 @@ def _has_session_key(text: str) -> bool:
 
     Either ``_SESSION_RE`` matches a whole word (``session``, ``token``,
     ``session_id``, ...), unchanged from before, or the WHERE clause filters on a
-    PascalCase/camelCase session key such as T-SQL's ``[SessionToken]``,
-    ``[CSRFToken]``, ``sessionId`` (:func:`_is_session_key_name`). The second rule
+    two-part session key such as T-SQL's ``[SessionToken]``, ``[CSRFToken]``,
+    ``sessionId``, or the snake_case ``session_token``/``auth_token`` (#893: the
+    session fact the DynamoDB and ElastiCache analyses read too, whose copies read
+    ``session_token`` and this one did not; :func:`_is_session_key_name`). The second rule
     is deliberately narrow, because ``session_store`` selects analysis agents on
     its own: a name part such as ``[SessionTimeout]`` or ``[TokenCount]`` does not
     count, and neither does a ``[UserSession]`` query keyed by something else or
-    a session key named only in the select list. Needs the SQL in its original
-    case.
+    a session key named only in the select list or inside a string literal. Needs
+    the SQL in its original case.
     """
     text = text or ""
     if _SESSION_RE.search(text):
         return True
-    where = _WHERE_CLAUSE_RE.search(text)
+    # Literals blanked (``purpose = 'reset_token'`` names no column); a bracketed or
+    # double-quoted identifier keeps its name (``scan_sql``).
+    where = _WHERE_CLAUSE_RE.search(scan_sql(text))
     if where is None:
         return False
     return any(_is_session_key_name(name) for name in _IDENTIFIER_RE.findall(where.group(1)))
@@ -576,16 +513,6 @@ _MERGE_RE = re.compile(
     r".{0,80}\busing\b",
     re.IGNORECASE | re.DOTALL,
 )
-# Every function-shaped signal requires an opening paren, so a column literally named
-# e.g. ``json_value`` (not a call to the ``JSON_VALUE(...)`` function) does not match.
-# ``FOR JSON`` and ``IS JSON`` are not function calls -- SQL Server's ``FOR JSON PATH``
-# clause and the ``IS JSON`` predicate take no parens -- so those two keep the plain
-# keyword-boundary match.
-_JSON_FUNCTION_RE = re.compile(
-    r"\bjson_value\s*\(|\bjson_query\s*\(|\bopenjson\s*\(|\bfor\s+json\b|\bjson_table\s*\(|"
-    r"\bis\s+json\b|\bjson_exists\s*\(",
-    re.IGNORECASE,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -667,9 +594,17 @@ class QueryFacts:
     # -- Parsed facts (the facade's ``SqlFacts``, #893) ------------------------
 
     @cached_property
+    def _readings(self) -> tuple[SqlFacts, AccessFacts]:
+        """The facade's readings of the text, from one parse in the source engine's dialect."""
+        return query_readings(self._text, self._source_engine)
+
+    @cached_property
     def _parsed(self) -> SqlFacts:
-        """The facade's reading of the text, in the source engine's dialect."""
-        return sql_facts(self._text, self._source_engine)
+        return self._readings[0]
+
+    @cached_property
+    def _access(self) -> AccessFacts:
+        return self._readings[1]
 
     def _has(self, *hints: str) -> bool:
         return any(hint in self._lower for hint in hints)
@@ -777,6 +712,58 @@ class QueryFacts:
         """
         return self._has("with") and self._parsed.recursive_cte
 
+    @cached_property
+    def order_by(self) -> bool:
+        """An ``ORDER BY`` that sorts a query's rows, not a window's (``SqlFacts.order_by``)."""
+        return self._has("order") and self._parsed.order_by
+
+    @cached_property
+    def row_limit(self) -> bool:
+        """A row limit: ``LIMIT``, ``TOP``, ``FETCH FIRST``/``NEXT`` (``SqlFacts.row_limit``);
+        a ``credit_limit`` column is not one.
+        """
+        return self._has(*_ROW_LIMIT_HINTS) and self._parsed.row_limit
+
+    @cached_property
+    def top_n(self) -> bool:
+        """A top-N read: one query with both an ``ORDER BY`` and a row limit
+        (``SqlFacts.top_n``; ``TOP`` with no ``ORDER BY`` is not one).
+        """
+        return self.order_by and self.row_limit and self._parsed.top_n
+
+    @cached_property
+    def timestamp_column(self) -> bool:
+        """A column named as a timestamp (``created_at``, ``updated_at``, ``timestamp``,
+        ``event_time``, ``*_date``, ``last_*_at``, ...; ``SqlFacts.timestamp_column``).
+        """
+        return self._has(*_TIMESTAMP_HINTS) and self._parsed.timestamp_column
+
+    @cached_property
+    def update_target_join(self) -> bool:
+        """MySQL's multi-table ``UPDATE a JOIN b ... SET`` (``SqlFacts.update_target_join``);
+        not ``UPDATE ... FROM ... JOIN``.
+        """
+        return self._has("update") and self._has("join") and self._parsed.update_target_join
+
+    @cached_property
+    def json_access(self) -> bool:
+        """The query reads or builds JSON: a JSON function or operator, a cast to
+        ``json``/``jsonb``, a JSON containment (``SqlFacts.json_access``).
+        """
+        return self._has(*_JSON_HINTS) and self._parsed.json_access
+
+    @cached_property
+    def range_with_order_by(self) -> bool:
+        """``BETWEEN`` or a word character followed by ``<``/``<=``/``>``/``>=``, and an
+        ``ORDER BY`` (the range predicates are #893's last group).
+        """
+        return bool(_RANGE_OPERATOR_WORD_RE.search(self._lower)) and self.order_by
+
+    @cached_property
+    def time_range_operator(self) -> bool:
+        """``between``, ``>=`` or ``<=``."""
+        return _contains_any(self._lower, TIME_RANGE_KEYWORDS)
+
     # -- Text facts ------------------------------------------------------------
 
     @cached_property
@@ -812,21 +799,9 @@ class QueryFacts:
         return bool(_EXISTS_OR_IN_SUBQUERY_RE.search(self._text))
 
     @cached_property
-    def pagination_keyword(self) -> bool:
-        """A :data:`PAGINATION_KEYWORDS` substring (``limit``, ``offset``, ``fetch first``,
-        ``fetch next``).
-        """
-        return _contains_any(self._lower, PAGINATION_KEYWORDS)
-
-    @cached_property
     def in_list(self) -> bool:
         """`` in (`` or `` in(``."""
         return _contains_any(self._lower, IN_LIST_KEYWORDS)
-
-    @cached_property
-    def json_function_keyword(self) -> bool:
-        """A :data:`JSON_FUNCTION_KEYWORDS` substring (``json_extract(``, ..., ``->``)."""
-        return _contains_any(self._lower, JSON_FUNCTION_KEYWORDS)
 
     @cached_property
     def duplicate_key_upsert(self) -> bool:
@@ -846,11 +821,6 @@ class QueryFacts:
         return _contains_any(self._lower, STORED_ROUTINE_KEYWORDS)
 
     @cached_property
-    def jsonb_operation(self) -> bool:
-        """``->>``, a ``jsonb_*(`` function, ``::jsonb`` or ``@> '``."""
-        return bool(_JSONB_OPERATION_RE.search(self._text))
-
-    @cached_property
     def array_operation(self) -> bool:
         """``ANY(ARRAY``, ``array_agg(``, ``unnest(``, ``ARRAY[`` or ``@> ARRAY``."""
         return bool(_ARRAY_OPERATION_RE.search(self._text))
@@ -866,32 +836,6 @@ class QueryFacts:
         return bool(_ON_CONFLICT_OR_RETURNING_RE.search(self._text))
 
     @cached_property
-    def timestamp_column_word(self) -> bool:
-        """A timestamp-like word (``created_at``, ``updated_at``, ``timestamp``, ``date``,
-        ``time``, ``expires_at``, ``ttl``, ``last_*_at``).
-        """
-        return bool(_TIMESTAMP_COLUMN_RE.search(self._text))
-
-    @cached_property
-    def session_word(self) -> bool:
-        """``session``, ``token``, ``sess_id``, ``session_id``, ``login`` or ``auth`` as a
-        word.
-        """
-        return bool(_SESSION_WORD_RE.search(self._text))
-
-    @cached_property
-    def range_with_order_by(self) -> bool:
-        """``BETWEEN`` or a word character followed by ``<``/``<=``/``>``/``>=``, and
-        ``order by`` somewhere in the text.
-        """
-        return bool(_RANGE_OPERATOR_WORD_RE.search(self._lower)) and self.order_by_substring
-
-    @cached_property
-    def limit_word(self) -> bool:
-        """The lower-cased text contains ``limit``."""
-        return "limit" in self._lower
-
-    @cached_property
     def negation_word(self) -> bool:
         """``NOT IN``, ``NOT EXISTS``, ``<>`` or ``!=`` between word characters."""
         return bool(_NEGATION_WORD_RE.search(self._text))
@@ -902,48 +846,14 @@ class QueryFacts:
         return bool(_CORRELATED_SUBQUERY_SHAPE_RE.search(self._text))
 
     @cached_property
-    def json_extract_word(self) -> bool:
-        """``json_extract``, ``json_unquote``, ``json_value``, ``->>`` or ``->`` between
-        word characters.
-        """
-        return bool(_JSON_EXTRACT_WORD_RE.search(self._text))
-
-    @cached_property
     def comma_count(self) -> int:
         """How many commas the text has."""
         return self._lower.count(",")
 
     @cached_property
-    def timestamp_keyword(self) -> bool:
-        """A :data:`TIMESTAMP_KEYWORDS` substring (``timestamp``, ``created_at``,
-        ``updated_at``, ``event_time``, ``log_time``, ``ingested_at``).
-        """
-        return _contains_any(self._lower, TIMESTAMP_KEYWORDS)
-
-    @cached_property
-    def time_range_operator(self) -> bool:
-        """``between``, ``>=`` or ``<=``."""
-        return _contains_any(self._lower, TIME_RANGE_KEYWORDS)
-
-    @cached_property
     def time_function_keyword(self) -> bool:
         """``date_trunc``, ``date(``, ``hour(`` or ``extract(``."""
         return _contains_any(self._lower, TIME_AGG_KEYWORDS)
-
-    @cached_property
-    def session_or_user_keyword(self) -> bool:
-        """``session`` or ``user_id`` anywhere."""
-        return _contains_any(self._lower, SESSION_OR_USER_KEYWORDS)
-
-    @cached_property
-    def order_by_substring(self) -> bool:
-        """The lower-cased text contains ``order by`` (one space)."""
-        return "order by" in self._lower
-
-    @cached_property
-    def timestamp_or_date_keyword(self) -> bool:
-        """``timestamp``, ``created_at``, ``updated_at`` or ``date`` anywhere."""
-        return _contains_any(self._lower, TIMESTAMP_OR_DATE_KEYWORDS)
 
     @cached_property
     def geospatial_keyword(self) -> bool:
@@ -973,14 +883,6 @@ class QueryFacts:
         return bool(_COUNT_STAR_OR_ONE_RE.search(self._lower))
 
     @cached_property
-    def event_timestamp_word(self) -> bool:
-        """An event-time column word (``created_at``, ``updated_at``, ``timestamp``,
-        ``event_time``, ``open_date``, ``close_date``, ``created_date``,
-        ``modified_date``, ``log_time``, ``event_date``).
-        """
-        return bool(_EVENT_TIMESTAMP_WORD_RE.search(self._lower))
-
-    @cached_property
     def _scanned(self) -> str:
         return scan_sql(self._text)
 
@@ -1001,13 +903,6 @@ class QueryFacts:
         :func:`scan_sql`'s output.
         """
         return "merge" in self._scanned_lower and bool(_MERGE_RE.search(self._scanned))
-
-    @cached_property
-    def json_function_call(self) -> bool:
-        """``JSON_VALUE(``, ``JSON_QUERY(``, ``OPENJSON(``, ``FOR JSON``, ``JSON_TABLE(``,
-        ``IS JSON`` or ``JSON_EXISTS(``, read on :func:`scan_sql`'s output.
-        """
-        return "json" in self._scanned_lower and bool(_JSON_FUNCTION_RE.search(self._scanned))
 
     @cached_property
     def _where_split(self) -> list[str]:
@@ -1035,13 +930,6 @@ class QueryFacts:
             _DML_KEYWORD_RE.search(reading) or _LEADING_WRITE_VERB_RE.match(reading)
             for reading in _leading_comment_readings(self._text)
         )
-
-    @cached_property
-    def top_n_shape(self) -> bool:
-        """A top-N read: ``ORDER BY ... LIMIT``/``FETCH FIRST|NEXT``, or
-        ``TOP (n)``/``TOP n``/``TOP @v`` ... ``ORDER BY``.
-        """
-        return bool(_TOP_N_RE.search(self._text))
 
     @cached_property
     def session_key(self) -> bool:

@@ -194,9 +194,10 @@ class TestEligibility:
         ],
     )
     def test_tsql_and_ansi_top_n_is_top_n(self, text):
-        # #663: TOP (n) ... ORDER BY and OFFSET/FETCH are LIMIT's T-SQL/ANSI spellings.
-        assert cache_pattern(_q("q", text, rows=10)) == "top_n"
-        assert cache_pattern(_q("q", text, rows=1)) == "point_lookup"
+        # #663: TOP (n) ... ORDER BY and OFFSET/FETCH are LIMIT's T-SQL/ANSI spellings,
+        # read in the source engine's dialect (the facade's top_n fact, #893).
+        assert cache_pattern(_q("q", text, rows=10), "sqlserver") == "top_n"
+        assert cache_pattern(_q("q", text, rows=1), "sqlserver") == "point_lookup"
 
     def test_top_without_order_by_is_not_top_n(self):
         # TOP (n) with no ORDER BY returns arbitrary rows, not the top of anything.

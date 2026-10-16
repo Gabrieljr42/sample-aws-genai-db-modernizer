@@ -1005,7 +1005,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             low_freq_write_queries.append(q)
 
         # Time-series / event log
-        if facts.timestamp_column_word and (
+        if facts.timestamp_column and (
             qt == "INSERT" or (qt == "SELECT" and _has_range_condition(q, source_engine))
         ):
             timeseries_queries.append(q)
@@ -1018,7 +1018,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
                     break
 
         # Session store
-        if facts.session_word:
+        if facts.session_key:
             session_queries.append(q)
 
         # Denormalization sub-type detection (replaces single denormalizable-join)
@@ -1063,7 +1063,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             complex_agg_queries.append(q)
 
         # Unbounded result set
-        if qt == "SELECT" and rows_avg > 10000 and not facts.limit_word:
+        if qt == "SELECT" and rows_avg > 10000 and not facts.row_limit:
             unbounded_queries.append(q)
 
         # Wide transaction (ADR-031 Decision 3, #493): DynamoDB runs a write of up to

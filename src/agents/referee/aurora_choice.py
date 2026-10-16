@@ -156,7 +156,7 @@ def detect_heterogeneous_features(
         "sequences": any(has_sequence_reference(scan_sql(t)) for t in query_texts),
         "recursive_ctes": any(f.recursive_cte for f in facts),
         "merge_statements": any(f.merge_statement for f in facts),
-        "json_usage": json_columns or any(f.json_function_call for f in facts),
+        "json_usage": json_columns or any(f.json_access for f in facts),
         "multiple_schemas": len(schema_names) > 1,
         "babelfish_compatible": (source_engine or "").lower() == "sqlserver",
     }

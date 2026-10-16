@@ -46,17 +46,20 @@ FACT_MODULES: dict[str, str] = {
         "the dedup-only GROUP BY proof (#336) behind the dedup_only_group_by fact; its scans run "
         "on comment- and literal-stripped text inside that proof"
     ),
+    "src/agents/referee/query_shape.py": (
+        "the query-shape facts: the locking clause (#838), skipped locked rows, the primary-key "
+        "ordered row limit (#857) and the single-table access shape (ADR-031 Decision 14, which "
+        "the access-pattern switch replaces, #728). Only those: its GROUP BY, ORDER BY, LIKE and "
+        "SELECT readings come from regex_facts (QUERY_SHAPE_OWN_DETECTORS)"
+    ),
+    "src/agents/referee/utility_statements.py": (
+        "the utility-statement fact (#327, #737): DDL, session and transaction control, "
+        "metadata reads"
+    ),
 }
 
 # Modules with a SQL regex that is not a routing or analysis query fact.
 OTHER_SQL_MODULES: dict[str, str] = {
-    "src/agents/referee/query_shape.py": (
-        "the query-shape facts (locking clause, single-table access shape); registered as a "
-        "fact module by #893's second PR"
-    ),
-    "src/agents/referee/utility_statements.py": (
-        "the utility-statement fact (#327); registered as a fact module by #893's second PR"
-    ),
     "src/agents/referee/transaction_shape.py": (
         "the write-transaction shape (#493); its keyword scans are not yet audited against the "
         "query facts (#930)"
@@ -189,6 +192,58 @@ def test_only_declared_modules_hold_sql_detectors():
         f"{sorted(found - declared)}"
     )
     assert not declared - found, f"No SQL detector left: remove {sorted(declared - found)}"
+
+
+# The detectors query_shape.py defines itself, each for one of its documented facts.
+# GROUP BY, ORDER BY, a pattern-match predicate, a literal-prefix LIKE and the SELECT
+# word are not among them: it imports those from src.tools.sql.regex_facts (#893 review).
+QUERY_SHAPE_OWN_DETECTORS: dict[str, str] = {
+    "_QUOTED_IDENT_RE": "quoted identifiers made bare before literals are stripped",
+    "_DISTINCT_RE": "the shape check's DISTINCT",
+    "_CTE_RE": "the shape check's CTE",
+    "_WHERE_RE": "the WHERE clause the key predicate is read from",
+    "_EQUALS_RE": "the key predicate's equality",
+    "_IN_LIST_RE": "the key predicate's IN list",
+    "_NOT_BEFORE_RE": "a NOT before an IN list",
+    "_LEFT_OPERAND_RE": "the operand before an operator",
+    "_RIGHT_OPERAND_RE": "the operand after an operator",
+    "_COLUMN_RE": "a column operand",
+    "_RANGE_PREDICATE_RE": "the shape check's range (one range definition is #933)",
+    "_ORDER_BY_ITEMS_RE": "the primary-key ordered row limit's sort items",
+    "_SORT_ITEM_RE": "one sort item",
+    "_TOP_RE": "the primary-key ordered row limit's TOP",
+    "_OFFSET_RE": "its OFFSET",
+    "_WHERE_WORD_RE": "a WHERE word",
+    "_FOR_LOCKING_RE": "the locking clause (#838)",
+    "_LOCK_IN_SHARE_MODE_RE": "MySQL's locking clause",
+    "_TABLE_HINTS_RE": "SQL Server's locking hints",
+    "_HINT_ARGUMENTS_RE": "a hint's arguments",
+    "_HINT_WORD_RE": "a hint's name",
+    "_SPAN_OPENER_RE": "the comment/literal scanner",
+}
+
+
+def test_query_shape_defines_only_its_documented_facts():
+    tree = ast.parse((_REPO / "src/agents/referee/query_shape.py").read_text(encoding="utf-8"))
+    compiled = {
+        node.targets[0].id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "re.compile"
+    }
+    assert compiled == set(QUERY_SHAPE_OWN_DETECTORS), (
+        "query_shape.py defines a detector that is not one of its documented facts: read it "
+        f"from src.tools.sql.regex_facts. {sorted(compiled ^ set(QUERY_SHAPE_OWN_DETECTORS))}"
+    )
+    imported = {
+        alias.name
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "src.tools.sql.regex_facts"
+        for alias in node.names
+    }
+    assert {"GROUP_BY_RE", "ORDER_BY_RE", "PATTERN_PREDICATE_RE", "SELECT_WORD_RE"} <= imported
 
 
 @pytest.mark.parametrize(
@@ -365,6 +420,7 @@ PROBES: list[tuple[str, str]] = [
     ("SELECT * FROM t JOIN LATERAL (SELECT 1) x ON true", "postgresql"),
     ("INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING", "postgresql"),
     ("INSERT INTO t VALUES (1) ON DUPLICATE KEY UPDATE a = 1", "mysql"),
+    ("UPDATE a JOIN b ON b.id = a.id SET a.x = ?", "mysql"),
     ("SELECT GROUP_CONCAT(a) FROM t", "mysql"),
     ("CALL refresh_stats()", "mysql"),
     ("SELECT * FROM t WHERE created_at > ? ORDER BY created_at", "mysql"),
@@ -426,26 +482,14 @@ def test_every_fact_is_true_somewhere(corpus):
 # Fact pairs that agree on most queries but are two facts, with why. A pair whose
 # one fact reads the other (``self.<fact>``) is related by construction, not listed.
 RELATED_FACTS: dict[frozenset[str], str] = {
-    frozenset({"group_by", "aggregation"}): "aggregation is group_by or an aggregate function",
     frozenset({"aggregate_function_count", "needs_aggregation"}): (
         "the aggregation capability adds windows and FOUND_ROWS, and drops a dedup GROUP BY"
     ),
     frozenset({"window_function", "ranking_window_function"}): (
         "ROW_NUMBER, RANK and DENSE_RANK are one kind of window function"
     ),
-    frozenset({"top_n_shape", "order_by_substring"}): "a top-N read is ORDER BY plus a row limit",
     frozenset({"in_list", "comma_count"}): "an IN list holds commas; the count is DocumentDB's",
     frozenset({"where_word", "keyed_after_where"}): "a keyed read is a WHERE with an equality",
-    # Row limits and timestamps: one definition each in #893's second PR.
-    frozenset({"pagination_keyword", "limit_word"}): "row limits (#893 second PR)",
-    frozenset({"pagination_keyword", "top_n_shape"}): "row limits (#893 second PR)",
-    frozenset({"limit_word", "top_n_shape"}): "row limits (#893 second PR)",
-    frozenset({"timestamp_column_word", "timestamp_keyword"}): "timestamps (#893 second PR)",
-    frozenset({"timestamp_column_word", "timestamp_or_date_keyword"}): "timestamps (#893 PR 2)",
-    frozenset({"timestamp_column_word", "event_timestamp_word"}): "timestamps (#893 second PR)",
-    frozenset({"timestamp_keyword", "timestamp_or_date_keyword"}): "timestamps (#893 second PR)",
-    frozenset({"timestamp_keyword", "event_timestamp_word"}): "timestamps (#893 second PR)",
-    frozenset({"timestamp_or_date_keyword", "event_timestamp_word"}): "timestamps (#893 PR 2)",
 }
 
 # Two facts whose true sets overlap at least this much (Jaccard) are one idea

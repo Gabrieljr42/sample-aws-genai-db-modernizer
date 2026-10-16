@@ -59,7 +59,7 @@ def detect_mysql_specific_features(query_text: str, source_engine: str = "") -> 
     facts = query_facts(query_text, source_engine)
     matched: list[str] = []
 
-    if facts.json_function_keyword:
+    if facts.json_access:
         matched.append("aurora-mysql-01")
 
     if facts.fulltext_search:
@@ -108,7 +108,6 @@ def analyze_aurora_mysql_use_cases(collector_output: dict) -> WorkloadAnalysis:
         qt = (q.get("query_type") or "").upper()
         text = q.get("query_text") or ""
         tables = q.get("tables_accessed") or []
-        has_joins = bool(q.get("has_joins", False))
 
         matched_ids = detect_mysql_specific_features(text, source_engine)
         for pid in matched_ids:
@@ -116,8 +115,9 @@ def analyze_aurora_mysql_use_cases(collector_output: dict) -> WorkloadAnalysis:
                 mysql_accum[pid]["query_ids"].append(qid)
                 mysql_accum[pid]["table_ids"].extend(tables)
 
-        # aurora-mysql-06: multi-table UPDATE with JOIN (MySQL-specific syntax)
-        if qt == "UPDATE" and has_joins:
+        # aurora-mysql-06: multi-table UPDATE with JOIN (MySQL-specific syntax,
+        # ``UPDATE a JOIN b ... SET``; not ``UPDATE ... FROM``, #893 review)
+        if qt == "UPDATE" and query_facts(text, source_engine).update_target_join:
             mysql_accum["aurora-mysql-06"]["query_ids"].append(qid)
             mysql_accum["aurora-mysql-06"]["table_ids"].extend(tables)
 

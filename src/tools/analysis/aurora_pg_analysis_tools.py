@@ -65,7 +65,7 @@ def detect_pg_specific_features(query_text: str, source_engine: str = "") -> lis
     if facts.window_function:
         matched.append("aurora-pg-02")
 
-    if facts.jsonb_operation:
+    if facts.json_access:
         matched.append("aurora-pg-03")
 
     if facts.array_operation:

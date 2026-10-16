@@ -61,6 +61,7 @@ from sqlglot import exp
 
 from src.tools.sql.normalize import normalize_digest_text, quoted_mask
 from src.tools.sql.regex_facts import (
+    TIMESTAMP_COLUMN_NAME_RE,
     regex_aggregate_function_count,
     regex_fulltext_search,
     regex_group_by,
@@ -68,12 +69,18 @@ from src.tools.sql.regex_facts import (
     regex_has_joins,
     regex_has_subquery,
     regex_join_count,
+    regex_json_access,
     regex_like_parameter,
     regex_offset_window_function,
+    regex_order_by,
     regex_pattern_match,
     regex_ranking_window_function,
     regex_recursive_cte,
+    regex_row_limit,
     regex_similarity_match,
+    regex_timestamp_column,
+    regex_top_n,
+    regex_update_target_join,
     regex_wildcard_leading,
     regex_window_function,
     regex_windowed_aggregate,
@@ -270,6 +277,24 @@ class SqlFacts:
         recursive_cte: ``WITH RECURSIVE``, or a CTE whose own body has a
             ``UNION`` and reads the CTE's own name (SQL Server and Oracle
             have no ``RECURSIVE`` keyword).
+        order_by: An ``ORDER BY`` that sorts a query's rows (not one inside
+            a window's ``OVER (...)``).
+        row_limit: A row limit: ``LIMIT``, ``TOP``, ``FETCH FIRST``/``NEXT``.
+        top_n: A query (a ``SELECT`` or a set operation) with both an
+            ``ORDER BY`` and a row limit: a top-N read. ``TOP`` with no
+            ``ORDER BY`` returns arbitrary rows and is not one.
+        timestamp_column: A column (read, written, or in an ``INSERT``'s
+            column list) whose name is a timestamp's
+            (``regex_facts.TIMESTAMP_COLUMN_NAMES``: ``created_at``,
+            ``updated_at``, ``timestamp``, ``event_time``, ``*_date``, ...).
+        json_access: The query reads or builds JSON: a JSON function or
+            operator (``JSON_EXTRACT``, ``->``, ``->>``, ``#>``,
+            ``jsonb_*``, ``JSON_VALUE``, ``OPENJSON``, ``FOR JSON``, ``IS
+            JSON``), a cast to ``json``/``jsonb``, or a JSON containment
+            (``@>`` against a string literal); not PostgreSQL's ``?`` key test.
+        update_target_join: MySQL's multi-table ``UPDATE``, whose target itself joins
+            (``UPDATE a JOIN b ON ... SET ...``). PostgreSQL's and SQL Server's
+            ``UPDATE ... FROM ... JOIN`` is not one.
     """
 
     join_count: int
@@ -291,6 +316,12 @@ class SqlFacts:
     offset_window_function: bool = False
     windowed_aggregate: bool = False
     recursive_cte: bool = False
+    order_by: bool = False
+    row_limit: bool = False
+    top_n: bool = False
+    timestamp_column: bool = False
+    json_access: bool = False
+    update_target_join: bool = False
 
 
 @dataclass(frozen=True)
@@ -339,6 +370,9 @@ class _Parsed:
     truncated: bool
     statements: tuple[exp.Expr, ...] = ()
     fallback_reason: FallbackReason | None = None
+    # A T-SQL ``DELETE``/``UPDATE``/``INSERT TOP (n)`` the bridge dropped before
+    # parsing: a row limit the tree no longer shows (``SqlFacts.row_limit``).
+    dml_top_dropped: bool = False
 
 
 def _parse(sql: str, source_engine: str) -> _Parsed:
@@ -355,12 +389,14 @@ def _parse(sql: str, source_engine: str) -> _Parsed:
     if not normalized.text.strip():
         return fallback("empty")
     text = normalized.text
+    dml_top_dropped = False
     if dialect == "oracle":
         text = _sub_outside_quotes(_ORACLE_POSITIONAL_BIND_RE, r":b\1", text, source_engine)
     elif dialect == "postgres":
         text = _sub_outside_quotes(_PG_PLACEHOLDER_RE, r"\1 ", text, source_engine)
     elif dialect == "tsql":
-        text = _sub_outside_quotes(_TSQL_DML_TOP_RE, r"\1", text, source_engine)
+        bridged = _sub_outside_quotes(_TSQL_DML_TOP_RE, r"\1", text, source_engine)
+        dml_top_dropped, text = bridged != text, bridged
     try:
         statements = [s for s in sqlglot.parse(text, read=dialect or None) if s]
     except Exception:  # noqa: BLE001 -- any parser failure falls back, by contract
@@ -371,7 +407,13 @@ def _parse(sql: str, source_engine: str) -> _Parsed:
         return fallback("command")
     if not all(isinstance(s, _STATEMENT_TYPES) for s in statements):
         return fallback("not_a_statement")
-    return _Parsed(sql, dialect, truncated=normalized.truncated, statements=tuple(statements))
+    return _Parsed(
+        sql,
+        dialect,
+        truncated=normalized.truncated,
+        statements=tuple(statements),
+        dml_top_dropped=dml_top_dropped,
+    )
 
 
 def _tables(parsed: _Parsed) -> TableReferences:
@@ -385,7 +427,7 @@ def _tables(parsed: _Parsed) -> TableReferences:
 def _facts(parsed: _Parsed) -> SqlFacts:
     if parsed.fallback_reason is not None:
         return _regex_facts(parsed.sql, parsed.fallback_reason, parsed.dialect)
-    return _facts_from_statements(parsed.statements, parsed.dialect)
+    return _facts_from_statements(parsed.statements, parsed.dialect, parsed.dml_top_dropped)
 
 
 def regex_answer(sql: str, source_engine: str, reason: FallbackReason) -> TableReferences:
@@ -438,9 +480,12 @@ def _from_statements(statements: list[exp.Expr], dialect: str, truncated: bool) 
     cte_names: list[str] = []
     for statement in statements:
         cte_names.extend(c.alias_or_name.lower() for c in statement.find_all(exp.CTE))
+        aliases = _table_aliases(statement)
         for table in statement.find_all(exp.Table):
             ref = _ref_from_node(table)
             if ref is None or _is_temp_table(table) or _is_cte_reference(table, ref):
+                continue
+            if _is_alias_reference(table, ref, aliases):
                 continue
             found.append((_position(table), ref))
     found.sort(key=lambda item: item[0])
@@ -475,6 +520,19 @@ def _ref_from_node(table: exp.Table) -> TableRef | None:
     if not ref.qualifiers and ref.name.lower() in _PSEUDO_TABLES:
         return None
     return ref
+
+
+def _table_aliases(statement: exp.Expr) -> frozenset[str]:
+    """The aliases (lower-case) the statement gives its tables."""
+    return frozenset(t.alias.lower() for t in statement.find_all(exp.Table) if t.alias)
+
+
+def _is_alias_reference(table: exp.Table, ref: TableRef, aliases: frozenset[str]) -> bool:
+    """An unqualified, unaliased table node that names another table's alias: the
+    target of T-SQL's ``UPDATE t SET ... FROM [Ticket] t`` or ``DELETE t FROM [Ticket]
+    t`` (#893 review), which names the table by its alias. A table that really has
+    the name keeps it, since no table in the statement is aliased to it then."""
+    return not ref.qualifiers and not table.alias and ref.name.lower() in aliases
 
 
 def _is_temp_table(table: exp.Table) -> bool:
@@ -574,10 +632,18 @@ def _regex_facts(sql: str, reason: FallbackReason, dialect: str) -> SqlFacts:
         offset_window_function=regex_offset_window_function(sql),
         windowed_aggregate=regex_windowed_aggregate(sql),
         recursive_cte=regex_recursive_cte(sql),
+        order_by=regex_order_by(sql),
+        row_limit=regex_row_limit(sql),
+        top_n=regex_top_n(sql),
+        timestamp_column=regex_timestamp_column(sql),
+        json_access=regex_json_access(sql),
+        update_target_join=regex_update_target_join(sql),
     )
 
 
-def _facts_from_statements(statements: tuple[exp.Expr, ...], dialect: str) -> SqlFacts:
+def _facts_from_statements(
+    statements: tuple[exp.Expr, ...], dialect: str, dml_top_dropped: bool = False
+) -> SqlFacts:
     """The facts of parsed statements (see :class:`SqlFacts`)."""
     nodes = [node for statement in statements for node in statement.walk()]
     join_count = sum(
@@ -607,7 +673,69 @@ def _facts_from_statements(statements: tuple[exp.Expr, ...], dialect: str) -> Sq
         offset_window_function=any(isinstance(w, _OFFSET_FUNCTIONS) for w in windows),
         windowed_aggregate=_has_windowed_aggregate(nodes),
         recursive_cte=any(_is_recursive_with(node) for node in nodes),
+        order_by=any(
+            isinstance(n, exp.Order) and not isinstance(n.parent, exp.Window) for n in nodes
+        ),
+        row_limit=dml_top_dropped or any(isinstance(node, _ROW_LIMIT_NODES) for node in nodes),
+        top_n=any(
+            isinstance(node, exp.Query) and node.args.get("order") and node.args.get("limit")
+            for node in nodes
+        ),
+        timestamp_column=any(
+            TIMESTAMP_COLUMN_NAME_RE.fullmatch(name) for name in _column_names(nodes)
+        ),
+        json_access=any(_is_json_access(node) for node in nodes),
+        update_target_join=any(
+            isinstance(node, exp.Update)
+            and isinstance(node.this, exp.Table)
+            and bool(node.this.args.get("joins"))
+            for node in nodes
+        ),
     )
+
+
+_ROW_LIMIT_NODES: tuple[type[exp.Expr], ...] = (exp.Limit, exp.Fetch)
+# sqlglot's JSON functions and operators (``JSONExtract`` for ``->``, ``JSONValue``,
+# ...), whatever the dialect names them; the ``JSONPath*`` nodes only appear inside
+# one of them. PostgreSQL's ``?``/``?|``/``?&`` key-existence operators are left
+# out: sqlglot reads ``?`` as one in every dialect but MySQL, where a digest's ``?``
+# is a bind parameter, and none of the detectors this fact replaced read them.
+_JSON_KEY_EXISTS_NODES = frozenset(
+    {"JSONBContainsTopKey", "JSONBContainsAnyTopKeys", "JSONBContainsAllTopKeys"}
+)
+_JSON_NODES: tuple[type[exp.Expr], ...] = tuple(
+    node
+    for name, node in vars(exp).items()
+    if name.startswith("JSON")
+    and name not in _JSON_KEY_EXISTS_NODES
+    and isinstance(node, type)
+    and issubclass(node, exp.Expr)
+) + (exp.OpenJSON,)
+
+
+def _column_names(nodes: list[exp.Expr]) -> Iterable[str]:
+    """Every column name: column references, and an ``INSERT``'s column list."""
+    for node in nodes:
+        if isinstance(node, exp.Column) and node.name:
+            yield node.name
+        elif isinstance(node, exp.Insert) and isinstance(node.this, exp.Schema):
+            yield from (c.name for c in node.this.expressions if isinstance(c, exp.Identifier))
+
+
+def _is_json_access(node: exp.Expr) -> bool:
+    if isinstance(node, _JSON_NODES):
+        return True
+    if isinstance(node, exp.ForClause):
+        return str(node.args.get("kind") or "").upper() == "JSON"
+    if isinstance(node, exp.Cast | exp.TryCast):
+        return bool(node.to.is_type(exp.DataType.Type.JSON, exp.DataType.Type.JSONB))
+    if isinstance(node, exp.ArrayContainsAll):  # PostgreSQL ``@>`` on a JSON document
+        return any(
+            isinstance(side, exp.Literal) and bool(side.is_string) for side in node.args.values()
+        )
+    if isinstance(node, exp.Anonymous):
+        return bool(node.name.lower().startswith("json"))
+    return False
 
 
 def _has_windowed_aggregate(nodes: Iterable[exp.Expr]) -> bool:
@@ -804,6 +932,13 @@ class AccessFacts:
     fallback_reason: FallbackReason | None
 
 
+def query_readings(sql: str, source_engine: str) -> tuple[SqlFacts, AccessFacts]:
+    """:func:`sql_facts` and :func:`access_facts` from one parse (the query facts'
+    reader, ``src.tools.sql.query_facts``). Never raises."""
+    parsed = _parse(sql, source_engine)
+    return _facts(parsed), _access(parsed)
+
+
 def access_facts(sql: str, source_engine: str) -> AccessFacts:
     """The access-pattern facts of ``sql``, read with the source engine's dialect.
 
@@ -811,7 +946,10 @@ def access_facts(sql: str, source_engine: str) -> AccessFacts:
     ``parsed_by="regex"``, the reason and no scopes. A ``SHOW`` (which sqlglot
     reads as a generic command) is kind ``other``.
     """
-    parsed = _parse(sql, source_engine)
+    return _access(_parse(sql, source_engine))
+
+
+def _access(parsed: _Parsed) -> AccessFacts:
     reason = parsed.fallback_reason
     if reason is not None:
         return AccessFacts(
@@ -1060,7 +1198,14 @@ def _scope_sources(
     nodes: list[exp.Expr] = []
     joins: list[exp.Join] = []
     if isinstance(root, (exp.Update, exp.Delete)) and root.this is not None:
-        nodes.append(root.this)
+        target = root.this
+        target_ref = _ref_from_node(target) if isinstance(target, exp.Table) else None
+        if not (
+            isinstance(target, exp.Table)
+            and target_ref is not None
+            and _is_alias_reference(target, target_ref, _table_aliases(root))
+        ):
+            nodes.append(target)
     from_ = root.args.get("from_")
     if isinstance(from_, exp.From):
         nodes.append(from_.this)

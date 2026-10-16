@@ -43,7 +43,17 @@ count:
   by ``OVER``;
 - ``recursive_cte``: ``WITH RECURSIVE``, or a CTE whose body has a ``UNION`` and
   names the CTE again, read on :func:`scan_sql`'s output (the Aurora engine
-  choice's detector, #381).
+  choice's detector, #381);
+- ``order_by``: ``ORDER BY``, not one inside ``OVER (...)``;
+- ``row_limit``: ``LIMIT``, ``FETCH FIRST``/``NEXT``, or ``TOP`` followed by a
+  number, ``(`` or a variable;
+- ``top_n``: ``ORDER BY ... LIMIT``/``FETCH FIRST|NEXT``, or ``TOP (n) ... ORDER
+  BY`` (the top-N regex triage and the cache overlay read before, #296/#663);
+- ``timestamp_column``: a :data:`TIMESTAMP_COLUMN_NAMES` name as a word;
+- ``json_access``: a ``json_*``/``jsonb_*`` call, ``->``/``->>``, ``#>``,
+  ``::json``/``::jsonb``, ``@> '``, ``OPENJSON(``, ``FOR JSON``, ``IS JSON``;
+- ``update_target_join``: ``UPDATE``, then ``JOIN`` before the first ``SET`` with no
+  ``FROM`` between them.
 """
 
 from __future__ import annotations
@@ -55,7 +65,14 @@ _AGGREGATION_WORD_RE = re.compile(
     r"\b(count|sum|avg|min|max|group_concat|string_agg|array_agg|group\s+by)\b", re.IGNORECASE
 )
 _LEADING_WILDCARD_RE = re.compile(r"LIKE\s+['\"]%", re.IGNORECASE)
-_GROUP_BY_RE = re.compile(r"\bgroup\s+by\b", re.IGNORECASE)
+# ``GROUP BY``, ``ORDER BY``, a pattern-match predicate, a literal-prefix ``LIKE`` and
+# the ``SELECT`` word: the regex readings ``query_shape``'s shape check runs on
+# comment- and literal-stripped text, defined here once (#893 review).
+GROUP_BY_RE = re.compile(r"\bgroup\s+by\b", re.IGNORECASE)
+ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
+PATTERN_PREDICATE_RE = re.compile(r"\b(?:I?LIKE|SIMILAR\s+TO|REGEXP|RLIKE)\b", re.IGNORECASE)
+LITERAL_PREFIX_LIKE_RE = re.compile(r"\bI?LIKE\s+'[^%_']", re.IGNORECASE)
+SELECT_WORD_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
 _AGGREGATE_WORD_RE = re.compile(
     r"\b(?:count|sum|avg|min|max|group_concat|string_agg|array_agg)\b", re.IGNORECASE
 )
@@ -84,6 +101,29 @@ _PATTERN_MATCH_RE = re.compile(
 )
 _SIMILARITY_MATCH_RE = re.compile(r"\b(?:strict_word_|word_)?similarity\s*\(", re.IGNORECASE)
 _WINDOW_FUNCTION_RE = re.compile(r"\)\s*OVER\s*\(", re.IGNORECASE)
+_ROW_LIMIT_RE = re.compile(
+    r"\blimit\b|\bfetch\s+(?:first|next)\b|\btop\s*(?:\(|\d|@)", re.IGNORECASE
+)
+# A top-N read: ``ORDER BY ... LIMIT n``, or its T-SQL and ANSI spellings (#663),
+# ``SELECT TOP (n) ... ORDER BY`` and ``ORDER BY ... [OFFSET ...] FETCH {FIRST|NEXT}``.
+# TOP takes a number, a ``(expression)`` or a variable, so a column named ``top``
+# is not one; TOP with no ORDER BY returns arbitrary rows and is not a top-N.
+_TOP_N_RE = re.compile(
+    r"order\s+by\b.*\b(?:limit|fetch\s+(?:first|next))\b|\btop\s*(?:\(|\d|@).*\border\s+by\b",
+    re.IGNORECASE | re.DOTALL,
+)
+# The names of a timestamp column: every name the DynamoDB, OpenSearch,
+# ElastiCache and triage detectors read before #893, as whole names.
+TIMESTAMP_COLUMN_NAMES = (
+    r"created_at|updated_at|timestamp|date|time|expires?_at|ttl|last_\w+_at|event_time|"
+    r"log_time|ingested_at|open_date|close_date|created_date|modified_date|event_date"
+)
+TIMESTAMP_COLUMN_NAME_RE = re.compile(rf"(?:{TIMESTAMP_COLUMN_NAMES})", re.IGNORECASE)
+_TIMESTAMP_COLUMN_RE = re.compile(rf"\b(?:{TIMESTAMP_COLUMN_NAMES})\b", re.IGNORECASE)
+_JSON_ACCESS_RE = re.compile(
+    r"\bjsonb?_\w+\s*\(|->>?|#>|::jsonb?\b|@>\s*'|\bopenjson\s*\(|\bfor\s+json\b|\bis\s+json\b",
+    re.IGNORECASE,
+)
 _RANKING_WINDOW_FUNCTION_RE = re.compile(
     r"\b(?:ROW_NUMBER|RANK|DENSE_RANK)\s*\(\s*\)\s*OVER\b", re.IGNORECASE
 )
@@ -124,7 +164,7 @@ def regex_wildcard_leading(query_text: str) -> bool:
 
 def regex_group_by(query_text: str) -> bool:
     """``GROUP BY``, case-insensitive."""
-    return bool(_GROUP_BY_RE.search(query_text or ""))
+    return bool(GROUP_BY_RE.search(query_text or ""))
 
 
 def regex_aggregate_function_count(query_text: str) -> int:
@@ -344,3 +384,68 @@ def _has_recursive_cte(text: str) -> bool:
         ):
             return True
     return False
+
+
+_OVER_RE = re.compile(r"\bover\s*\(", re.IGNORECASE)
+
+
+def _without_windows(text: str) -> str:
+    """``text`` with each ``OVER (...)`` window blanked (balanced parentheses)."""
+    out, i = [], 0
+    for match in _OVER_RE.finditer(text):
+        if match.start() < i:
+            continue
+        out.append(text[i : match.start()])
+        depth, j = 1, match.end()
+        while j < len(text) and depth:
+            depth += {"(": 1, ")": -1}.get(text[j], 0)
+            j += 1
+        out.append(" ")
+        i = j
+    out.append(text[i:])
+    return "".join(out)
+
+
+def regex_order_by(query_text: str) -> bool:
+    """``ORDER BY``, not one inside a window's ``OVER (...)``."""
+    return bool(ORDER_BY_RE.search(_without_windows(query_text or "")))
+
+
+def regex_row_limit(query_text: str) -> bool:
+    """``LIMIT``, ``FETCH FIRST``/``NEXT``, or ``TOP`` with a count."""
+    return bool(_ROW_LIMIT_RE.search(query_text or ""))
+
+
+def regex_top_n(query_text: str) -> bool:
+    """``ORDER BY ... LIMIT``/``FETCH``, or ``TOP (n) ... ORDER BY``, not counting an
+    ``ORDER BY`` inside a window's ``OVER (...)``."""
+    return bool(_TOP_N_RE.search(_without_windows(query_text or "")))
+
+
+def regex_timestamp_column(query_text: str) -> bool:
+    """A timestamp column name as a word."""
+    return bool(_TIMESTAMP_COLUMN_RE.search(query_text or ""))
+
+
+def regex_json_access(query_text: str) -> bool:
+    """A JSON function, operator, cast or containment."""
+    return bool(_JSON_ACCESS_RE.search(query_text or ""))
+
+
+_UPDATE_RE = re.compile(r"\bupdate\b", re.IGNORECASE)
+_SET_RE = re.compile(r"\bset\b", re.IGNORECASE)
+_JOIN_RE = re.compile(r"\bjoin\b", re.IGNORECASE)
+_FROM_RE = re.compile(r"\bfrom\b", re.IGNORECASE)
+
+
+def regex_update_target_join(query_text: str) -> bool:
+    """``UPDATE ... JOIN ... SET``: a ``JOIN`` before the first ``SET``, no ``FROM``."""
+    text = query_text or ""
+    update = _UPDATE_RE.search(text)
+    if update is None:
+        return False
+    set_ = _SET_RE.search(text, update.end())
+    if set_ is None:
+        return False
+    head = text[update.end() : set_.start()]
+    return bool(_JOIN_RE.search(head)) and not _FROM_RE.search(head)

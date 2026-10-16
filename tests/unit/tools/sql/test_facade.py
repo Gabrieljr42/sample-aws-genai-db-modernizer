@@ -156,6 +156,29 @@ class TestPerDialect:
         assert _names("UPDATE orders SET status = $1 WHERE id = $2", "postgresql") == ["orders"]
         assert _names("DELETE FROM `wp_options` WHERE `option_name` = ?", "mysql") == ["wp_options"]
 
+    @pytest.mark.parametrize(
+        "sql,engine,expected",
+        [
+            # T-SQL names the target by its alias in the FROM list (#893 review).
+            (
+                "UPDATE t SET t.[Status] = N'CLOSED' FROM [Ticket] t "
+                "JOIN [TicketMessage] m ON m.[TicketID] = t.[TicketID] WHERE m.[MessageID] = @m",
+                "sqlserver",
+                ["Ticket", "TicketMessage"],
+            ),
+            ("DELETE t FROM [Ticket] t JOIN [X] x ON x.id = t.id", "sqlserver", ["Ticket", "X"]),
+            # A real table of that name is still a table.
+            ("UPDATE t SET a = 1 FROM t JOIN u ON u.id = t.id", "sqlserver", ["t", "u"]),
+            (
+                "UPDATE posts p SET a = 1 FROM topics t WHERE t.id = p.topic_id",
+                "postgresql",
+                ["posts", "topics"],
+            ),
+        ],
+    )
+    def test_a_target_named_by_its_alias_is_its_table(self, sql, engine, expected):
+        assert _names(sql, engine) == expected
+
 
 class TestCteNames:
     """Mirrors the #682 regex cases in tests/unit/tools/database/test_cte_names.py."""
