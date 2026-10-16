@@ -125,12 +125,14 @@ def routed_fits(
     query_patterns: Iterable[Mapping],
     analysis_outputs: Mapping[str, Mapping],
     source_tables: Iterable[str] | None = None,
+    source_engine: str = "",
 ) -> dict[str, RoutedFit]:
     """``{engine: RoutedFit}`` for every engine in ``analysis_outputs``; {} without assignment.
 
     ``source_tables`` (the collector's table ids) decides which names in
     ``tables_accessed`` are real tables; without it only the placeholders are
-    dropped.
+    dropped. ``source_engine`` (the collector's) is the dialect the scorer's
+    exclusion gate reads each query's facts in, as at assignment (#893).
     """
     if not assignment:
         return {}
@@ -148,7 +150,12 @@ def routed_fits(
     # every real pipeline ``triage.json`` has one, so this is only exercised
     # by a legacy or hand-built fixture.
     scoring_ctx = ScoringContext.from_pipeline(
-        outputs, triage, {"queries": {"query_patterns": list(query_map.values())}}
+        outputs,
+        triage,
+        {
+            "metadata": {"source_database": {"engine": source_engine}},
+            "queries": {"query_patterns": list(query_map.values())},
+        },
     )
 
     def real_tables(qid: str) -> set[str]:

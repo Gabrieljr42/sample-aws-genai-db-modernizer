@@ -52,6 +52,7 @@ from src.shared.catalog.patterns import (
 from src.shared.engine_capabilities import PATTERN_ONLY_ENGINES
 from src.shared.engine_names import display_engine
 from src.tools.analysis.scoring import DEFAULT_WEIGHTS, compute_confidence
+from src.tools.sql.query_facts import source_engine_of
 
 ANTI_PATTERN_PENALTIES: dict[str, int] = anti_pattern_penalties()
 CAPABILITY_SIGNAL_ENGINES: dict[str, frozenset[str]] = capability_signal_engines()
@@ -369,6 +370,11 @@ class ScoringContext:
     # The per-query pattern dimension (#728, shadow only): ``None`` everywhere in
     # production, so the score is today's. Only the shadow builder sets one.
     pattern_model: QueryPatternModel | None = None
+    # The collector's source engine (``metadata.source_database.engine``): the
+    # dialect the exclusion gate reads each query's facts in (#893), the same
+    # one triage's capability detection reads them in. :meth:`from_pipeline`
+    # fills it from ``collector``; empty reads them in the generic dialect.
+    source_engine: str = ""
 
     def with_flag_gaps(self, gaps: Mapping[str, Iterable[str]]) -> ScoringContext:
         """A copy whose ``flag_gaps`` also carries ``gaps`` (merged per query)."""
@@ -441,6 +447,7 @@ class ScoringContext:
             anti_pattern_map=anti_pattern_map,
             anti_pattern_notes=anti_pattern_notes,
             query_capabilities=query_capabilities,
+            source_engine=source_engine_of(collector),
         )
 
 
@@ -514,7 +521,7 @@ def score_query_for_engine(query: Mapping, engine: str, ctx: ScoringContext) -> 
     """
     query_id = str(query.get("query_id") or "")
     query_text = query.get("query_text", "")
-    exclusion = check_exclusions(query_id, query_text, engine)
+    exclusion = check_exclusions(query_id, query_text, engine, ctx.source_engine)
     if exclusion:
         return EngineScore(
             score=None,

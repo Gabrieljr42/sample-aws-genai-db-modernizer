@@ -18,14 +18,29 @@ def test_sql_facts_match_the_committed_snapshot():
     )
 
 
-def test_every_regex_difference_on_the_samples_is_a_known_correction():
-    """Only the 21 discourse queries whose facts the regex misread (#796) differ."""
+_FACTS_796 = frozenset({"join_count", "has_joins", "has_aggregation", "has_subquery"})
+
+
+def _differs(facts: frozenset[str] | None = None) -> dict[tuple[str, str], tuple[str, ...]]:
     snapshot = json.loads(BASELINE.read_text(encoding="utf-8"))
-    differs = {
-        (sample, qid): tuple(row["regex_differs"])
+    return {
+        (sample, qid): tuple(f for f in row["regex_differs"] if facts is None or f in facts)
         for sample, queries in snapshot.items()
         for qid, row in queries.items()
-        if row["regex_differs"]
+        if any(facts is None or f in facts for f in row["regex_differs"])
     }
+
+
+def test_every_regex_difference_on_the_samples_is_a_known_correction():
+    """Only the 21 discourse queries whose facts the regex misread (#796) differ."""
+    differs = _differs(_FACTS_796)
     assert {sample for sample, _ in differs} == {"discourse"}
     assert len(differs) == 21
+
+
+def test_the_facts_893_added_differ_from_their_fallback_only_where_it_misreads():
+    """The regex aggregate count counts the words (a ``count`` column, ``COUNT``
+    in a comment). No other fact #893 added differs from its fallback on the samples."""
+    added = _differs(None)
+    names = {f for facts in added.values() for f in facts} - _FACTS_796
+    assert names == {"aggregate_function_count"}

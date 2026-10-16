@@ -9,21 +9,26 @@ way whichever engine is being scored against it, and a fact is defined once
 instead of once per engine module (#485 traced a routing bug to two copies of
 the leading-wildcard check that had drifted apart).
 
-Two kinds of fact, from two readers:
+Each fact has one definition, and every reader uses it (#893; the guard is
+``tests/unit/tools/sql/test_one_definition_per_fact.py``). Two kinds:
 
-- Parse-derived facts -- table references, join count, aggregation,
-  subquery, leading-wildcard ``LIKE`` -- come from the sqlglot facade
-  (:func:`src.tools.sql.facade.read_sql`), which needs the source engine's
-  dialect. The collectors store them on each query pattern (``has_joins``,
-  ``join_count``, ``has_aggregations``, ``has_subqueries``, #796).
-- Text facts (:class:`QueryFacts`, this module) need no dialect: each is the
-  regex scan its detector ran before #491, moved here unchanged, so every
-  routing decision that reads one is byte-identical. A detector called with
-  the query text alone -- the exclusion gate inside
-  ``query_scoring.score_query_for_engine`` -- can read them. The
-  leading-wildcard fact here is the facade's own regex fallback
-  (:func:`src.tools.sql.regex_facts.regex_wildcard_leading`); it moves to the
-  facade's parsed reading once that gate receives the source engine.
+- Parsed facts -- join count, ``GROUP BY``, aggregate functions, the text
+  searches (leading-wildcard and parameterised ``LIKE``, full-text,
+  regular-expression and similarity matches), the window functions, a
+  recursive CTE -- are the sqlglot facade's (:class:`src.tools.sql.facade.SqlFacts`),
+  read in the source engine's dialect, so a comment, a string literal or a
+  column name (``count``, ``rank``) is never read as SQL. When sqlglot can't
+  read a statement, each is its regex fallback
+  (:mod:`src.tools.sql.regex_facts`). The collectors store some of them on each
+  query pattern (``has_joins``, ``join_count``, ``has_aggregations``,
+  ``has_subqueries``, #796), the same facts read once.
+- Text facts are a regex scan on the text: the ones no parse gives yet (a
+  timestamp column, a session key, a write statement, ...), each moved here
+  from its detector by #491.
+
+A reader passes the collector's source engine
+(``metadata.source_database.engine``, :func:`source_engine_of`); a reader with
+none gets sqlglot's generic dialect.
 
 :func:`query_facts` returns one object per text, and each fact on it is
 computed the first time a reader asks for it, then kept: a query read by
@@ -34,33 +39,49 @@ it doesn't read (#895 review).
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from functools import cached_property, lru_cache
 
 from src.shared.sql_comments import strip_leading_comments
 from src.shared.unsupported_pattern import is_dedup_only_group_by
-from src.tools.sql.regex_facts import regex_has_subquery, regex_join_count, regex_wildcard_leading
+from src.tools.sql.facade import SqlFacts, sql_facts
+from src.tools.sql.regex_facts import scan_sql
 
-__all__ = ["QueryFacts", "query_facts", "scan_sql"]
-
-# ---------------------------------------------------------------------------
-# Text search (the "inverted_index" capability's detectors)
-# ---------------------------------------------------------------------------
-
-_FULLTEXT_MATCH_RE = re.compile(r"MATCH\s*\(.+?\)\s*AGAINST\s*\(", re.IGNORECASE)
-_TEXT_SEARCH_OPERATOR_RE = re.compile(r"to_tsvector|to_tsquery|@@", re.IGNORECASE)
+__all__ = ["QueryFacts", "query_facts", "scan_sql", "source_engine_of"]
 
 # ---------------------------------------------------------------------------
-# Scan shapes (the "scan_engine" capability's detectors)
+# Parsed facts (#893). Each is the sqlglot facade's reading (``SqlFacts``),
+# which falls back to its regex fact only when the statement can't be parsed.
+# A parse is skipped when the text can't hold the fact at all: each fact's
+# hint below is a necessary condition of both readings (a GROUP BY needs the
+# word ``group``, a window function the word ``over``, ...), so it never
+# changes an answer, it only saves the parse
+# (``tests/unit/tools/sql/test_query_facts.py::TestParsedFactHints``).
 # ---------------------------------------------------------------------------
 
-_RANKING_WINDOW_FUNCTION_RE = re.compile(
-    r"\b(ROW_NUMBER|RANK|DENSE_RANK|NTILE|LAG|LEAD)\s*\(\s*\)\s*OVER\s*\(", re.IGNORECASE
+# A function-call shape: a name (or a closing quote or bracket of a quoted
+# one) followed by ``(``, where the name is not a keyword that takes a
+# parenthesised list (``IN (``, ``EXISTS (``, ``VALUES (``, ...). An aggregate
+# function is always called this way.
+_FUNCTION_CALL_HINT_RE = re.compile(
+    r"(?:[`\"\]]|\b(?!(?:in|exists|values|as|on|using|from|join|where|and|or|not|select|"
+    r"with|over|by|into|union)\b)[a-z_][\w$]*)\s*\(",
+    re.IGNORECASE,
 )
-# ``WITH RECURSIVE`` (the capability gate and the Aurora PostgreSQL
-# recursive-CTE pattern read this one fact). The leading ``\b`` came from the
-# PostgreSQL pattern; the gate's copy had none, which only differs when WITH is
-# glued to a preceding word character, as in no SQL statement.
-_RECURSIVE_CTE_RE = re.compile(r"\bWITH\s+RECURSIVE\b", re.IGNORECASE)
+# The regex fallback's aggregate words (``src.tools.sql.regex_facts``).
+_AGGREGATE_WORD_HINTS = (
+    "count",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "group_concat",
+    "string_agg",
+    "array_agg",
+)
+_JOIN_HINTS = ("join", ",", "apply")
+_FULLTEXT_HINTS = ("match", "@@", "tsvector", "tsquery", "ts_rank", "contains", "freetext")
+_PATTERN_MATCH_HINTS = ("regexp", "rlike", "~", "similar")
 
 # ---------------------------------------------------------------------------
 # Aggregation (#338, #336)
@@ -71,10 +92,9 @@ _RECURSIVE_CTE_RE = re.compile(r"\bWITH\s+RECURSIVE\b", re.IGNORECASE)
 # join (a bare SELECT COUNT(*) FROM t) used to get no capability requirement
 # the same way the join/aggregation gap did (#338) -- an aggregate function
 # call alone is enough, so this fires independently of GROUP BY or join count.
-# FOUND_ROWS()/SQL_CALC_FOUND_ROWS (MySQL's row-count-of-last-query modifier),
-# GROUP_CONCAT/STRING_AGG/ARRAY_AGG (string and array aggregation) and any
-# window function (anything immediately followed by ``OVER (...)``) all count
-# too: DynamoDB has no equivalent for any of them.
+# FOUND_ROWS()/SQL_CALC_FOUND_ROWS (MySQL's row-count-of-last-query modifier)
+# and any window function count too: DynamoDB has no equivalent for any of
+# them.
 #
 # GROUP BY alone, with no aggregate function, is usually a deduplication
 # technique (#336) rather than an aggregation. Rather than re-deriving that
@@ -85,16 +105,7 @@ _RECURSIVE_CTE_RE = re.compile(r"\bWITH\s+RECURSIVE\b", re.IGNORECASE)
 # says it is not just a dedup.
 # ---------------------------------------------------------------------------
 
-_AGGREGATE_FUNCTION_CALL_RE = re.compile(
-    r"`?\b(sum|count|avg|min|max|found_rows|group_concat|string_agg|array_agg)\b`?\s*\(",
-    re.IGNORECASE,
-)
-_SQL_CALC_FOUND_ROWS_RE = re.compile(r"\bsql_calc_found_rows\b", re.IGNORECASE)
-# Any function call immediately followed by OVER (...) is a window function
-# (ROW_NUMBER() OVER (...), SUM(x) OVER (...), ...) -- an aggregate computed
-# per-row over a window.
-_WINDOW_FUNCTION_RE = re.compile(r"\)\s*OVER\s*\(", re.IGNORECASE)
-_GROUP_BY_RE = re.compile(r"\bGROUP\s+BY\b", re.IGNORECASE)
+_FOUND_ROWS_RE = re.compile(r"\bsql_calc_found_rows\b|`?\bfound_rows\b`?\s*\(", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # Computed-expression join (review of #375, finding B2)
@@ -156,16 +167,6 @@ _WRITE_WITH_SUBQUERY_RE = re.compile(
 # ``credit_limit``), which is why they are kept apart from the parsed facts.
 # ---------------------------------------------------------------------------
 
-AGGREGATION_KEYWORDS: tuple[str, ...] = (
-    "group by",
-    "having",
-    "sum(",
-    "count(",
-    "avg(",
-    "min(",
-    "max(",
-)
-
 # EXISTS (subquery), NOT EXISTS (subquery), IN (SELECT ...)
 _EXISTS_OR_IN_SUBQUERY_RE = re.compile(
     r"""
@@ -190,19 +191,6 @@ IN_LIST_KEYWORDS: tuple[str, ...] = (
     " in(",
 )
 
-# Text search indicators (for the volume-based high-volume-text-search check).
-# The ``like N'%`` entry is compared with lower-cased text, so it never
-# matches; it is kept as found (#491 moves detectors, it does not change them).
-TEXT_SEARCH_KEYWORDS: tuple[str, ...] = (
-    "like '%",
-    "like N'%",
-    "ilike '%",
-    "to_tsvector",
-    "plainto_tsquery",
-    "match(",
-    "match (",
-)
-
 # ---------------------------------------------------------------------------
 # MySQL syntax (the Aurora MySQL analysis's detectors, moved here from
 # ``aurora_mysql_pattern_catalog``): case-insensitive substring checks.
@@ -217,13 +205,6 @@ JSON_FUNCTION_KEYWORDS: tuple[str, ...] = (
     "json_object(",
     "->>",
     "->",
-)
-
-MATCH_AGAINST_KEYWORDS: tuple[str, ...] = (
-    "match(",
-    "match (",
-    "against(",
-    "against (",
 )
 
 DUPLICATE_KEY_KEYWORDS: tuple[str, ...] = ("on duplicate key", "replace into")
@@ -241,18 +222,6 @@ STORED_ROUTINE_KEYWORDS: tuple[str, ...] = (
 # PostgreSQL syntax (the Aurora PostgreSQL analysis's detectors, moved here
 # from ``aurora_pg_pattern_catalog``).
 # ---------------------------------------------------------------------------
-
-# Window functions: named window functions OR ) OVER ( OR OVER (PARTITION|ORDER BY
-_WINDOW_FUNCTION_KEYWORD_RE = re.compile(
-    r"""
-    \b(?:ROW_NUMBER|RANK|DENSE_RANK|LAG|LEAD|NTILE|FIRST_VALUE|LAST_VALUE|CUME_DIST|PERCENT_RANK)\s*\(
-    |
-    \)\s*OVER\s*\(
-    |
-    \bOVER\s*\(\s*(?:PARTITION\s+BY|ORDER\s+BY)
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
 
 # JSONB operations:
 #   - ->> operator
@@ -294,20 +263,6 @@ _ARRAY_OPERATION_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-# Full-text search: tsvector/tsquery functions and @@ operator in tsquery context
-_TSVECTOR_SEARCH_RE = re.compile(
-    r"""
-    \b(?:to_tsvector|to_tsquery|plainto_tsquery|phraseto_tsquery|websearch_to_tsquery)\s*\(
-    |
-    \btsvector\b
-    |
-    \bts_rank\s*\(
-    |
-    @@
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
-
 # LATERAL joins: requires JOIN LATERAL or comma LATERAL or LATERAL( with word boundary
 _LATERAL_JOIN_RE = re.compile(
     r"""
@@ -345,12 +300,6 @@ _TIMESTAMP_COLUMN_RE = re.compile(
 )
 # A word that looks like session or auth data.
 _SESSION_WORD_RE = re.compile(r"\b(session|token|sess_id|session_id|login|auth)\b", re.I)
-# GROUP BY, HAVING or COUNT/SUM/AVG followed by "(" -- the trailing \b needs a
-# word character right after the "(", so ``count(*)`` does not match it but
-# ``count(id)`` does (kept as found, #491).
-_AGGREGATION_CALL_WORD_RE = re.compile(
-    r"\b(group\s+by|having|count\s*\(|sum\s*\(|avg\s*\()\b", re.I
-)
 # BETWEEN, or < / <= / > / >= with a word character before them (``a>=1``,
 # not ``a >= 1``), read on the lower-cased text.
 _RANGE_OPERATOR_WORD_RE = re.compile(r"\b(between|>=?|<=?)\b")
@@ -361,25 +310,6 @@ _RANGE_OPERATOR_WORD_RE = re.compile(r"\b(between|>=?|<=?)\b")
 # ``documentdb_analysis_tools``).
 # ---------------------------------------------------------------------------
 
-# GROUP BY, HAVING or COUNT/SUM/AVG/MIN/MAX followed by "(" and a word
-# character (the DynamoDB copy, ``_AGGREGATION_CALL_WORD_RE``, has no MIN/MAX).
-_AGGREGATE_CALL_WORD_RE = re.compile(
-    r"\b(group\s+by|having|count\s*\(|sum\s*\(|avg\s*\(|min\s*\(|max\s*\()\b", re.I
-)
-_WINDOW_FUNCTION_WORD_RE = re.compile(
-    r"\b(row_number|rank|dense_rank|ntile|lag|lead|over\s*\()\b", re.I
-)
-# The window functions DocumentDB 8.0.2+ serves through $setWindowFields
-# (ROW_NUMBER/RANK/DENSE_RANK as $documentNumber/$rank/$denseRank, and
-# aggregates such as SUM(...) OVER for running totals), and the ones it has no
-# operator for on any version (LAG/LEAD need $shift; NTILE has none), per the
-# supported-APIs page.
-_SET_WINDOW_FIELDS_RE = re.compile(
-    r"\b(row_number|rank|dense_rank)\s*\("
-    r"|\b(sum|avg|min|max|count)\s*\((?:[^()]|\([^()]*\))*\)\s*over\b",
-    re.I,
-)
-_OFFSET_OR_BUCKET_WINDOW_CALL_RE = re.compile(r"\b(lag|lead|ntile)\s*\(", re.I)
 _NEGATION_WORD_RE = re.compile(r"\b(not\s+in|not\s+exists|<>|!=)\b", re.I)
 _CORRELATED_SUBQUERY_SHAPE_RE = re.compile(
     r"\(\s*select\b.*?\bwhere\b.*?\b\w+\.\w+\s*=\s*\w+\.\w+", re.I | re.S
@@ -391,32 +321,6 @@ _JSON_EXTRACT_WORD_RE = re.compile(r"\b(json_extract|json_unquote|json_value|->>
 # Search and time-series keywords (the OpenSearch analysis's detectors, moved
 # here from ``opensearch_pattern_catalog``): case-insensitive substring checks.
 # ---------------------------------------------------------------------------
-
-FULLTEXT_KEYWORDS: tuple[str, ...] = (
-    "tsvector",
-    "tsquery",
-    "to_tsvector",
-    "plainto_tsquery",
-    "@@",
-    "match against",
-)
-
-WILDCARD_KEYWORDS: tuple[str, ...] = (
-    "like ",
-    "ilike ",
-)
-
-REGEX_KEYWORDS: tuple[str, ...] = (
-    "regexp",
-    "rlike",
-    "~ ",
-    "~* ",
-)
-
-FUZZY_KEYWORDS: tuple[str, ...] = (
-    "pg_trgm",
-    "similarity(",
-)
 
 TIMESTAMP_KEYWORDS: tuple[str, ...] = (
     "timestamp",
@@ -469,7 +373,6 @@ GEOSPATIAL_KEYWORDS: tuple[str, ...] = (
 
 _MIN_MAX_CALL_RE = re.compile(r"\b(max|min)\s*\(")
 _STATUS_EQUALS_VALUE_RE = re.compile(r"\bstatus\s*=\s*[\?'\"]")
-_EXISTS_CALL_RE = re.compile(r"\b(exists|not\s+exists)\s*\(")
 _IS_NULL_RE = re.compile(r"\bis\s+null\b")
 _COUNT_STAR_OR_ONE_RE = re.compile(r"\bcount\s*\(\s*[\*1]\s*\)")
 _EVENT_TIMESTAMP_WORD_RE = re.compile(
@@ -477,12 +380,6 @@ _EVENT_TIMESTAMP_WORD_RE = re.compile(
     r"created_date|modified_date|log_time|event_date)\b",
     re.IGNORECASE,
 )
-_LIKE_PATTERN_VALUE_RE = re.compile(r"\b(like|ilike)\s+['\"\?%]")
-_FULLTEXT_WORD_RE = re.compile(
-    r"\b(tsvector|tsquery|to_tsvector|plainto_tsquery|match\s+against)\b"
-)
-_REGEXP_WORD_RE = re.compile(r"\b(regexp|rlike)\b")
-_SIMILARITY_OR_TRIGRAM_RE = re.compile(r"\b(similarity\s*\(|pg_trgm)\b")
 
 
 # ---------------------------------------------------------------------------
@@ -635,12 +532,12 @@ _FUZZY_MATCH_RE = re.compile(
 )
 
 
-def _has_search_depth(query_text: str) -> bool:
+def _has_search_depth(query_text: str, group_by: bool) -> bool:
     """Real search depth in one query (#326 finding 4): a search predicate
-    plus relevance ranking, fuzzy matching, or a facet (GROUP BY alongside
-    the same predicate) -- never a bare GROUP BY, a plain LIKE/prefix filter,
-    a plain join, or to_tsvector()/pg_trgm document/extension setup with no
-    match operator.
+    plus relevance ranking, fuzzy matching, or a facet (``group_by``, the
+    query's ``GROUP BY`` fact, alongside the same predicate) -- never a bare
+    GROUP BY, a plain LIKE/prefix filter, a plain join, or to_tsvector()/pg_trgm
+    document/extension setup with no match operator.
     """
     text = _STRING_LITERAL_RE.sub("?", query_text)
     # Each regex below needs a literal word or symbol; a substring test on the lower-cased
@@ -652,7 +549,7 @@ def _has_search_depth(query_text: str) -> bool:
         return True
     if ("similarity" in lower or "%" in lower) and _FUZZY_MATCH_RE.search(text):
         return True
-    return bool(_GROUP_BY_RE.search(text) and _SEARCH_PREDICATE_RE.search(text))
+    return group_by and bool(_SEARCH_PREDICATE_RE.search(text))
 
 
 # ---------------------------------------------------------------------------
@@ -689,168 +586,6 @@ _JSON_FUNCTION_RE = re.compile(
     r"\bis\s+json\b|\bjson_exists\s*\(",
     re.IGNORECASE,
 )
-# Matches a CTE's own name definition, whether it is the first one after ``WITH`` or a
-# later one introduced by a comma (``WITH a AS (...), b AS (...)``) -- #381 review: the
-# pre-review version only matched the first, so a recursive CTE named anywhere but first
-# in the list went undetected. ``[#\w]+`` (#381 review round 2) rather than
-# ``[a-zA-Z_]\w*``: by the time this runs, ``scan_sql`` has already turned a bracketed
-# or double-quoted CTE name (``[Tree]``, ``"Tree"``) into its bare identifier, so the
-# name itself is always a plain word here regardless of how the query originally quoted
-# it.
-_CTE_NAME_RE = re.compile(r"(?:\bwith\b|,)\s*([#\w]+)\s*(?:\([^)]*\))?\s+as\s*\(", re.IGNORECASE)
-
-
-# The characters :func:`scan_sql` acts on: ``--``, ``/*``, a quote (with an optional
-# ``N`` prefix), ``[`` and ``"``. Everything between two of them passes through.
-_SCAN_SPECIAL_RE = re.compile(r"--|/\*|[Nn]?'|\[|\"")
-
-
-def scan_sql(text: str) -> str:
-    """One left-to-right pass over ``text`` neutralizing comments, strings and
-    quoted identifiers, so every feature regex below runs against SQL as the engine
-    would actually parse it, never raw source text (#381 review round 2).
-
-    Two independent regex passes (strip strings, then strip comments) can each
-    mis-handle what the other produces: a comment containing an apostrophe
-    (``-- don't touch``) made the string-literal pass, if it ran first, swallow
-    everything up to the *next* quote -- which could be an entire real statement
-    later in the query. Scanning once, left to right, in the order these characters
-    are actually encountered removes that ordering bug entirely.
-
-    Each construct below is replaced the way the engine would resolve it, not simply
-    deleted (so a real token on either side is never glued to its neighbour):
-
-    - ``--`` to end of line: a space (the newline itself is kept, so later-line
-      offsets are not shifted and a line comment never merges two lines).
-    - ``/* ... */``: a space, with nesting support (SQL Server supports nested
-      block comments) -- the whole span up to the matching outer ``*/`` is one
-      comment, so text between an inner ``*/`` and the outer one is never
-      mistaken for live code.
-    - ``'...'`` string literals, with ``''``-doubled escapes and an optional
-      ``N``/``n`` (Unicode) prefix: a space. Content is never a real keyword
-      match, only text a customer or generator happened to write.
-    - ``[ident]`` (T-SQL brackets, ``]]``-escaped) and ``"ident"`` (ANSI/Oracle/
-      PostgreSQL double quotes, ``""``-escaped): the bare identifier, with the
-      quoting removed. These name a column, table or CTE -- not a string -- so a
-      feature regex must still be able to see and match the name inside
-      (``MERGE [dbo].[Target]``, ``WITH "Tree" AS (...)``).
-
-    Every other character passes through unchanged.
-    """
-    out: list[str] = []
-    i, n = 0, len(text)
-    while i < n:
-        # Copy the plain run up to the next character that starts a construct.
-        hit = _SCAN_SPECIAL_RE.search(text, i)
-        if hit is None:
-            out.append(text[i:])
-            break
-        if hit.start() > i:
-            out.append(text[i : hit.start()])
-            i = hit.start()
-        c = text[i]
-        if c == "-" and i + 1 < n and text[i + 1] == "-":
-            j = text.find("\n", i)
-            out.append(" ")
-            i = n if j == -1 else j
-            continue
-        if c == "/" and i + 1 < n and text[i + 1] == "*":
-            depth = 1
-            i += 2
-            while i < n and depth > 0:
-                if text[i : i + 2] == "/*":
-                    depth += 1
-                    i += 2
-                elif text[i : i + 2] == "*/":
-                    depth -= 1
-                    i += 2
-                else:
-                    i += 1
-            out.append(" ")
-            continue
-        if c == "'" or (c in "Nn" and i + 1 < n and text[i + 1] == "'"):
-            if c in "Nn":
-                i += 1
-            i += 1  # opening quote
-            while i < n:
-                if text[i] == "'" and i + 1 < n and text[i + 1] == "'":
-                    i += 2
-                    continue
-                if text[i] == "'":
-                    i += 1
-                    break
-                i += 1
-            out.append(" ")
-            continue
-        if c == "[":
-            j = i + 1
-            body: list[str] = []
-            while j < n:
-                if text[j] == "]" and j + 1 < n and text[j + 1] == "]":
-                    body.append("]")
-                    j += 2
-                    continue
-                if text[j] == "]":
-                    j += 1
-                    break
-                body.append(text[j])
-                j += 1
-            out.append("".join(body))
-            i = j
-            continue
-        if c == '"':
-            j = i + 1
-            body = []
-            while j < n:
-                if text[j] == '"' and j + 1 < n and text[j + 1] == '"':
-                    body.append('"')
-                    j += 2
-                    continue
-                if text[j] == '"':
-                    j += 1
-                    break
-                body.append(text[j])
-                j += 1
-            out.append("".join(body))
-            i = j
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
-
-
-def _has_recursive_cte(text: str) -> bool:
-    """A CTE whose own body both ``UNION``s and refers back to its own name.
-
-    SQL Server and Oracle have no ``WITH RECURSIVE`` keyword (unlike PostgreSQL and
-    MySQL 8): any ``name AS (...)`` CTE can be recursive if its body unions the anchor
-    member with one that references ``name`` again -- checked for every CTE in the
-    ``WITH`` list, not only the first (#381 review). Requiring both a self-reference and
-    a ``UNION`` inside the CTE's own (paren-balanced) body avoids counting a CTE that is
-    merely referenced again later in the main query -- normal, non-recursive CTE use.
-    """
-    lower = text.lower()
-    if "recursive" in lower and re.search(r"\bwith\s+recursive\b", text, re.IGNORECASE):
-        return True
-    if "union" not in lower:  # a self-referencing CTE body must UNION its anchor member
-        return False
-    for m in _CTE_NAME_RE.finditer(text):
-        name = m.group(1)
-        depth = 1
-        i = m.end()
-        start = i
-        while i < len(text) and depth > 0:
-            if text[i] == "(":
-                depth += 1
-            elif text[i] == ")":
-                depth -= 1
-            i += 1
-        body = text[start:i]
-        if re.search(r"\bunion\b", body, re.IGNORECASE) and re.search(
-            rf"\b{re.escape(name)}\b", body, re.IGNORECASE
-        ):
-            return True
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -861,10 +596,6 @@ def _has_recursive_cte(text: str) -> bool:
 
 _WHERE_RE = re.compile(r"\bwhere\b", re.IGNORECASE)
 _KEYED_RE = re.compile(r"(?<![<>!])=|\bin\s*\(", re.IGNORECASE)
-_AGGREGATE_RE = re.compile(r"\bgroup\s+by\b|\b(sum|count|avg)\s*\(", re.IGNORECASE)
-_TEXT_SEARCH_RE = re.compile(
-    r"\b(i?like|regexp|rlike)\b|\bmatch\s*\(|to_tsvector|to_tsquery|@@", re.IGNORECASE
-)
 
 # Leading ``--`` or ``#`` line comments and ``/* ... */`` block comments, as
 # many as the statement opens with, are stripped first (review of #303: a
@@ -925,62 +656,135 @@ class QueryFacts:
     subquery shape) never runs in the steps that don't read it (#895 review).
     """
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, source_engine: str = "") -> None:
         self._text = text
+        self._source_engine = source_engine
 
     @cached_property
     def _lower(self) -> str:
         return self._text.lower()
 
-    @cached_property
-    def leading_wildcard_like(self) -> bool:
-        """``LIKE`` followed by a quote and ``%`` (``ILIKE`` and ``NOT LIKE`` included)."""
-        return regex_wildcard_leading(self._text)
+    # -- Parsed facts (the facade's ``SqlFacts``, #893) ------------------------
 
     @cached_property
-    def fulltext_match(self) -> bool:
-        """MySQL ``MATCH (...) AGAINST (``."""
-        return bool(_FULLTEXT_MATCH_RE.search(self._text))
+    def _parsed(self) -> SqlFacts:
+        """The facade's reading of the text, in the source engine's dialect."""
+        return sql_facts(self._text, self._source_engine)
 
-    @cached_property
-    def text_search_operator(self) -> bool:
-        """PostgreSQL ``to_tsvector``, ``to_tsquery`` or ``@@``."""
-        return bool(_TEXT_SEARCH_OPERATOR_RE.search(self._text))
-
-    @cached_property
-    def ranking_window_function(self) -> bool:
-        """``ROW_NUMBER``/``RANK``/``DENSE_RANK``/ ``NTILE``/``LAG``/``LEAD`` with an empty
-        argument list and ``OVER (``.
-        """
-        return bool(_RANKING_WINDOW_FUNCTION_RE.search(self._text))
-
-    @cached_property
-    def recursive_cte(self) -> bool:
-        """``WITH RECURSIVE``."""
-        return bool(_RECURSIVE_CTE_RE.search(self._text))
-
-    @cached_property
-    def aggregate_function_call(self) -> bool:
-        """A call to ``SUM``/``COUNT``/``AVG``/``MIN``/
-        ``MAX``/``FOUND_ROWS``/``GROUP_CONCAT``/``STRING_AGG``/``ARRAY_AGG``
-        (backtick-quoted names included).
-        """
-        return bool(_AGGREGATE_FUNCTION_CALL_RE.search(self._text))
-
-    @cached_property
-    def sql_calc_found_rows(self) -> bool:
-        """MySQL's ``SQL_CALC_FOUND_ROWS`` modifier."""
-        return bool(_SQL_CALC_FOUND_ROWS_RE.search(self._text))
-
-    @cached_property
-    def window_function(self) -> bool:
-        """``)`` followed by ``OVER (`` -- any window function."""
-        return bool(_WINDOW_FUNCTION_RE.search(self._text))
+    def _has(self, *hints: str) -> bool:
+        return any(hint in self._lower for hint in hints)
 
     @cached_property
     def group_by(self) -> bool:
-        """A ``GROUP BY`` anywhere in the text."""
-        return bool(_GROUP_BY_RE.search(self._text))
+        """A ``GROUP BY`` clause (``SqlFacts.group_by``)."""
+        return self._has("group") and self._parsed.group_by
+
+    @cached_property
+    def aggregate_function_count(self) -> int:
+        """How many aggregate function calls (``SqlFacts.aggregate_function_count``)."""
+        if not self._may_aggregate:
+            return 0
+        return self._parsed.aggregate_function_count
+
+    @cached_property
+    def _may_aggregate(self) -> bool:
+        return self._has(*_AGGREGATE_WORD_HINTS) or bool(_FUNCTION_CALL_HINT_RE.search(self._text))
+
+    @cached_property
+    def aggregation(self) -> bool:
+        """A ``GROUP BY`` or an aggregate function, windowed or not: exactly the facade's
+        ``has_aggregation``, the collector's ``has_aggregations``. A ranking or offset
+        window function alone is not one.
+        """
+        return self.group_by or self.aggregate_function_count > 0
+
+    @cached_property
+    def join_count(self) -> int:
+        """Joins to another row source (``SqlFacts.join_count``, the collector's
+        ``join_count``): ``FROM a, b`` is one join, a table function is none.
+        """
+        return self._parsed.join_count if self._has(*_JOIN_HINTS) else 0
+
+    @cached_property
+    def leading_wildcard_like(self) -> bool:
+        """A ``LIKE``/``ILIKE`` whose pattern starts with ``%`` (``SqlFacts.wildcard_leading``)."""
+        return self._has("like") and self._parsed.wildcard_leading
+
+    @cached_property
+    def like_parameter(self) -> bool:
+        """A ``LIKE``/``ILIKE`` whose whole pattern is a bind parameter
+        (``SqlFacts.like_parameter``): a MySQL digest's ``LIKE ?``.
+        """
+        return self._has("like") and self._parsed.like_parameter
+
+    @cached_property
+    def fulltext_search(self) -> bool:
+        """A full-text match: ``MATCH ... AGAINST``, ``@@`` or a ``tsvector``/``tsquery``
+        function, ``CONTAINS``/``FREETEXT`` (``SqlFacts.fulltext_search``).
+        """
+        return self._has(*_FULLTEXT_HINTS) and self._parsed.fulltext_search
+
+    @cached_property
+    def pattern_match(self) -> bool:
+        """A regular-expression or ``SIMILAR TO`` match (``SqlFacts.pattern_match``)."""
+        return self._has(*_PATTERN_MATCH_HINTS) and self._parsed.pattern_match
+
+    @cached_property
+    def similarity_match(self) -> bool:
+        """A trigram similarity function (``SqlFacts.similarity_match``)."""
+        return self._has("similarity") and self._parsed.similarity_match
+
+    @cached_property
+    def text_search(self) -> bool:
+        """A text search: a leading-wildcard or parameterised ``LIKE``, a full-text,
+        regular-expression or similarity match. A prefix ``LIKE 'abc%'`` is a range,
+        not a search (ADR-031 Decision 14 Amendment 5).
+        """
+        return (
+            self.leading_wildcard_like
+            or self.like_parameter
+            or self.fulltext_search
+            or self.pattern_match
+            or self.similarity_match
+        )
+
+    @cached_property
+    def window_function(self) -> bool:
+        """A function with an ``OVER`` clause (``SqlFacts.window_function``)."""
+        return self._has("over") and self._parsed.window_function
+
+    @cached_property
+    def ranking_window_function(self) -> bool:
+        """``ROW_NUMBER``/``RANK``/``DENSE_RANK`` over a window
+        (``SqlFacts.ranking_window_function``).
+        """
+        return self._has("over") and self._parsed.ranking_window_function
+
+    @cached_property
+    def offset_window_function(self) -> bool:
+        """``LAG``/``LEAD``/``NTILE`` over a window (``SqlFacts.offset_window_function``)."""
+        return self._has("over") and self._parsed.offset_window_function
+
+    @cached_property
+    def windowed_aggregate(self) -> bool:
+        """An aggregate over a window, ``SUM(...) OVER`` (``SqlFacts.windowed_aggregate``)."""
+        return self._has("over") and self._parsed.windowed_aggregate
+
+    @cached_property
+    def recursive_cte(self) -> bool:
+        """``WITH RECURSIVE``, or a CTE whose body has a ``UNION`` and reads itself
+        (``SqlFacts.recursive_cte``; SQL Server and Oracle have no ``RECURSIVE``).
+        """
+        return self._has("with") and self._parsed.recursive_cte
+
+    # -- Text facts ------------------------------------------------------------
+
+    @cached_property
+    def found_rows(self) -> bool:
+        """MySQL's ``SQL_CALC_FOUND_ROWS`` modifier or a ``FOUND_ROWS()`` call (the row
+        count of the previous query).
+        """
+        return bool(_FOUND_ROWS_RE.search(self._text))
 
     @cached_property
     def dedup_only_group_by(self) -> bool:
@@ -1003,20 +807,6 @@ class QueryFacts:
         return bool(_WRITE_WITH_SUBQUERY_RE.search(self._text))
 
     @cached_property
-    def join_keyword_count(self) -> int:
-        """How many times the word ``join`` appears (the regex join count,
-        :func:`src.tools.sql.regex_facts.regex_join_count`).
-        """
-        return regex_join_count(self._text)
-
-    @cached_property
-    def aggregation_keyword(self) -> bool:
-        """An :data:`AGGREGATION_KEYWORDS` substring (``group by``, ``having``, ``count(``,
-        ...).
-        """
-        return _contains_any(self._lower, AGGREGATION_KEYWORDS)
-
-    @cached_property
     def exists_or_in_subquery(self) -> bool:
         """``EXISTS (``, ``NOT EXISTS (`` or ``IN (SELECT``."""
         return bool(_EXISTS_OR_IN_SUBQUERY_RE.search(self._text))
@@ -1034,26 +824,9 @@ class QueryFacts:
         return _contains_any(self._lower, IN_LIST_KEYWORDS)
 
     @cached_property
-    def like_percent_literal(self) -> bool:
-        """The lower-cased text contains ``like '%`` (one space, a single quote; ``ilike
-        '%`` included).
-        """
-        return "like '%" in self._lower
-
-    @cached_property
-    def text_search_keyword(self) -> bool:
-        """A :data:`TEXT_SEARCH_KEYWORDS` substring."""
-        return _contains_any(self._lower, TEXT_SEARCH_KEYWORDS)
-
-    @cached_property
     def json_function_keyword(self) -> bool:
         """A :data:`JSON_FUNCTION_KEYWORDS` substring (``json_extract(``, ..., ``->``)."""
         return _contains_any(self._lower, JSON_FUNCTION_KEYWORDS)
-
-    @cached_property
-    def match_against_keyword(self) -> bool:
-        """``match(``, ``match (``, ``against(`` or ``against (``."""
-        return _contains_any(self._lower, MATCH_AGAINST_KEYWORDS)
 
     @cached_property
     def duplicate_key_upsert(self) -> bool:
@@ -1073,13 +846,6 @@ class QueryFacts:
         return _contains_any(self._lower, STORED_ROUTINE_KEYWORDS)
 
     @cached_property
-    def window_function_keyword(self) -> bool:
-        """A named window function call (``ROW_NUMBER(``, ``RANK(``, ...
-        ``PERCENT_RANK(``), ``) OVER (``, or ``OVER (PARTITION BY``/``OVER (ORDER BY``.
-        """
-        return bool(_WINDOW_FUNCTION_KEYWORD_RE.search(self._text))
-
-    @cached_property
     def jsonb_operation(self) -> bool:
         """``->>``, a ``jsonb_*(`` function, ``::jsonb`` or ``@> '``."""
         return bool(_JSONB_OPERATION_RE.search(self._text))
@@ -1088,11 +854,6 @@ class QueryFacts:
     def array_operation(self) -> bool:
         """``ANY(ARRAY``, ``array_agg(``, ``unnest(``, ``ARRAY[`` or ``@> ARRAY``."""
         return bool(_ARRAY_OPERATION_RE.search(self._text))
-
-    @cached_property
-    def tsvector_search(self) -> bool:
-        """A ``to_tsvector``/``*to_tsquery`` call, ``tsvector``, ``ts_rank(`` or ``@@``."""
-        return bool(_TSVECTOR_SEARCH_RE.search(self._text))
 
     @cached_property
     def lateral_join(self) -> bool:
@@ -1119,13 +880,6 @@ class QueryFacts:
         return bool(_SESSION_WORD_RE.search(self._text))
 
     @cached_property
-    def aggregation_call_word(self) -> bool:
-        """``GROUP BY``, ``HAVING``, or ``COUNT(``/``SUM(``/ ``AVG(`` followed by a word
-        character (``count(*)`` is not one).
-        """
-        return bool(_AGGREGATION_CALL_WORD_RE.search(self._text))
-
-    @cached_property
     def range_with_order_by(self) -> bool:
         """``BETWEEN`` or a word character followed by ``<``/``<=``/``>``/``>=``, and
         ``order by`` somewhere in the text.
@@ -1136,33 +890,6 @@ class QueryFacts:
     def limit_word(self) -> bool:
         """The lower-cased text contains ``limit``."""
         return "limit" in self._lower
-
-    @cached_property
-    def aggregate_call_word_count(self) -> int:
-        """How many ``GROUP BY``, ``HAVING`` or
-        ``COUNT(``/``SUM(``/``AVG(``/``MIN(``/``MAX(`` followed by a word character the
-        text has (``aggregation_call_word`` without ``MIN``/``MAX``, counted).
-        """
-        return len(_AGGREGATE_CALL_WORD_RE.findall(self._text))
-
-    @cached_property
-    def window_function_word(self) -> bool:
-        """``row_number``, ``rank``, ``dense_rank``, ``ntile``, ``lag``, ``lead`` as a
-        word, or ``over (`` followed by a word character.
-        """
-        return bool(_WINDOW_FUNCTION_WORD_RE.search(self._text))
-
-    @cached_property
-    def set_window_fields_shape(self) -> bool:
-        """A ``ROW_NUMBER(``/``RANK(``/``DENSE_RANK(`` call, or
-        ``SUM``/``AVG``/``MIN``/``MAX``/``COUNT(...) OVER``.
-        """
-        return bool(_SET_WINDOW_FIELDS_RE.search(self._text))
-
-    @cached_property
-    def offset_or_bucket_window_call(self) -> bool:
-        """A ``LAG(``, ``LEAD(`` or ``NTILE(`` call."""
-        return bool(_OFFSET_OR_BUCKET_WINDOW_CALL_RE.search(self._text))
 
     @cached_property
     def negation_word(self) -> bool:
@@ -1182,36 +909,9 @@ class QueryFacts:
         return bool(_JSON_EXTRACT_WORD_RE.search(self._text))
 
     @cached_property
-    def group_by_substring(self) -> bool:
-        """The lower-cased text contains ``group by`` (one space)."""
-        return "group by" in self._lower
-
-    @cached_property
     def comma_count(self) -> int:
         """How many commas the text has."""
         return self._lower.count(",")
-
-    @cached_property
-    def fulltext_keyword(self) -> bool:
-        """A :data:`FULLTEXT_KEYWORDS` substring (``tsvector``, ``tsquery``, ``@@``,
-        ``match against``, ...).
-        """
-        return _contains_any(self._lower, FULLTEXT_KEYWORDS)
-
-    @cached_property
-    def like_keyword(self) -> bool:
-        """``like `` or ``ilike `` (followed by a space)."""
-        return _contains_any(self._lower, WILDCARD_KEYWORDS)
-
-    @cached_property
-    def regex_keyword(self) -> bool:
-        """``regexp``, ``rlike``, ``~ `` or ``~* ``."""
-        return _contains_any(self._lower, REGEX_KEYWORDS)
-
-    @cached_property
-    def fuzzy_keyword(self) -> bool:
-        """``pg_trgm`` or ``similarity(``."""
-        return _contains_any(self._lower, FUZZY_KEYWORDS)
 
     @cached_property
     def timestamp_keyword(self) -> bool:
@@ -1263,19 +963,9 @@ class QueryFacts:
         return bool(_STATUS_EQUALS_VALUE_RE.search(self._lower))
 
     @cached_property
-    def exists_call(self) -> bool:
-        """``EXISTS (`` or ``NOT EXISTS (``."""
-        return bool(_EXISTS_CALL_RE.search(self._lower))
-
-    @cached_property
     def is_null(self) -> bool:
         """``IS NULL``."""
         return bool(_IS_NULL_RE.search(self._lower))
-
-    @cached_property
-    def join_with_spaces_count(self) -> int:
-        """How many times `` join `` (a space on each side) appears in the lower-cased text."""
-        return self._lower.count(" join ")
 
     @cached_property
     def count_star_or_one(self) -> bool:
@@ -1291,35 +981,6 @@ class QueryFacts:
         return bool(_EVENT_TIMESTAMP_WORD_RE.search(self._lower))
 
     @cached_property
-    def like_pattern_value(self) -> bool:
-        """``LIKE``/``ILIKE`` followed by a quote, ``?`` or ``%``."""
-        return bool(_LIKE_PATTERN_VALUE_RE.search(self._lower))
-
-    @cached_property
-    def fulltext_word(self) -> bool:
-        """``tsvector``, ``tsquery``, ``to_tsvector``, ``plainto_tsquery`` or
-        ``match against`` as a word.
-        """
-        return bool(_FULLTEXT_WORD_RE.search(self._lower))
-
-    @cached_property
-    def regexp_word(self) -> bool:
-        """``regexp`` or ``rlike`` as a word."""
-        return bool(_REGEXP_WORD_RE.search(self._lower))
-
-    @cached_property
-    def similarity_or_trigram(self) -> bool:
-        """``similarity(`` followed by a word character, or ``pg_trgm``."""
-        return bool(_SIMILARITY_OR_TRIGRAM_RE.search(self._lower))
-
-    @cached_property
-    def select_word_repeated(self) -> bool:
-        """More than one ``select`` substring (the regex subquery test,
-        :func:`src.tools.sql.regex_facts.regex_has_subquery`).
-        """
-        return regex_has_subquery(self._text)
-
-    @cached_property
     def _scanned(self) -> str:
         return scan_sql(self._text)
 
@@ -1332,7 +993,7 @@ class QueryFacts:
         """Real search depth (#326): relevance ranking or fuzzy matching, or a search
         predicate with a ``GROUP BY`` facet, read with string literals blanked.
         """
-        return _has_search_depth(self._text)
+        return _has_search_depth(self._text, self.group_by)
 
     @cached_property
     def merge_statement(self) -> bool:
@@ -1349,14 +1010,6 @@ class QueryFacts:
         return "json" in self._scanned_lower and bool(_JSON_FUNCTION_RE.search(self._scanned))
 
     @cached_property
-    def self_referencing_recursive_cte(self) -> bool:
-        """``WITH RECURSIVE``, or a CTE whose own body both ``UNION``s and names the CTE
-        again (SQL Server and Oracle have no ``RECURSIVE`` keyword), read on
-        :func:`scan_sql`'s output.
-        """
-        return _has_recursive_cte(self._scanned)
-
-    @cached_property
     def _where_split(self) -> list[str]:
         return _WHERE_RE.split(self._text, maxsplit=1)
 
@@ -1371,18 +1024,6 @@ class QueryFacts:
         ``WHERE``.
         """
         return len(self._where_split) == 2 and bool(_KEYED_RE.search(self._where_split[1]))
-
-    @cached_property
-    def aggregate_or_group_by_word(self) -> bool:
-        """``GROUP BY`` or a ``SUM(``/``COUNT(``/``AVG(`` call."""
-        return bool(_AGGREGATE_RE.search(self._text))
-
-    @cached_property
-    def pattern_match_or_text_search_word(self) -> bool:
-        """``LIKE``/``ILIKE``/``REGEXP``/``RLIKE`` as a word, ``MATCH(``, ``to_tsvector``,
-        ``to_tsquery`` or ``@@``.
-        """
-        return bool(_TEXT_SEARCH_RE.search(self._text))
 
     @cached_property
     def write_statement_text(self) -> bool:
@@ -1412,11 +1053,11 @@ class QueryFacts:
 
     @property
     def needs_aggregation(self) -> bool:
-        """An aggregate call, ``SQL_CALC_FOUND_ROWS`` or a window function, or a
-        ``GROUP BY`` that does more than de-duplicate (#338, #336)."""
-        if self.aggregate_function_call or self.sql_calc_found_rows or self.window_function:
+        """A window function, ``FOUND_ROWS``, or an aggregation that is more than a
+        de-duplicating ``GROUP BY`` (#338, #336)."""
+        if self.window_function or self.found_rows:
             return True
-        return self.group_by and not self.dedup_only_group_by
+        return self.aggregation and not self.dedup_only_group_by
 
 
 def _has_computed_join_key(text: str) -> bool:
@@ -1431,11 +1072,20 @@ def _has_computed_join_key(text: str) -> bool:
 # raised past that by ``MODERNIZER_MAX_UPLOAD_QUERIES`` only recomputes what
 # its readers ask for, since each fact is lazy.
 @lru_cache(maxsize=65536)
-def _query_facts(text: str) -> QueryFacts:
-    return QueryFacts(text)
+def _query_facts(text: str, source_engine: str) -> QueryFacts:
+    return QueryFacts(text, source_engine)
 
 
-def query_facts(query_text: str | None) -> QueryFacts:
-    """The text facts of ``query_text`` (``None`` reads as empty text), one
-    object per text: computed facts are kept for every later reader."""
-    return _query_facts(query_text or "")
+def query_facts(query_text: str | None, source_engine: str | None = None) -> QueryFacts:
+    """The facts of ``query_text`` (``None`` reads as empty text), one object per
+    text and source engine: computed facts are kept for every later reader. The
+    source engine (the collector's ``metadata.source_database.engine``) picks the
+    dialect the parsed facts are read in; none reads them in sqlglot's generic one.
+    """
+    return _query_facts(query_text or "", (source_engine or "").strip().lower())
+
+
+def source_engine_of(collector_output: Mapping | None) -> str:
+    """The collection's source engine (``metadata.source_database.engine``), lower-cased."""
+    source = ((collector_output or {}).get("metadata") or {}).get("source_database") or {}
+    return str(source.get("engine") or "").strip().lower()

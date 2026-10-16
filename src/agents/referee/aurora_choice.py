@@ -36,7 +36,7 @@ from src.agents.referee.tie_break import break_tie
 from src.agents.referee.triage import BASELINE, SOURCE_ENGINE_TO_AURORA
 from src.agents.referee.utility_statements import has_sequence_reference
 from src.shared.engine_names import display_engine
-from src.tools.sql.query_facts import query_facts, scan_sql
+from src.tools.sql.query_facts import query_facts, scan_sql, source_engine_of
 
 AURORA_ENGINES = frozenset({"aurora_postgresql", "aurora_mysql"})
 
@@ -144,7 +144,7 @@ def detect_heterogeneous_features(
     tables = (collector_output.get("database_schema") or {}).get("tables") or []
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
     query_texts = [str(q.get("query_text") or "") for q in queries]
-    facts = [query_facts(t) for t in query_texts]
+    facts = [query_facts(t, source_engine) for t in query_texts]
     schema_names = {t.get("schema_name") for t in tables if t.get("schema_name")}
     json_columns = any(
         (c.get("data_type") or "").lower() in ("json", "jsonb")
@@ -154,7 +154,7 @@ def detect_heterogeneous_features(
     return {
         # shared, #654
         "sequences": any(has_sequence_reference(scan_sql(t)) for t in query_texts),
-        "recursive_ctes": any(f.self_referencing_recursive_cte for f in facts),
+        "recursive_ctes": any(f.recursive_cte for f in facts),
         "merge_statements": any(f.merge_statement for f in facts),
         "json_usage": json_columns or any(f.json_function_call for f in facts),
         "multiple_schemas": len(schema_names) > 1,
@@ -163,9 +163,9 @@ def detect_heterogeneous_features(
 
 
 def source_database_engine(collector_output: Mapping) -> str:
-    """The collector's source database engine (e.g. ``"mysql"``), lower-cased."""
-    metadata = collector_output.get("metadata") or {}
-    return str((metadata.get("source_database") or {}).get("engine") or "").lower()
+    """The collector's source database engine (e.g. ``"mysql"``), lower-cased
+    (``query_facts.source_engine_of``, the dialect the query facts are read in)."""
+    return source_engine_of(collector_output)
 
 
 def source_database_version(collector_output: Mapping) -> str | None:

@@ -44,6 +44,7 @@ from src.agents.referee.query_shape import (
     _unquote_identifiers,
     single_table_access_shape,
 )
+from src.agents.referee.table_resolution import SourceScope
 from src.shared.unsupported_pattern import strip_comments_and_literals
 
 SINGLE_ITEM = "single item"
@@ -206,11 +207,14 @@ _KEY_ARRAY = TransactionShape(
 )
 
 
-def _keyed(query: Mapping, query_type: str, sql: str, reason: str) -> TransactionShape:
-    """The shape of a write whose rows ``sql``'s ``WHERE`` picks on one table."""
+def _keyed(
+    query: Mapping, query_type: str, sql: str, reason: str, scope: SourceScope | None
+) -> TransactionShape:
+    """The shape of a write whose rows ``sql``'s ``WHERE`` picks on one table, read in
+    ``scope``'s source-engine dialect (#893)."""
     tables = _tables_named_in(sql, list(query.get("tables_accessed") or []))
     probe = {**query, "query_type": query_type, "query_text": sql, "tables_accessed": tables}
-    if single_table_access_shape(probe) != CRUD:
+    if single_table_access_shape(probe, source=scope) != CRUD:
         return _UNKEYED
     if _KEY_ARRAY_RE.search(sql):
         return _KEY_ARRAY
@@ -218,7 +222,7 @@ def _keyed(query: Mapping, query_type: str, sql: str, reason: str) -> Transactio
     return _by_count(keys, f"{reason} {keys} key value(s) on one table")
 
 
-def _insert_shape(query: Mapping, sql: str) -> TransactionShape:
+def _insert_shape(query: Mapping, sql: str, scope: SourceScope | None) -> TransactionShape:
     values = _top_level(sql, _VALUES_RE)
     select = _top_level(sql, _SELECT_RE)
     if select is None or (values is not None and values.start() < select.start()):
@@ -230,7 +234,9 @@ def _insert_shape(query: Mapping, sql: str) -> TransactionShape:
         source = _top_level(body, _FROM_RE)
         if source is None:
             return _by_count(1, "inserts one row when its condition holds")
-        shape = _keyed(query, "DELETE", f"DELETE {body[source.start():]}", "copies the rows of")
+        shape = _keyed(
+            query, "DELETE", f"DELETE {body[source.start():]}", "copies the rows of", scope
+        )
         if shape is not _UNKEYED:
             return shape
     return TransactionShape(
@@ -249,8 +255,11 @@ def _merge_shape(sql: str) -> TransactionShape:
     return _UNKEYED
 
 
-def transaction_shape(query: Mapping) -> TransactionShape | None:
-    """The transaction shape of ``query``, or ``None`` when it is not a write."""
+def transaction_shape(query: Mapping, source: SourceScope | None = None) -> TransactionShape | None:
+    """The transaction shape of ``query``, or ``None`` when it is not a write.
+
+    ``source`` is the collected database; its engine is the dialect the query facts
+    behind the single-table check are read in (#893)."""
     query_type = str(query.get("query_type") or "").upper()
     if query_type not in _WRITE_TYPES:
         return None
@@ -261,7 +270,7 @@ def transaction_shape(query: Mapping) -> TransactionShape | None:
         strip_comments_and_literals(_unquote_identifiers(str(query.get("query_text") or "")))
     )
     if query_type in ("INSERT", "REPLACE"):
-        return _insert_shape(query, sql)
+        return _insert_shape(query, sql, source)
     if query_type == "MERGE":
         return _merge_shape(sql)
-    return _keyed(query, query_type, sql, "addresses its rows by")
+    return _keyed(query, query_type, sql, "addresses its rows by", source)

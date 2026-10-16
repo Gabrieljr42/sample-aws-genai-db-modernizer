@@ -14,12 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from src.agents.referee.move_ledger import (
-    MoveLedger,
-    apply_to_assignment,
-    best_other,
-    ledger_for,
-)
+from src.agents.referee.move_ledger import MoveLedger, apply_to_assignment, best_other, ledger_for
 from src.agents.referee.reality_check_records import _queries, engine_changes
 from src.agents.referee.reality_check_rules import (
     AURORA_ENGINES,
@@ -131,7 +126,7 @@ OPENSEARCH_NATIVE_OVERRIDE_MIN_CALLS_PER_SECOND = 10.0
 OPENSEARCH_MIN_CORPUS_ROWS_AVG = 1000.0
 
 
-def _query_has_search_depth(query_text: str | None) -> bool:
+def _query_has_search_depth(query_text: str | None, source_engine: str | None = None) -> bool:
     """Real search depth in one query (#326 finding 4): the engine-neutral
     ``search_depth`` query fact (``src.tools.sql.query_facts``, #491) -- a
     search predicate plus relevance ranking, fuzzy matching, or a facet
@@ -139,11 +134,14 @@ def _query_has_search_depth(query_text: str | None) -> bool:
     LIKE/prefix filter, a plain join, or to_tsvector()/pg_trgm
     document/extension setup with no match operator.
     """
-    return query_facts(query_text).search_depth
+    return query_facts(query_text, source_engine).search_depth
 
 
 def closed_to_pinned_search(
-    query_assignments: list[dict], query_map: dict[str, dict], kept_by_customer: Iterable[str]
+    query_assignments: list[dict],
+    query_map: dict[str, dict],
+    kept_by_customer: Iterable[str],
+    source_engine: str | None = None,
 ) -> dict[str, set[str]]:
     """The queries that may not join an OpenSearch a customer pin keeps (#860).
 
@@ -160,7 +158,9 @@ def closed_to_pinned_search(
             qa["query_id"]
             for qa in query_assignments
             if qa["assigned_engine"] != engine
-            and not _query_has_search_depth(query_map.get(qa["query_id"], {}).get("query_text"))
+            and not _query_has_search_depth(
+                query_map.get(qa["query_id"], {}).get("query_text"), source_engine
+            )
         }
     }
 
@@ -195,7 +195,7 @@ def opensearch_justification(
     the decision so the deliverables can state why.
     """
     texts = {qa["query_id"]: query_map.get(qa["query_id"], {}).get("query_text") for qa in qas}
-    deep_qids = {qid for qid, t in texts.items() if _query_has_search_depth(t)}
+    deep_qids = {qid for qid, t in texts.items() if _query_has_search_depth(t, source_engine)}
 
     shallow_reason = (
         "no search predicate with relevance ranking, fuzzy matching or a facet in this query"

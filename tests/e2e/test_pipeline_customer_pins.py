@@ -1,8 +1,13 @@
 """A customer pin keeps its engine, but never pulls a query onto it for the pin's sake (#860).
 
-The first reality check removes OpenSearch on discourse and trailgear and moves
-its queries off. The customer then pins one of them back on OpenSearch and the
-check runs again on that version. The pin keeps OpenSearch in the plan and
+The first reality check leaves OpenSearch out of the plan on discourse and
+trailgear; since #893 the first assignment can already put some of OpenSearch's
+search queries on another engine (trailgear's prefix ``LIKE`` is a range, not a
+wildcard search). The customer then pins one of OpenSearch's search queries --
+one the first assignment put there, or one OpenSearch's analysis reports a search
+pattern for -- on OpenSearch, and the check runs again on that version. Discourse
+covers a query the first check moved off OpenSearch being pinned back; on trailgear
+the pin can be a query the first assignment never put on OpenSearch. The pin keeps OpenSearch in the plan and
 pays its standing cost (ADR-031 Decision 7), so a query leaves it or joins it
 only by score -- but a query with no real search depth (the per-query #326
 check) never joins it: discourse's ``SELECT to_tsvector($1, $2)`` and
@@ -24,6 +29,8 @@ import pytest
 from tests.e2e.pipeline import REPO, PipelineResult, _env
 
 JOB = "pins"
+# OpenSearch's search patterns: full text, wildcard, regex and fuzzy search.
+_SEARCH_PATTERNS = frozenset({"os-01", "os-02", "os-03", "os-04"})
 
 
 def _script(*args: str) -> dict:
@@ -49,12 +56,20 @@ def _pin_search_back(run: PipelineResult, root: Path) -> dict:
 
     job = root / run.db / JOB
     shutil.copytree(run.job_dir(), job)
-    search = sorted(
+    analysis = json.loads((job / "analysis-opensearch" / "analysis.json").read_text())
+    search_patterns = {
+        str(q)
+        for p in analysis["workload_analysis"]["patterns_detected"]
+        if p["pattern_id"] in _SEARCH_PATTERNS
+        for q in p.get("query_ids") or []
+    }
+    first_on_search = {
         str(qa["query_id"])
         for qa in _assignment(job, 1)["query_assignments"]
         if qa["assigned_engine"] == "opensearch"
-    )
-    assert len(search) >= 2, "the first assignment puts at least two queries on OpenSearch"
+    }
+    search = sorted(search_patterns | first_on_search)
+    assert len(search) >= 2, "at least two search queries OpenSearch could serve"
     pin, others = search[-1], search[:-1]
     result = apply_assignment_overrides(
         LocalArtifactStore(base_dir=str(root)),

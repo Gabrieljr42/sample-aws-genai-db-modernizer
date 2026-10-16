@@ -62,6 +62,7 @@ from src.tools.analysis.aurora_common_pattern_catalog import (
     HIGH_VOLUME_TEXT_SEARCH_GUIDANCE,
     TIME_SERIES_INGEST_GUIDANCE,
 )
+from src.tools.sql.query_facts import source_engine_of
 
 if TYPE_CHECKING:
     from src.agents.referee.synthesis_data import SynthesisData
@@ -373,6 +374,7 @@ def build_ranking(data: SynthesisData) -> list[dict]:
         data.source_queries,
         {e: a.analysis or {} for e, a in data.engines.items()},
         source_tables=[str(t["table_id"]) for t in data.source_tables if t.get("table_id")],
+        source_engine=source_engine_of(data.collector),
     )
 
     for engine, artifacts in data.engines.items():

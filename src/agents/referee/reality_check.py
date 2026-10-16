@@ -344,7 +344,9 @@ def run_reality_check(
         settled_counts,
         tied_engines_by_qid,
         ledger=ledger,
-        closed_destinations=closed_to_pinned_search(query_assignments, query_map, kept_by_customer),
+        closed_destinations=closed_to_pinned_search(
+            query_assignments, query_map, kept_by_customer, resolved_source_engine
+        ),
     )
     lightweight_recommendations: list[dict] = []
 

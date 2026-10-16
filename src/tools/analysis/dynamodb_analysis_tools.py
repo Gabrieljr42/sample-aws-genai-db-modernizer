@@ -14,6 +14,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.transaction_shape import transaction_shape
 from src.contracts.analysis_output import (
     AntiPattern,
@@ -41,7 +42,7 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, source_engine_of
 
 # ---------------------------------------------------------------------------
 # LLM Advisor Pydantic models (structured LLM response parsing only)
@@ -237,8 +238,8 @@ def _is_single_row_pk_lookup(q: dict, pk_columns: set[str]) -> bool:
     return bool(pk_columns & {f.lower() for f in filters})
 
 
-def _has_range_condition(q: dict) -> bool:
-    return query_facts(q.get("query_text", "")).range_with_order_by
+def _has_range_condition(q: dict, source_engine: str = "") -> bool:
+    return query_facts(q.get("query_text", ""), source_engine).range_with_order_by
 
 
 def _is_write_query(q: dict) -> bool:
@@ -925,6 +926,8 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     """
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     tables = collector_output.get("database_schema", {}).get("tables", [])
+    source_engine = source_engine_of(collector_output)
+    scope = SourceScope.from_collector(collector_output)
 
     if not tables:
         return WorkloadAnalysis(patterns_detected=[], anti_patterns_detected=None)
@@ -970,7 +973,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     wide_transaction_queries: list[dict] = []
 
     for q in queries:
-        facts = query_facts(q.get("query_text", ""))
+        facts = query_facts(q.get("query_text", ""), source_engine)
         qt = q.get("query_type", "").upper()
         tables_accessed = q.get("tables_accessed") or []
         rows_avg = q.get("rows_returned_avg", 0)
@@ -990,7 +993,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             kv_queries.append(q)
 
         # Range query
-        if qt == "SELECT" and _has_range_condition(q):
+        if qt == "SELECT" and _has_range_condition(q, source_engine):
             range_queries.append(q)
 
         # Write-heavy
@@ -1003,7 +1006,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
         # Time-series / event log
         if facts.timestamp_column_word and (
-            qt == "INSERT" or (qt == "SELECT" and _has_range_condition(q))
+            qt == "INSERT" or (qt == "SELECT" and _has_range_condition(q, source_engine))
         ):
             timeseries_queries.append(q)
 
@@ -1052,10 +1055,11 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         if qt == "SELECT" and not has_filter and _scan_frequency_per_minute(q) > 1:
             frequent_scan_queries.append(q)
 
-        # Complex aggregation — any GROUP BY / SUM / COUNT / AVG is an anti-pattern
-        # for DynamoDB regardless of joins. DynamoDB has no server-side aggregation;
-        # these need pre-computed counters or a different engine.
-        if facts.aggregation_call_word:
+        # Complex aggregation — any GROUP BY or aggregate function (COUNT(*)
+        # included, #893) is an anti-pattern for DynamoDB regardless of joins.
+        # DynamoDB has no server-side aggregation; these need pre-computed
+        # counters or a different engine.
+        if facts.aggregation:
             complex_agg_queries.append(q)
 
         # Unbounded result set
@@ -1066,7 +1070,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # 100 items as one transaction; only a write whose shape one transaction
         # cannot hold (more items, or a set the statement does not bound) needs a
         # redesign. The shape is the engine-neutral fact in transaction_shape.
-        shape = transaction_shape(q)
+        shape = transaction_shape(q, scope)
         if shape is not None and shape.needs_redesign:
             wide_transaction_queries.append(q)
 
@@ -1477,6 +1481,7 @@ def build_decision_trace(
     from dataclasses import asdict
 
     queries = collector_output.get("queries", {}).get("query_patterns", [])
+    scope = SourceScope.from_collector(collector_output)
 
     # Build FK-connected table groups
     table_groups = build_table_groups(collector_output)
@@ -1504,7 +1509,7 @@ def build_decision_trace(
             "matched_anti_patterns": query_anti_pattern_map.get(qid, []),
         }
         # Which transaction shape a write matched and why (ADR-031 Decision 3).
-        shape = transaction_shape(q)
+        shape = transaction_shape(q, scope)
         if shape is not None:
             match["transaction_shape"] = shape.as_trace()
         query_matches.append(match)

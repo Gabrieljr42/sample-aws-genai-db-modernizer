@@ -167,20 +167,20 @@ def write_heavy_tables(queries: Iterable[Mapping]) -> set[str]:
     return heavy
 
 
-def cache_pattern(query: Mapping) -> str | None:
+def cache_pattern(query: Mapping, source_engine: str = "") -> str | None:
     """The cacheable shape of a read, or None when it is not a lookup.
 
-    Detected from the SQL itself, with the same keywords and shape as triage's
-    ``session_store`` and ``leaderboard_pattern`` signals (``CACHE_HINT_SIGNALS``),
-    so the overlay is re-evaluated identically wherever only the collector is at hand.
+    Detected from the SQL itself, with the same facts and shape as triage's
+    ``session_store``, ``leaderboard_pattern`` and ``text_search`` signals
+    (``CACHE_HINT_SIGNALS``), read in ``source_engine``'s dialect, so the overlay
+    is re-evaluated identically wherever only the collector is at hand. An
+    aggregation or a text search (the ``aggregation`` and ``text_search`` facts,
+    #893) is not a lookup; a prefix ``LIKE 'abc%'`` is a range, which the keyed
+    test below decides.
     """
     text = str(query.get("query_text") or "")
-    facts = query_facts(text)
-    if (
-        facts.aggregate_or_group_by_word
-        or facts.pattern_match_or_text_search_word
-        or locking_clause(text)
-    ):
+    facts = query_facts(text, source_engine)
+    if facts.aggregation or facts.text_search or locking_clause(text):
         return None
     # A sequence fetch returns a new value on every call: a cached answer is wrong (#654).
     if is_sequence_fetch(text):
@@ -198,7 +198,9 @@ def cache_pattern(query: Mapping) -> str | None:
     return "reference_read"
 
 
-def cache_eligibility(query: Mapping, heavy_tables: set[str]) -> tuple[str, str] | None:
+def cache_eligibility(
+    query: Mapping, heavy_tables: set[str], source_engine: str = ""
+) -> tuple[str, str] | None:
     """``(cache_pattern, cache_reason)`` when ``query`` qualifies for the overlay, else None."""
     if str(query.get("query_type") or "").upper() != "SELECT":
         return None
@@ -210,7 +212,7 @@ def cache_eligibility(query: Mapping, heavy_tables: set[str]) -> tuple[str, str]
         return None
     if heavy_tables & set(query.get("tables_accessed") or []):
         return None
-    pattern = cache_pattern(query)
+    pattern = cache_pattern(query, source_engine)
     if pattern is None:
         return None
     reason = f"hot {PATTERN_LABELS[pattern]}: {cps:.1f} calls/s, {rows:.1f} rows avg"
@@ -238,15 +240,19 @@ def _clear(qa: dict) -> None:
     qa["cache_reason"] = None
 
 
-def pin_customer_cache(qa: dict, cache: str, query: Mapping | None, heavy: set[str]) -> None:
+def pin_customer_cache(
+    qa: dict, cache: str, query: Mapping | None, heavy: set[str], source_engine: str = ""
+) -> None:
     """Mark ``qa`` cached by ``cache`` because the customer asked for it (#296).
 
     The owner is unchanged. A query that fails the hot-read rule keeps the cache
     and carries a warning saying why it would not have been chosen.
     """
-    verdict = cache_eligibility(query, heavy) if query else None
+    verdict = cache_eligibility(query, heavy, source_engine) if query else None
     qa["cache_engine"] = cache
-    qa["cache_pattern"] = verdict[0] if verdict else (cache_pattern(query) if query else None)
+    qa["cache_pattern"] = (
+        verdict[0] if verdict else (cache_pattern(query, source_engine) if query else None)
+    )
     qa["cache_reason"] = CUSTOMER_CACHE_REASON
     qa["cache_customer_override"] = True
     qa["cache_dropped"] = False
@@ -264,6 +270,7 @@ def apply_cache_overlay(
     query_assignments: list[dict],
     queries: Iterable[Mapping],
     engines: Iterable[str],
+    source_engine: str = "",
 ) -> list[dict]:
     """Set or clear the overlay fields on every assignment dict, in place.
 
@@ -272,7 +279,8 @@ def apply_cache_overlay(
     owners change re-evaluates the overlay the same way, and clears an earlier
     safety-net drop (the next schema design gets its own chance). A cache the
     customer decided (``cache_customer_override``) is kept as decided: a pin is
-    never cleared and a removal is never re-enabled. Returns the list.
+    never cleared and a removal is never re-enabled. ``source_engine`` (the
+    collector's) is the dialect the query facts are read in. Returns the list.
     """
     query_list = list(queries)
     by_id = {q.get("query_id"): q for q in query_list}
@@ -284,7 +292,7 @@ def apply_cache_overlay(
             # The customer decided: cached (cache_engine set) stays cached, removed
             # (cache_engine empty) stays removed, whatever the rules say.
             if qa.get("cache_engine"):
-                pin_customer_cache(qa, qa["cache_engine"], q, heavy)
+                pin_customer_cache(qa, qa["cache_engine"], q, heavy, source_engine)
             else:
                 qa["cache_engine"] = None
                 qa["cache_pattern"] = None
@@ -292,7 +300,7 @@ def apply_cache_overlay(
                 qa["cache_dropped"] = False
             continue
         qa["cache_dropped"] = False
-        verdict = cache_eligibility(q, heavy) if cache and q else None
+        verdict = cache_eligibility(q, heavy, source_engine) if cache and q else None
         if verdict and qa.get("assigned_engine") != cache:
             qa["cache_engine"] = cache
             qa["cache_pattern"], qa["cache_reason"] = verdict
@@ -738,7 +746,7 @@ def normalize_cache_owners(
         )
         qa["signal_override"] = None
         moved[owner] += 1
-        verdict = cache_eligibility(q, heavy) if q else None
+        verdict = cache_eligibility(q, heavy, source_engine) if q else None
         if verdict:
             qa["cache_engine"] = cache
             qa["cache_pattern"], qa["cache_reason"] = verdict
@@ -792,10 +800,13 @@ def refresh_cache_overlay(
     assignment: dict,
     queries: Iterable[Mapping],
     engines: Iterable[str],
+    source_engine: str = "",
 ) -> dict:
     """Re-evaluate every query's overlay and the summary on an assignment dict, in place."""
     query_list = list(queries)
-    apply_cache_overlay(assignment.get("query_assignments") or [], query_list, engines)
+    apply_cache_overlay(
+        assignment.get("query_assignments") or [], query_list, engines, source_engine
+    )
     assignment["cache_overlay"] = overlay_summary(
         assignment.get("query_assignments") or [], query_list
     )
