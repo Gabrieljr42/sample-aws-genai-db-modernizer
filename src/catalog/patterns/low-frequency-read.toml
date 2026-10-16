@@ -1,24 +1,17 @@
 # Pattern low-frequency-read. Fields: src/shared/catalog/patterns.py (ADR-031 Decision 8).
 id = "low-frequency-read"
-detectors = [
-    "src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases",
-]
+detectors = []
 triage_signal = "low_frequency_reads"
 penalty = 0
 
-# Detection signals: low_frequency_read, select_below_threshold, no_pattern_match
+# Not a fit pattern (#920): how often a query runs (SELECT below 0.1 calls/s) is not an access pattern.
+# It used to be DynamoDB's catch-all fit, matched by joins, aggregates and full scans
+# alike. That on-demand capacity suits sporadic traffic is cost evidence, for the cost
+# dimension (ADR-031 Decision 5, #494); the query is scored on its own access pattern.
 [engines.dynamodb]
-kind = "fit"
+kind = "unscored"
 supported = true
-catalog = "dynamodb"
-catalog_id = "dynamodb-09"
-score = 55
-why = "Infrequent read operations (SELECT below 0.1 cps) that don't match any specific access pattern. May include admin queries, health checks, or reporting. DynamoDB Scan or Query with GSI depending on access pattern."
-concerns = [
-    "Full-table scans (no WHERE clause) require DynamoDB Scan — acceptable at low frequency",
-    "COUNT(*) queries need application-level counting or a metadata item",
-    "Schema design agent should propose a specific access pattern for each query",
-]
+why = "Call rate is not an access pattern, so this is not a fit; that on-demand capacity suits sporadic traffic is cost evidence for the cost dimension (ADR-031 Decision 5, #494)."
 
 [engines.documentdb]
 kind = "unscored"

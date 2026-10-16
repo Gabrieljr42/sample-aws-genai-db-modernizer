@@ -3,7 +3,8 @@ id = "window-functions"
 detectors = [
     "src.tools.analysis.documentdb_analysis_tools:analyze_documentdb_use_cases",
 ]
-penalty = 0
+penalty = 10
+penalty_basis = "bounded_limit"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -17,7 +18,7 @@ supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-anti-07"
 severity = 0.5
-why = "SQL window functions (ROW_NUMBER, RANK, running totals). $setWindowFields needs DocumentDB 8.0.2+ on an instance-based cluster; LAG/LEAD ($shift) is not supported on any version."
+why = "SQL window functions (ROW_NUMBER, RANK, running totals). $setWindowFields runs on DocumentDB 8.0.2 or later on an instance-based cluster; LAG/LEAD ($shift) is not supported on any version (Amazon DocumentDB Developer Guide, Supported MongoDB APIs, operations, and data types)."
 guidance = "Use Computed Pattern (pre-calculated fields) or application-layer computation."
 
 [engines.opensearch]

@@ -3,7 +3,8 @@ id = "multi-index-joins"
 detectors = [
     "src.tools.analysis.opensearch_analysis_tools:analyze_opensearch_use_cases",
 ]
-penalty = 25
+penalty = 30
+penalty_basis = "needs_redesign"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -22,7 +23,7 @@ supported = true
 catalog = "opensearch"
 catalog_id = "os-ap-01"
 severity = 0.8
-why = "Queries joining multiple tables (join_count >= 2). OpenSearch does not support cross-index joins natively — these must be denormalized into a single index or handled in the application layer."
+why = "Queries joining multiple tables (join_count >= 2). OpenSearch has no join across indexes: nested documents and the join field type relate documents inside one index only, so the data must be denormalized into one index or joined in the application layer (OpenSearch documentation, Joining queries)."
 guidance = "Denormalize into a single OpenSearch index, or handle joins in the application layer by fetching related documents separately."
 
 [engines.elasticache]

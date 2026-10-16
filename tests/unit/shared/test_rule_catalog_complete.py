@@ -403,6 +403,10 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
         ),
         _DETECTION,
     ),
+    "src/tools/analysis/variant_attributes.py": (
+        frozenset({"_ATTRIBUTE_TABLE_MAX_COLUMNS"}),
+        _DETECTION + ": the widest an entity-attribute-value table can be (#920)",
+    ),
     "src/tools/analysis/pattern_catalog_base.py": (
         frozenset({"HIGH_INGEST_CPS_THRESHOLD"}),
         _DETECTION + "; one value for OpenSearch's os-07 and Aurora's anti-04 (#493)",

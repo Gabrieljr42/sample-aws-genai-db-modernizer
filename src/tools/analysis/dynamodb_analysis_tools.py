@@ -14,6 +14,14 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from src.agents.referee.access_pattern import (
+    KEY_LOOKUP,
+    KEY_SCOPED,
+    UNPARSED,
+    UTILITY,
+    SchemaKeys,
+    query_access,
+)
 from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.transaction_shape import transaction_shape
 from src.contracts.analysis_output import (
@@ -224,6 +232,12 @@ class LlmAdvisor(LlmAdvisorBase):
 # The text detectors (timestamp and session words, aggregation calls, range
 # conditions, LIMIT) are engine-neutral query facts in
 # ``src.tools.sql.query_facts`` (#491).
+
+
+# A write that addresses its items by key: an INSERT, or an UPDATE/DELETE pinning a key.
+_KEYED_CLASSES = frozenset({KEY_LOOKUP, KEY_SCOPED})
+# Statements with no parsed access facts: nothing is known about their predicates.
+_UNREAD_CLASSES = frozenset({UNPARSED, UTILITY})
 
 
 def _is_single_row_pk_lookup(q: dict, pk_columns: set[str]) -> bool:
@@ -928,6 +942,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     tables = collector_output.get("database_schema", {}).get("tables", [])
     source_engine = source_engine_of(collector_output)
     scope = SourceScope.from_collector(collector_output)
+    schema_keys = SchemaKeys.from_collector(collector_output)
 
     if not tables:
         return WorkloadAnalysis(patterns_detected=[], anti_patterns_detected=None)
@@ -954,8 +969,6 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     kv_queries: list[dict] = []
     range_queries: list[dict] = []
     write_queries: list[dict] = []
-    low_freq_write_queries: list[dict] = []
-    low_freq_read_queries: list[dict] = []
     timeseries_queries: list[dict] = []
     metadata_queries: list[dict] = []
     session_queries: list[dict] = []
@@ -996,13 +1009,17 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         if qt == "SELECT" and _has_range_condition(q, source_engine):
             range_queries.append(q)
 
-        # Write-heavy
-        if _is_write_query(q) and _is_high_frequency(q, threshold=0.5):
-            write_queries.append(q)
+        access = query_access(q, schema_keys, source_engine)
 
-        # Low-frequency writes (below write-heavy threshold but still need migration)
-        if _is_write_query(q) and not _is_high_frequency(q, threshold=0.5):
-            low_freq_write_queries.append(q)
+        # Write-heavy: a frequent write that addresses its items by key (PutItem,
+        # UpdateItem, DeleteItem). A frequent write alone is a call rate, not an access
+        # pattern (#920): an unkeyed or joined write is not this pattern.
+        if (
+            _is_write_query(q)
+            and _is_high_frequency(q, threshold=0.5)
+            and access.classification.name in _KEYED_CLASSES
+        ):
+            write_queries.append(q)
 
         # Time-series / event log
         if facts.timestamp_column and (
@@ -1050,9 +1067,14 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
         # --- Anti-pattern matching ---
 
-        # Frequent full scan
-        has_filter = bool(q.get("filter_columns"))
-        if qt == "SELECT" and not has_filter and _scan_frequency_per_minute(q) > 1:
+        # Frequent full scan: a SELECT that pins no column to a value in any scope, so no
+        # partition key value can address it whatever the key design (a Scan), run more
+        # than once a minute. Read from the SQL facts, not the collector's filter_columns
+        # (#920); a statement the facade cannot parse is not called a scan.
+        pins_nothing = access.classification.name not in _UNREAD_CLASSES and not any(
+            scope.pinned for scope in access.scopes
+        )
+        if qt == "SELECT" and pins_nothing and _scan_frequency_per_minute(q) > 1:
             frequent_scan_queries.append(q)
 
         # Complex aggregation — any GROUP BY or aggregate function (COUNT(*)
@@ -1074,11 +1096,6 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         if shape is not None and shape.needs_redesign:
             wide_transaction_queries.append(q)
 
-        # Low-frequency reads — catch-all for SELECTs below frequency thresholds
-        # that didn't match key-value, range, metadata, or session patterns
-        if qt == "SELECT" and cps < 0.1:
-            low_freq_read_queries.append(q)
-
     # Build Pattern objects from catalog
     patterns = _build_patterns_from_matches(
         [
@@ -1092,8 +1109,6 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             (PATTERN_BY_ID["dynamodb-07b"], many_to_many_junction_queries),
             (PATTERN_BY_ID["dynamodb-07c"], co_accessed_tables_queries),
             (PATTERN_BY_ID["dynamodb-07d"], adjacency_list_queries),
-            (PATTERN_BY_ID["dynamodb-08"], low_freq_write_queries),
-            (PATTERN_BY_ID["dynamodb-09"], low_freq_read_queries),
         ]
     )
 

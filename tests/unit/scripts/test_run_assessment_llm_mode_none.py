@@ -177,9 +177,12 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     assert roles["elasticache"] == "Cache layer"
     # 61%, not 59%, since #690: wp_comments' point read and INSERT stay on
     # Aurora MySQL (its COUNT(*) query means the table has a relational need).
+    # 63% since #920: ``REPLACE INTO wp_wc_product_meta_lookup`` and the
+    # wp_commentmeta read by comment_id, which DynamoDB took after the reality check,
+    # stay on Aurora MySQL (67 of 107 queries).
     assert arch["rationale"] == (
         "Hybrid architecture: Aurora MySQL retained as the relational core "
-        "(61% of queries); DynamoDB for key-value access; ElastiCache for "
+        "(63% of queries); DynamoDB for key-value access; ElastiCache for "
         "caching hot data. Schema design was not run, so no tables are "
         "allocated yet."
     )

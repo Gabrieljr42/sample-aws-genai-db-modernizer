@@ -6,16 +6,18 @@ detectors = [
 triage_signal = "write_heavy"
 penalty = 0
 
-# Detection signals: high_write_ratio, high_insert_frequency, simple_insert_structure, auto_increment_pk
+# Detection (#920): a write at 0.5 calls/s or more whose access-pattern class is a key lookup
+# or a key-scoped write (an INSERT, or an UPDATE/DELETE pinning a key). A frequent write
+# alone is a call rate, not an access pattern.
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-03"
 score = 85
-why = "High-throughput write workloads (INSERT/UPDATE)."
+why = "Frequent writes that address their items by key (INSERT, or UPDATE/DELETE by key): PutItem, UpdateItem and DeleteItem write one item by its primary key, and capacity scales with the table's partitions (Amazon DynamoDB Developer Guide, Working with items)."
 concerns = [
-    "Auto-increment PKs create hot partitions — need key redesign",
+    "Hot partitions come from low-cardinality or skewed partition keys, or a time bucket as partition key; sequential numeric keys are hashed and spread evenly (Amazon DynamoDB Developer Guide, Designing partition keys)",
     "Batch writes limited to 25 items per request",
 ]
 

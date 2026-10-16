@@ -3,7 +3,8 @@ id = "large-result-sets"
 detectors = [
     "src.tools.analysis.redis_analysis_tools:analyze_redis_use_cases",
 ]
-penalty = 0
+penalty = 10
+penalty_basis = "bounded_limit"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -26,7 +27,7 @@ supported = true
 catalog = "elasticache"
 catalog_id = "redis-large-results-001"
 severity = 0.5
-why = "Queries returning large result sets (>10k rows) not ideal for Redis"
+why = "Queries returning more than 10,000 rows: cached as one value, each read and write moves the whole result, and a value is at most 512 MB (Valkey documentation, Strings)."
 guidance = "Consider pagination or filtering to reduce result set size"
 
 [engines.aurora_postgresql]

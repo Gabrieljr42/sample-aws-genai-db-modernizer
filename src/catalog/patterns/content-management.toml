@@ -10,14 +10,17 @@ kind = "unscored"
 supported = true
 why = "DynamoDB's analysis does not report this pattern; it adds no cross-engine penalty."
 
-# Detection signals: sparse_columns (>30% nullable), type_discriminator_column, text/blob columns
+# Detection (#920): a key lookup or key-scoped SELECT that joins a typed entity (a
+# discriminator column such as post_type) to its entity-attribute-value table on the entity
+# key, the entity and its variable fields in one read
+# (src/tools/analysis/variant_attributes.py, ENTITY_WITH_ATTRIBUTE_ROWS).
 [engines.documentdb]
 kind = "fit"
 supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-01"
 score = 90
-why = "Polymorphic content tables with variable schemas — articles, pages, media with different field sets per type. Natural fit for flexible document model."
+why = "Typed content (articles, pages, media) read by key together with its per-type attribute rows: DocumentDB stores the entity and its variable fields as one document of up to 16 MB; it has no wildcard index, so each queried field needs its own index (Amazon DocumentDB Developer Guide, Quotas and limits; Functional differences)."
 concerns = ["16MB document limit for large text/blob content"]
 
 [engines.opensearch]

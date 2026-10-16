@@ -7,6 +7,7 @@ triage_signal = "text_search"
 capability = "text_search"
 # Penalty: LIKE '%term%' is not DynamoDB's job.
 penalty = 40
+penalty_basis = "cannot_run"
 exempt_note = "{engine} runs this search pattern natively: not penalized. OpenSearch is worth the move only when traffic, data size or search depth justify a dedicated search engine"
 
 [engines.dynamodb]

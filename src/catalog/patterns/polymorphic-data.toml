@@ -10,14 +10,17 @@ kind = "unscored"
 supported = true
 why = "DynamoDB's analysis does not report this pattern; it adds no cross-engine penalty."
 
-# Detection signals: sparse_columns (>30% nullable), type/category discriminator, eav_tables
+# Detection (#920): a key lookup or key-scoped SELECT that reads an entity-attribute-value
+# table with its entity column pinned or joined, one entity's attribute set
+# (src/tools/analysis/variant_attributes.py, ATTRIBUTE_ROWS). Nullable columns are not
+# sparseness, and the collector reports no null fraction.
 [engines.documentdb]
 kind = "fit"
 supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-03"
 score = 80
-why = "Tables with sparse columns or EAV pattern indicating polymorphic entities. DocumentDB stores each variant as a document with only its relevant fields."
+why = "One entity's attribute rows (an entity-attribute-value table) read by the entity's key: DocumentDB stores the attributes as fields of the entity's own document, up to 16 MB, with only the fields it has; it has no wildcard index, so each queried attribute needs its own index (Amazon DocumentDB Developer Guide, Quotas and limits; Functional differences)."
 concerns = [
     "Wildcard indexes ($**) not supported in any DocumentDB version — flatten queryable attributes to top-level with targeted compound indexes",
 ]

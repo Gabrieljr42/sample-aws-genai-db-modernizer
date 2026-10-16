@@ -52,55 +52,64 @@ def _table(
 
 
 def get_content_management_fixture() -> dict[str, Any]:
-    """Polymorphic content table with sparse nullable columns + type discriminator."""
+    """A typed content table (a ``type`` discriminator) read by key together with its
+    per-type attribute rows (an entity-attribute-value table), #920."""
     cols = [
         {"column_name": "id", "ordinal_position": 1, "data_type": "int", "nullable": False},
         {"column_name": "type", "ordinal_position": 2, "data_type": "varchar", "nullable": False},
         {"column_name": "title", "ordinal_position": 3, "data_type": "varchar", "nullable": False},
         {"column_name": "body", "ordinal_position": 4, "data_type": "text", "nullable": True},
-        {
-            "column_name": "video_url",
-            "ordinal_position": 5,
-            "data_type": "varchar",
-            "nullable": True,
-        },
-        {
-            "column_name": "image_path",
-            "ordinal_position": 6,
-            "data_type": "varchar",
-            "nullable": True,
-        },
-        {
-            "column_name": "audio_url",
-            "ordinal_position": 7,
-            "data_type": "varchar",
-            "nullable": True,
-        },
-        {
-            "column_name": "duration_sec",
-            "ordinal_position": 8,
-            "data_type": "int",
-            "nullable": True,
-        },
-        {"column_name": "author_id", "ordinal_position": 9, "data_type": "int", "nullable": True},
-        {"column_name": "tags", "ordinal_position": 10, "data_type": "varchar", "nullable": True},
     ]
     t = _table("app.content", "content", 50000, 200.0, cols)
+    fields = _table(
+        "app.content_fields",
+        "content_fields",
+        400000,
+        90.0,
+        [
+            {"column_name": "id", "ordinal_position": 1, "data_type": "int", "nullable": False},
+            {
+                "column_name": "content_id",
+                "ordinal_position": 2,
+                "data_type": "int",
+                "nullable": False,
+            },
+            {
+                "column_name": "name",
+                "ordinal_position": 3,
+                "data_type": "varchar",
+                "nullable": False,
+            },
+            {"column_name": "value", "ordinal_position": 4, "data_type": "text", "nullable": True},
+        ],
+        fks=[
+            {
+                "columns": ["content_id"],
+                "referenced_table": "content",
+                "referenced_columns": ["id"],
+            }
+        ],
+    )
     q = {
         "query_id": "cm-001",
-        "query_text": "SELECT * FROM content WHERE type = ? AND id = ?",
+        "query_text": (
+            "SELECT c.id, c.title, f.name, f.value FROM content c "
+            "JOIN content_fields f ON f.content_id = c.id WHERE c.id = ?"
+        ),
         "query_type": "SELECT",
         "frequency_per_hour": 2000,
         "calls_per_second": 0.6,
-        "tables_accessed": ["app.content"],
-        "rows_returned_avg": 1.0,
-        "filter_columns": ["type", "id"],
+        "tables_accessed": ["app.content", "app.content_fields"],
+        "rows_returned_avg": 6.0,
+        "has_joins": True,
+        "join_count": 1,
     }
-    return _base("docdb-cm-test", [t], [q])
+    return _base("docdb-cm-test", [t, fields], [q])
 
 
 def get_product_catalog_fixture() -> dict[str, Any]:
-    """Wide table with many columns, some nullable, and JSON column."""
+    """A typed product (a ``category`` discriminator) with its variable attributes in a
+    JSON column, read by key (#920)."""
     cols = [
         {"column_name": "id", "ordinal_position": 1, "data_type": "int", "nullable": False},
         {"column_name": "name", "ordinal_position": 2, "data_type": "varchar", "nullable": False},
@@ -157,40 +166,47 @@ def get_product_catalog_fixture() -> dict[str, Any]:
     t = _table("app.products", "products", 25000, 45.0, cols)
     q = {
         "query_id": "pc-001",
-        "query_text": "SELECT * FROM products WHERE category = ? AND price BETWEEN ? AND ?",
+        "query_text": "SELECT * FROM products WHERE id = ?",
         "query_type": "SELECT",
         "frequency_per_hour": 5000,
         "calls_per_second": 1.4,
         "tables_accessed": ["app.products"],
-        "rows_returned_avg": 50.0,
+        "rows_returned_avg": 1.0,
     }
     return _base("docdb-pc-test", [t], [q])
 
 
 def get_polymorphic_data_fixture() -> dict[str, Any]:
-    """Table with >30% nullable columns (sparse)."""
+    """One entity's attribute rows (an entity-attribute-value table), read by the entity's
+    key (#920)."""
     cols = [
         {"column_name": "id", "ordinal_position": 1, "data_type": "int", "nullable": False},
+        {"column_name": "entity_id", "ordinal_position": 2, "data_type": "int", "nullable": False},
         {
-            "column_name": "entity_type",
-            "ordinal_position": 2,
+            "column_name": "attribute",
+            "ordinal_position": 3,
             "data_type": "varchar",
             "nullable": False,
         },
-        {"column_name": "name", "ordinal_position": 3, "data_type": "varchar", "nullable": False},
-        {"column_name": "attr1", "ordinal_position": 4, "data_type": "varchar", "nullable": True},
-        {"column_name": "attr2", "ordinal_position": 5, "data_type": "varchar", "nullable": True},
-        {"column_name": "attr3", "ordinal_position": 6, "data_type": "int", "nullable": True},
-        {"column_name": "attr4", "ordinal_position": 7, "data_type": "decimal", "nullable": True},
+        {"column_name": "value", "ordinal_position": 4, "data_type": "text", "nullable": True},
     ]
-    t = _table("app.entities", "entities", 100000, 80.0, cols)
+    t = _table("app.entity_attributes", "entity_attributes", 100000, 80.0, cols)
+    t["indexes"].append(
+        {
+            "index_name": "entity_attributes_entity_id",
+            "columns": ["entity_id", "attribute"],
+            "is_unique": True,
+            "is_primary": False,
+            "index_type": "btree",
+        }
+    )
     q = {
         "query_id": "poly-001",
-        "query_text": "SELECT * FROM entities WHERE entity_type = ? AND attr1 = ?",
+        "query_text": "SELECT attribute, value FROM entity_attributes WHERE entity_id = ?",
         "query_type": "SELECT",
         "frequency_per_hour": 3000,
         "calls_per_second": 0.8,
-        "tables_accessed": ["app.entities"],
+        "tables_accessed": ["app.entity_attributes"],
         "rows_returned_avg": 10.0,
     }
     return _base("docdb-poly-test", [t], [q])

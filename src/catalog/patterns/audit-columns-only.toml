@@ -4,6 +4,7 @@ detectors = [
     "src.tools.analysis.opensearch_analysis_tools:analyze_opensearch_use_cases",
 ]
 penalty = 0
+penalty_basis = "guidance_only"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -22,7 +23,7 @@ supported = true
 catalog = "opensearch"
 catalog_id = "os-ap-03"
 severity = 0.1
-why = "Timestamp columns (created_at, updated_at, event_time, etc.) used only in equality checks — not range queries. This is an audit/metadata pattern, not a time-series workload. Guard rail to prevent false time-series classification."
+why = "Timestamp columns (created_at, updated_at, event_time, etc.) used only in equality checks — not range queries. This is an audit/metadata pattern, not a time-series workload. Guard rail to prevent false time-series classification; guidance only, since no OpenSearch limit applies (OpenSearch documentation, Date field type)."
 guidance = "Tables with timestamp columns used only for audit/metadata purposes are not time-series candidates. Evaluate for search suitability instead."
 
 [engines.elasticache]

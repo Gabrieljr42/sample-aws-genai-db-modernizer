@@ -380,10 +380,15 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # ``SELECT FOUND_ROWS()`` loses the 15-point Aurora penalty and its first
     # assignment moves from DocumentDB back to Aurora MySQL -- documentdb -1,
     # aurora_mysql +1.
+    # #920: DocumentDB's product-catalog no longer fires on a wide table by column
+    # count alone and DynamoDB's call-rate fits are gone, so ``REPLACE INTO
+    # wp_wc_product_meta_lookup`` (``d72966f8...``) is first-assigned to Aurora MySQL,
+    # not DocumentDB -- documentdb -1, aurora_mysql +1 (the full per-query drift is in
+    # the #920 PR).
     assert rc["before_distribution"] == {
         "dynamodb": 37,
-        "aurora_mysql": 63,
-        "documentdb": 7,
+        "aurora_mysql": 64,
+        "documentdb": 6,
     }
     assert sum(rc["before_distribution"].values()) == sum(rc["after_distribution"].values())
     assert "opensearch" not in rc["after_distribution"]  # consolidated away

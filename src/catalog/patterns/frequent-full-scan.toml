@@ -3,7 +3,8 @@ id = "frequent-full-scan"
 detectors = [
     "src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases",
 ]
-penalty = 0
+penalty = 20
+penalty_basis = "reads_more_than_returns"
 
 # Detection signals: no_where_clause, high_frequency, large_rows_examined
 [engines.dynamodb]
@@ -12,7 +13,7 @@ supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-ap-01"
 severity = 0.5
-why = "Source database has queries performing full table scans at high frequency. These queries lack proper indexes or filter conditions in the source database. In DynamoDB, these must be replaced with Query operations using partition keys or GSIs — Scan operations at >1/min are not acceptable."
+why = "A read more frequent than once a minute that pins no column to a value, so no partition key value can address it whatever the key design. On DynamoDB that is a Scan, which reads every item and consumes read capacity for every item it reads, not only the ones it returns (Amazon DynamoDB Developer Guide, Scanning tables)."
 guidance = "The schema design agent will replace these scans with targeted Query or GetItem operations. Verify the generated access patterns cover all flagged queries. Remaining scans may need a GSI or access pattern redesign."
 
 [engines.documentdb]

@@ -3,7 +3,8 @@ id = "correlated-subquery-joins"
 detectors = [
     "src.tools.analysis.documentdb_analysis_tools:analyze_documentdb_use_cases",
 ]
-penalty = 0
+penalty = 20
+penalty_basis = "reads_more_than_returns"
 
 [engines.dynamodb]
 kind = "unscored"
@@ -17,7 +18,7 @@ supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-anti-08"
 severity = 0.7
-why = "Queries with correlated subqueries. Correlated $lookup (let/pipeline) needs DocumentDB 8.0.2+ on an instance-based cluster; otherwise pre-denormalize."
+why = "Queries with correlated subqueries. A correlated $lookup (let/pipeline) runs its sub-pipeline for each input document, and needs DocumentDB 8.0.2 or later on an instance-based cluster (Amazon DocumentDB Developer Guide, Supported MongoDB APIs, operations, and data types); otherwise pre-denormalize."
 guidance = "Pre-denormalize at write time. Use Extended Reference Pattern to embed frequently co-accessed fields."
 
 [engines.opensearch]

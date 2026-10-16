@@ -107,6 +107,7 @@ def _penalised(kind_for_documentdb: str, extra: str = "", top: str = "") -> str:
             id = "example"
             detectors = []
             penalty = 40
+            penalty_basis = "cannot_run"
             {top}
             [engines.opensearch]
             kind = "fit"
@@ -162,8 +163,10 @@ class TestLoaderIsStrict:
     def test_a_zero_score_and_a_zero_severity_load(self, tmp_path: Path) -> None:
         _write(tmp_path, "example", FIT.replace("score = 80", "score = 0"))
         assert load_pattern_catalog(tmp_path)[0].engines["dynamodb"].score == 0
-        anti = FIT.replace('kind = "fit"', 'kind = "anti_pattern"').replace(
-            "score = 80", "severity = 0.0"
+        anti = (
+            FIT.replace('kind = "fit"', 'kind = "anti_pattern"')
+            .replace("score = 80", "severity = 0.0")
+            .replace("penalty = 0", 'penalty = 0\npenalty_basis = "guidance_only"')
         )
         _write(tmp_path, "example", anti)
         assert load_pattern_catalog(tmp_path)[0].engines["dynamodb"].severity == 0.0
@@ -348,8 +351,6 @@ class TestConstantsAreTheCatalogsView:
             ("dynamodb-07b", "many-to-many-junction", 65),
             ("dynamodb-07c", "co-accessed-tables", 70),
             ("dynamodb-07d", "adjacency-list", 60),
-            ("dynamodb-08", "low-frequency-write", 70),
-            ("dynamodb-09", "low-frequency-read", 55),
         ]
         assert _ids(dynamodb_pattern_catalog.DYNAMODB_ANTI_PATTERNS, "severity_weight") == [
             ("dynamodb-ap-01", "frequent-full-scan", 0.5),
@@ -469,17 +470,25 @@ class TestConstantsAreTheCatalogsView:
             "full-text-search": 40,
             "regex-search": 40,
             "fuzzy-search": 40,
-            "complex-aggregation": 50,
-            "complex_aggregation": 50,
-            "multi-index-joins": 25,
-            "acid-transactions": 20,
-            "frequent-writes": 15,
-            "high-frequency-pk-lookup": 30,
-            "simple-cache-read": 25,
+            "complex-aggregation": 30,
+            "complex_aggregation": 30,
+            "multi-index-joins": 30,
+            "acid-transactions": 40,
+            "high-frequency-pk-lookup": 20,
+            "simple-cache-read": 20,
             "no-relational-need": 20,
-            "single-access-pattern-table": 15,
-            "high-volume-text-search": 35,
+            "single-access-pattern-table": 20,
+            "high-volume-text-search": 20,
             "wide-transaction": 10,
+            # #920: the anti-patterns that cost 0 before the one penalty rule.
+            "frequent-full-scan": 20,
+            "unbounded-result-set": 10,
+            "heavy-cross-collection-joins": 20,
+            "correlated-subquery-joins": 20,
+            "graph-traversal-hierarchy": 10,
+            "window-functions": 10,
+            "unbounded-array-growth": 10,
+            "large-result-sets": 10,
         }
         assert query_scoring.CAPABILITY_SIGNAL_ENGINES == {
             "acid-transactions": search | {"dynamodb"},
@@ -551,12 +560,14 @@ DETECTOR_MODULES = {
 }
 
 # Catalog entries no analysis emits today (kept so the catalog says so out loud):
-# three catalog-only anti-patterns, and two penalty keys no analysis reports.
+# two catalog-only anti-patterns, a penalty key no analysis reports, and the two call-rate
+# entries that are not fits (#920: call rate is cost evidence, #494).
 UNDETECTED = {
     "unbounded-array-growth",
     "high-frequency-small-updates",
     "text_search",
-    "frequent-writes",
+    "low-frequency-read",
+    "low-frequency-write",
     # Catalog-only: the access-pattern class "ad hoc filter" reads it (#728); the
     # classifier detects the class from the SQL facade's facts.
     "secondary-attribute-filter",

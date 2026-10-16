@@ -14,10 +14,11 @@ detectors = [
     "src.agents.referee.substring_match:substring_matches",
 ]
 capability = "substring_index"
-# Points a scan engine loses on a query that crosses scan_threshold: half of
-# wildcard-search's 40, the same half the catalog's reduced penalties take (wide-transaction
-# 10 of acid-transactions' 20). A scan is slower, not impossible.
+# Points a scan engine loses on a query that crosses scan_threshold: the
+# reads_more_than_returns basis (ADR-031 Decision 8 Amendment 6). A scan is slower, not
+# impossible.
 penalty = 20
+penalty_basis = "reads_more_than_returns"
 
 [scan_threshold]
 min_calls_per_second = 1.0

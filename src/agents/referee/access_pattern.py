@@ -446,3 +446,60 @@ def classify_query(
     """The access-pattern class of one collected query."""
     facts = access_facts(str(query.get("query_text") or ""), source_engine or "")
     return classify_facts(facts, keys, str(query.get("query_type") or ""))
+
+
+@dataclass(frozen=True)
+class ScopeColumns:
+    """One scope of a query resolved against the schema, by collected table id.
+
+    ``tables``: the stored tables the scope reads (a table outside the collected schema,
+    a derived table or a row function is left out). ``pinned``: per table, the columns
+    the scope pins to a value. ``joined``: the scope's ``col = col`` join terms as
+    ``(table, column, table, column)``.
+    """
+
+    tables: frozenset[str]
+    pinned: Mapping[str, frozenset[str]]
+    joined: frozenset[tuple[str, str, str, str]]
+
+
+@dataclass(frozen=True)
+class QueryAccess:
+    """A query's class and its scopes' resolved columns, from one parse."""
+
+    classification: AccessClassification
+    scopes: tuple[ScopeColumns, ...]
+
+
+def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
+    scope = _ScopeTables(keys, facts)
+    pinned: dict[str, set[str]] = {}
+    for column in facts.equalities:
+        owner = scope.owner(column)
+        table_id = scope.ids.get(owner) if owner is not None else None
+        if table_id:
+            pinned.setdefault(table_id, set()).add(column.name)
+    joined: set[tuple[str, str, str, str]] = set()
+    for left, right in facts.joins:
+        a, b = scope.owner(left), scope.owner(right)
+        ta = scope.ids.get(a) if a is not None else None
+        tb = scope.ids.get(b) if b is not None else None
+        if ta and tb and a != b:
+            joined.add((ta, left.name, tb, right.name))
+    tables = frozenset(
+        table_id
+        for source in facts.sources
+        if not source.function and (table_id := scope.ids.get(source.alias))
+    )
+    return ScopeColumns(
+        tables=tables,
+        pinned={t: frozenset(c) for t, c in pinned.items()},
+        joined=frozenset(joined),
+    )
+
+
+def query_access(query: Mapping, keys: SchemaKeys, source_engine: str | None) -> QueryAccess:
+    """:func:`classify_query` plus each scope's resolved columns, from one parse."""
+    facts = access_facts(str(query.get("query_text") or ""), source_engine or "")
+    classification = classify_facts(facts, keys, str(query.get("query_type") or ""))
+    return QueryAccess(classification, tuple(_scope_columns(s, keys) for s in facts.scopes))
