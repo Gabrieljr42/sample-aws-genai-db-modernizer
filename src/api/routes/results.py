@@ -1,12 +1,17 @@
-"""Results routes — analysis results, table mappings, and raw artifacts."""
+"""Results routes — analysis results, table mappings, deliverables and raw artifacts."""
+
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 
-from src.api.dependencies import job_id_param
+from src.api.dependencies import job_id_param, validated_filename
 from src.api.services.local_execution import LocalExecutionService
 from src.api.services.local_s3 import LocalS3Service
+from src.report.deliverables import FOLDER_ENTRIES, INDEX_FILENAME
 from src.report.facts import report_facts
 from src.report.renderers import resolve_migration_waves
+from src.shared.database_name import validate_database_name
 
 router = APIRouter(prefix="/api/v1/assessments", tags=["results"])
 
@@ -36,8 +41,8 @@ async def get_results(job_id: str = Depends(job_id_param)):
     if not synthesis:
         raise HTTPException(status_code=404, detail="Results not available yet")
 
-    # One wave source (#225): the UI and the HTML exports it
-    # feeds (ReportHtmlExport.js, ExportReport.js) read this same payload, so a
+    # One wave source (#225): the UI and the HTML export it
+    # feeds (ExportReport.js) read this same payload, so a
     # report written before #225 must show the same fallback roadmap the
     # decision report and engineering report already derive, not an empty one.
     if not synthesis.get("migration_waves"):
@@ -57,6 +62,99 @@ async def get_results(job_id: str = Depends(job_id_param)):
         "synthesis": synthesis,
         "triage_summary": triage,
     }
+
+
+# The deliverables folder's own index (#955) is listed and downloadable next to
+# the files it describes (src/report/deliverables.py FOLDER_ENTRIES).
+_INDEX_TITLE = "Folder index (Markdown)"
+_INDEX_AUDIENCE = "Everyone: what each file is and who it is for"
+
+_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".md": "text/markdown",
+    ".json": "application/json",
+    ".html": "text/html",
+}
+
+
+def _deliverables_db_name(job_id: str) -> str:
+    """The job's database name, validated like request input (#957 review):
+    it comes from the job's ``_meta.json`` and reaches a filesystem path here."""
+    try:
+        return validate_database_name(_get_database_name(job_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Deliverable not available") from exc
+
+
+def _deliverable_entries() -> list[tuple[str, str, str]]:
+    """(filename, title, audience) for every file the folder can hold, in order."""
+    return [(e.filename, e.title, e.audience) for e in FOLDER_ENTRIES] + [
+        (INDEX_FILENAME, _INDEX_TITLE, _INDEX_AUDIENCE)
+    ]
+
+
+@router.get("/{job_id}/deliverables")
+async def list_deliverables(job_id: str = Depends(job_id_param)):
+    """The files in the job's ``deliverables/`` folder (#957), for the results
+    page's download panel: each listed file the folder holds, with its title,
+    audience, size and download path. Empty until the folder is rendered."""
+    db_name = _deliverables_db_name(job_id)
+    if not sfn_service:
+        raise HTTPException(status_code=503, detail="Services not configured")
+    files = []
+    try:
+        folder = sfn_service.deliverables_dir(db_name, job_id)
+    except ValueError:
+        folder = None
+    if folder is not None:
+        for filename, title, audience in _deliverable_entries():
+            try:
+                path = sfn_service.deliverable_file(db_name, job_id, filename)
+            except ValueError:
+                path = None
+            if path is None:
+                continue
+            files.append(
+                {
+                    "filename": filename,
+                    "title": title,
+                    "audience": audience,
+                    "size_bytes": os.path.getsize(path),
+                    "path": f"assessments/{job_id}/deliverables/{filename}",
+                }
+            )
+    return {"job_id": job_id, "files": files}
+
+
+@router.get("/{job_id}/deliverables/{filename}")
+async def download_deliverable(
+    job_id: str = Depends(job_id_param), filename: str = Depends(validated_filename)
+):
+    """Download one file of the job's ``deliverables/`` folder (#957). Only a
+    file the folder's definition names is served, from inside that folder.
+    Always as an attachment with ``nosniff``; an HTML report also gets
+    ``Content-Security-Policy: sandbox``, so no browser runs its scripts on the
+    API origin even if it ignores the attachment disposition."""
+    db_name = _deliverables_db_name(job_id)
+    if not sfn_service:
+        raise HTTPException(status_code=503, detail="Services not configured")
+    try:
+        path = sfn_service.deliverable_file(db_name, job_id, filename)
+    except ValueError:
+        path = None
+    if path is None:
+        raise HTTPException(status_code=404, detail="Deliverable not available")
+    name = os.path.basename(path)
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if name.endswith(".html"):
+        headers["Content-Security-Policy"] = "sandbox"
+    return FileResponse(
+        path,
+        media_type=_MEDIA_TYPES.get(os.path.splitext(name)[1], "application/octet-stream"),
+        filename=name,
+        content_disposition_type="attachment",
+        headers=headers,
+    )
 
 
 @router.get("/{job_id}/collector")

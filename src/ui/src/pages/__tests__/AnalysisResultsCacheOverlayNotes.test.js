@@ -1,5 +1,5 @@
 /**
- * #459: the Results page (AnalysisResults-02.js) renders each
+ * #459: the Results page (AnalysisResults.js) renders each
  * `cacheOverlayNotes(cacheOverlay)` entry as a plain JSX text child
  * (`{note}`), the same pattern as every other server-generated string this
  * page shows. This test does not mount the full page -- there is no

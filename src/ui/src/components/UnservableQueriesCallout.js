@@ -31,33 +31,33 @@ const UnservableQueriesCallout = memo(({ synthesis, jobId, onOpen, t }) => {
   return (
     <Alert
       type="warning"
-      header={t('analysis-results-v2.unservable.header', { count: u.unservable_query_count })}
+      header={t('analysis-results.unservable.header', { count: u.unservable_query_count })}
     >
       <SpaceBetween size="s">
-        <Box>{t('analysis-results-v2.unservable.intro')}</Box>
+        <Box>{t('analysis-results.unservable.intro')}</Box>
         {u.unservable_queries.map(q => (
           <Box key={q.query_id}>
             <SpaceBetween direction="horizontal" size="xs">
               <Link
-                ariaLabel={t('analysis-results-v2.unservable.open-label', { id: q.query_id })}
+                ariaLabel={t('analysis-results.unservable.open-label', { id: q.query_id })}
                 onFollow={(e) => { e.preventDefault(); onOpen(q.query_id); }}
               >
                 <span style={{ fontFamily: 'monospace' }}>{q.query_id}</span>
               </Link>
-              <span>{t('analysis-results-v2.unservable.on-engine', { engine: displayEngine(q.engine) })}</span>
+              <span>{t('analysis-results.unservable.on-engine', { engine: displayEngine(q.engine) })}</span>
             </SpaceBetween>
             <div>{q.explanation}</div>
             {(q.blocking_gates || []).length > 0 && (
-              <div>{t('analysis-results-v2.unservable.ruled-out', { gates: gatesText(q) })}</div>
+              <div>{t('analysis-results.unservable.ruled-out', { gates: gatesText(q) })}</div>
             )}
-            <div>{t('analysis-results-v2.unservable.redesign', { engine: displayEngine(q.engine), hints: (q.redesign_hints || []).join(' ') })}</div>
+            <div>{t('analysis-results.unservable.redesign', { engine: displayEngine(q.engine), hints: (q.redesign_hints || []).join(' ') })}</div>
           </Box>
         ))}
         {u.more_unservable_count > 0 && (
-          <Box>{t('analysis-results-v2.unservable.more', { count: u.more_unservable_count })}</Box>
+          <Box>{t('analysis-results.unservable.more', { count: u.more_unservable_count })}</Box>
         )}
-        <Box>{t('analysis-results-v2.unservable.rerun')}</Box>
-        <Link href={`/analysis/assignments/${jobId}`}>{t('analysis-results-v2.unservable.assignment-link')}</Link>
+        <Box>{t('analysis-results.unservable.rerun')}</Box>
+        <Link href={`/analysis/assignments/${jobId}`}>{t('analysis-results.unservable.assignment-link')}</Link>
       </SpaceBetween>
     </Alert>
   );

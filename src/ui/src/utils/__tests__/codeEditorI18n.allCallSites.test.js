@@ -3,8 +3,7 @@
  * `codeEditorI18nStrings(t, ...)` as its `i18nStrings` prop, or Cloudscape's
  * own fallback renders a literal "undefined" in the page (see
  * codeEditorI18n.js's docstring). The fix for the Results page's two
- * editors missed `JobMonitoring.js` and `JobMonitoringSummary.js`'s own
- * editors -- this scans every `.js` file under `src/ui/src` for a
+ * editors missed the job-monitoring pages' own editors (since removed) -- this scans every `.js` file under `src/ui/src` for a
  * `<CodeEditor` element and fails if its nearest `i18nStrings={...}` is not
  * built from `codeEditorI18nStrings(`, so a new editor that skips the
  * helper fails this test instead of shipping "undefined" to a customer.

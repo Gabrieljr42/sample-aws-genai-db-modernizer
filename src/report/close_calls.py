@@ -19,7 +19,7 @@ from .formatting import fmt_num, plural_noun, plural_verb
 
 # How a customer moves a close call: both reports and the deck. The UI
 # callout says the same, with its last sentence worded for the page it is on
-# (src/ui/src/locales/en.json, analysis-results-v2.close-calls.override), and
+# (src/ui/src/locales/en.json, analysis-results.close-calls.override), and
 # the interactive report repeats this one (src/ui/src/utils/ExportReport.js).
 CLOSE_CALL_OVERRIDE_TEXT = (
     "To move any of them, change its engine in the assignment review (a query in a "

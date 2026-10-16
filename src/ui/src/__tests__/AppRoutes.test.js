@@ -8,6 +8,11 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import AppRoutes from '../AppRoutes';
 
+// GlobalConfigurations.js imports Cloudscape's Box (ESM, not transformed by
+// Jest) for its table helpers; only its plain config objects are read here.
+jest.mock('@cloudscape-design/components/box', () => () => null);
+import { SideNavigationConfigurations } from '../config/GlobalConfigurations';
+
 // jest.mock calls are hoisted above the imports, so the stub factory must be a
 // hoisted function declaration (and `mock`-prefixed to be allowed in a factory).
 function mockPage(name) {
@@ -18,13 +23,11 @@ function mockPage(name) {
 }
 jest.mock('../pages/Dashboard', () => mockPage('Dashboard'));
 jest.mock('../pages/CreateAnalysis', () => mockPage('CreateAnalysis'));
-jest.mock('../pages/JobMonitoring', () => mockPage('JobMonitoring'));
 jest.mock('../pages/JobMonitoringSummary', () => mockPage('JobMonitoringSummary'));
 jest.mock('../pages/PatternAnalysis', () => mockPage('PatternAnalysis'));
 jest.mock('../pages/Settings', () => mockPage('Settings'));
-jest.mock('../pages/EngineAnalysis', () => mockPage('EngineAnalysis'));
 jest.mock('../pages/AssignmentGate', () => mockPage('AssignmentGate'));
-jest.mock('../pages/AnalysisResults-02', () => mockPage('AnalysisResultsV2'));
+jest.mock('../pages/AnalysisResults', () => mockPage('AnalysisResults'));
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -80,12 +83,12 @@ test('/analysis/create renders the create-analysis page', () => {
 });
 
 test('a job route renders its page with :jobId from the URL', () => {
-  expect(renderAt('/analysis/monitor/job-42')).toEqual({
-    page: 'JobMonitoring', jobId: 'job-42', pathname: '/analysis/monitor/job-42',
+  expect(renderAt('/analysis/assignments/job-7')).toEqual({
+    page: 'AssignmentGate', jobId: 'job-7', pathname: '/analysis/assignments/job-7',
   });
 });
 
-test('nested monitor/summary route wins over monitor/:jobId', () => {
+test('/analysis/monitor/summary/:jobId renders the assessment summary', () => {
   expect(renderAt('/analysis/monitor/summary/job-42')).toEqual({
     page: 'JobMonitoringSummary', jobId: 'job-42', pathname: '/analysis/monitor/summary/job-42',
   });
@@ -97,34 +100,43 @@ test('/analysis/assignments/:jobId renders the assignment gate', () => {
   });
 });
 
-test('/analysis/engine-analysis/:jobId renders the engine-analysis drill-down', () => {
-  expect(renderAt('/analysis/engine-analysis/job-42')).toEqual({
-    page: 'EngineAnalysis', jobId: 'job-42', pathname: '/analysis/engine-analysis/job-42',
-  });
-});
-
 test('/analysis/patterns/:jobId renders pattern analysis (with its required ?target=)', () => {
   expect(renderAt('/analysis/patterns/job-42?target=dynamodb')).toEqual({
     page: 'PatternAnalysis', jobId: 'job-42', pathname: '/analysis/patterns/job-42',
   });
 });
 
-test('/analysis/results-v2/:jobId renders the results page directly', () => {
-  expect(renderAt('/analysis/results-v2/job-42')).toEqual({
-    page: 'AnalysisResultsV2', jobId: 'job-42', pathname: '/analysis/results-v2/job-42',
-  });
-});
-
-test('legacy /analysis/results/:jobId redirects to results-v2, keeping the job id', () => {
+test('/analysis/results/:jobId renders the results page directly', () => {
   expect(renderAt('/analysis/results/job-42')).toEqual({
-    page: 'AnalysisResultsV2', jobId: 'job-42', pathname: '/analysis/results-v2/job-42',
+    page: 'AnalysisResults', jobId: 'job-42', pathname: '/analysis/results/job-42',
   });
 });
 
-test('legacy /analysis/report/:jobId redirects to results-v2, keeping the job id (#356)', () => {
-  expect(renderAt('/analysis/report/job-42')).toEqual({
-    page: 'AnalysisResultsV2', jobId: 'job-42', pathname: '/analysis/results-v2/job-42',
+test('old /analysis/results-v2/:jobId bookmarks redirect to /analysis/results, keeping the job id', () => {
+  expect(renderAt('/analysis/results-v2/job-42')).toEqual({
+    page: 'AnalysisResults', jobId: 'job-42', pathname: '/analysis/results/job-42',
   });
+});
+
+test('legacy /analysis/report/:jobId redirects to /analysis/results, keeping the job id (#356)', () => {
+  expect(renderAt('/analysis/report/job-42')).toEqual({
+    page: 'AnalysisResults', jobId: 'job-42', pathname: '/analysis/results/job-42',
+  });
+});
+
+test('the version-suffixed results page module is gone', () => {
+  expect(() => jest.requireActual('../pages/AnalysisResults')).toThrow();
+});
+
+test('the removed job-monitoring page and its /analysis/monitor/:jobId route are gone', () => {
+  expect(() => jest.requireActual('../pages/JobMonitoring')).toThrow();
+  expect(renderAt('/analysis/monitor/job-42')).toEqual({ page: 'Dashboard', jobId: '', pathname: '/dashboard' });
+});
+
+test('the removed engine-analysis page and its route are gone', () => {
+  expect(() => jest.requireActual('../pages/EngineAnalysis')).toThrow();
+  expect(() => jest.requireActual('../hooks/useEngineAnalysis')).toThrow();
+  expect(renderAt('/analysis/engine-analysis/job-42')).toEqual({ page: 'Dashboard', jobId: '', pathname: '/dashboard' });
 });
 
 test('/settings renders the settings page', () => {
@@ -147,6 +159,21 @@ test('the removed /analysis/local page and route are gone (#357)', () => {
 
 test('the unused, unrouted LandingPage module is gone (#357)', () => {
   expect(() => jest.requireActual('../pages/LandingPage')).toThrow();
+});
+
+// #438: the side-nav Settings link pointed at /settings/s, which matched no
+// route, so the catch-all sent the user back to the dashboard. Every side-nav
+// link must land on its own page ("/" is the one deliberate redirect).
+test.each(SideNavigationConfigurations.items.filter(item => item.type === 'link' && item.href !== '/'))(
+  'the side-nav "$text" link ($href) opens its own route',
+  ({ href }) => {
+    expect(renderAt(href).pathname).toBe(href);
+  },
+);
+
+test('the side-nav Settings link opens the Settings page (#438)', () => {
+  const settings = SideNavigationConfigurations.items.find(item => item.text === 'Settings');
+  expect(renderAt(settings.href)).toEqual({ page: 'Settings', jobId: '', pathname: '/settings' });
 });
 
 test('unknown paths fall through * to / and then the dashboard', () => {

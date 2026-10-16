@@ -34,15 +34,17 @@ import StatusIndicator from "@cloudscape-design/components/status-indicator";
 import CopyToClipboard from "@cloudscape-design/components/copy-to-clipboard";
 
 //##-- Custom
-import { SideNavigationConfigurations } from "../config/GlobalConfigurations";
+import { SideNavigationConfigurations, ApiConfigurations } from "../config/GlobalConfigurations";
 import AppHeader from "../components/AppHeader";
 import ApiManager from "../classes/ApiManager";
-import ChartSankey from "../components/ChartSankey-01";
+import ChartSankey from "../components/ChartSankey";
 import SummaryFallbackNotice from "../components/SummaryFallbackNotice";
 import QueryDecisionTrace from "../components/QueryDecisionTrace";
 import QueryRoutingTable from "../components/QueryRoutingTable";
 import CloseCallCallout from "../components/CloseCallCallout";
 import UnservableQueriesCallout from "../components/UnservableQueriesCallout";
+import MigrationWavePlan from "../components/MigrationWavePlan";
+import DeliverablesPanel from "../components/DeliverablesPanel";
 import { buildQueryRoutingRows } from "../utils/queryRouting";
 import { generateHTMLReport } from "../utils/ExportReport";
 import { getCacheOverlay, ownerDistribution, formatCacheLayerLine, cacheOverlayNotes, targetEngineEntries, resolveCostBreakdown, ownerSchemaDesigns, cacheAccessPatternCount, addCacheOverlayNode, cacheLayerAccessPatterns } from "../utils/cacheLayer";
@@ -240,6 +242,8 @@ const AnalysisResultsPage = memo(() => {
   // #822: every query's journey (the query-journeys list), for the query
   // routing table that opens a trace without schema design.
   const [queryJourneyList, setQueryJourneyList] = useState({ items: [], loading: true, error: null, truncated: false });
+  // #957: the job's deliverables/ folder, for the download panel.
+  const [deliverables, setDeliverables] = useState({ files: [], loading: true, error: null });
 
   // Ace editor state
   const [ace, setAce] = useState(null);
@@ -255,7 +259,7 @@ const AnalysisResultsPage = memo(() => {
 
   const fetchData = useCallback(async () => {
     if (!jobId) {
-      addFlashbarMessage({ type: 'error', header: t('analysis-results-v2.error.invalid-job-id'), content: t('analysis-results-v2.error.no-job-id'), dismissible: true, id: `error-${Date.now()}` });
+      addFlashbarMessage({ type: 'error', header: t('analysis-results.error.invalid-job-id'), content: t('analysis-results.error.no-job-id'), dismissible: true, id: `error-${Date.now()}` });
       setLoading(false);
       return;
     }
@@ -272,7 +276,7 @@ const AnalysisResultsPage = memo(() => {
         setResultsData(results['results']);
         setFlashbarItems([]);
       } else if (results['results']?.error) {
-        addFlashbarMessage({ type: 'error', header: t('analysis-results-v2.error.failed-to-load'), content: results['results'].error?.message || 'Unknown error', dismissible: true, id: `error-${Date.now()}` });
+        addFlashbarMessage({ type: 'error', header: t('analysis-results.error.failed-to-load'), content: results['results'].error?.message || 'Unknown error', dismissible: true, id: `error-${Date.now()}` });
       }
 
       if (results['schemas']?.success) {
@@ -302,7 +306,7 @@ const AnalysisResultsPage = memo(() => {
       try {
         const apiManager = new ApiManager();
         const first = (await apiManager.execute([{ id: 'p1', path: listPath(1), method: 'GET', params: {} }]))['p1'];
-        if (!first?.success) throw new Error(first?.error?.message || t('analysis-results-v2.query-routing.empty'));
+        if (!first?.success) throw new Error(first?.error?.message || t('analysis-results.query-routing.empty'));
         let items = first.items || [];
         const totalPages = Number(first.total_pages) || 1;
         const pages = Math.min(totalPages, JOURNEY_MAX_PAGES);
@@ -313,7 +317,7 @@ const AnalysisResultsPage = memo(() => {
           }
           const rest = await apiManager.execute(calls);
           calls.forEach(({ id }) => {
-            if (!rest[id]?.success) throw new Error(rest[id]?.error?.message || t('analysis-results-v2.query-routing.empty'));
+            if (!rest[id]?.success) throw new Error(rest[id]?.error?.message || t('analysis-results.query-routing.empty'));
             items = items.concat(rest[id].items || []);
           });
         }
@@ -325,6 +329,27 @@ const AnalysisResultsPage = memo(() => {
     load();
     return () => { cancelled = true; };
   }, [jobId, t]);
+
+  // #957: the files of the job's deliverables/ folder (GET .../deliverables).
+  useEffect(() => {
+    if (!jobId) return undefined;
+    let cancelled = false;
+    const load = async () => {
+      setDeliverables({ files: [], loading: true, error: null });
+      try {
+        const apiManager = new ApiManager();
+        const res = (await apiManager.execute([
+          { id: 'deliverables', path: `assessments/${jobId}/deliverables`, method: 'GET', params: {} },
+        ]))['deliverables'];
+        if (!res?.success) throw new Error(res?.error?.message || 'Unknown error');
+        if (!cancelled) setDeliverables({ files: res.files || [], loading: false, error: null });
+      } catch (error) {
+        if (!cancelled) setDeliverables({ files: [], loading: false, error: error.message });
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [jobId]);
 
   // Load Ace editor
   useEffect(() => {
@@ -449,10 +474,10 @@ const AnalysisResultsPage = memo(() => {
   }, [afterDist, cacheOverlay]);
 
   const breadcrumbItems = useMemo(() => [
-    { href: "/", text: t('analysis-results-v2.breadcrumb.home') },
-    { href: "/dashboard", text: t('analysis-results-v2.breadcrumb.dashboard') },
-    { href: `/analysis/monitor/summary/${jobId}`, text: t('analysis-results-v2.breadcrumb.assessment') },
-    { href: `/analysis/results-v2/${jobId}`, text: t('analysis-results-v2.breadcrumb.results') }
+    { href: "/", text: t('analysis-results.breadcrumb.home') },
+    { href: "/dashboard", text: t('analysis-results.breadcrumb.dashboard') },
+    { href: `/analysis/monitor/summary/${jobId}`, text: t('analysis-results.breadcrumb.assessment') },
+    { href: `/analysis/results/${jobId}`, text: t('analysis-results.breadcrumb.results') }
   ], [jobId, t]);
 
 
@@ -1031,7 +1056,7 @@ const AnalysisResultsPage = memo(() => {
       if (trace?.success) {
         setQueryTrace({ data: trace, error: null });
       } else {
-        setQueryTrace({ data: null, error: trace?.error?.message || t('analysis-results-v2.query-trace.empty') });
+        setQueryTrace({ data: null, error: trace?.error?.message || t('analysis-results.query-trace.empty') });
       }
 
       if (result['query-journey']?.success) {
@@ -1173,7 +1198,7 @@ const AnalysisResultsPage = memo(() => {
   const patternColumnDefinitions = useMemo(() => [
     {
       id: 'pattern_id',
-      header: t('analysis-results-v2.explorer.col-pattern'),
+      header: t('analysis-results.explorer.col-pattern'),
       cell: item => (
         <Link onFollow={() => handlePatternClick(item)}>
           {item.id?.slice(0, 8) || '—'}
@@ -1184,14 +1209,14 @@ const AnalysisResultsPage = memo(() => {
     },
     {
       id: 'operation',
-      header: t('analysis-results-v2.explorer.col-operation'),
+      header: t('analysis-results.explorer.col-operation'),
       cell: item => item.operation,
       sortingField: 'operation',
       width: 150
     },
     {
       id: 'engine',
-      header: t('analysis-results-v2.explorer.col-engine'),
+      header: t('analysis-results.explorer.col-engine'),
       cell: item => (
         <Badge color={ENGINE_BADGE_COLORS[item.engine] || 'grey'}>
           {ENGINE_LABELS[item.engine] || item.engine}
@@ -1206,13 +1231,13 @@ const AnalysisResultsPage = memo(() => {
     },
     {
       id: 'source_tables',
-      header: t('analysis-results-v2.explorer.col-source-tables'),
+      header: t('analysis-results.explorer.col-source-tables'),
       cell: item => item.sourceTables.join(', '),
       width: 250
     },
     {
       id: 'destination',
-      header: t('analysis-results-v2.explorer.col-destination'),
+      header: t('analysis-results.explorer.col-destination'),
       cell: item => {
         const base = item.gsiName ? `${item.destTable} (GSI: ${item.gsiName})` : item.destTable;
         // #429 part 2: the cache layer's "destination" is its key design
@@ -1220,7 +1245,7 @@ const AnalysisResultsPage = memo(() => {
         // design has one, instead of leaving the key design's eviction
         // policy entirely unbrowsable.
         return item.isCacheLayer && item.ttlSeconds != null
-          ? `${base} · ${t('analysis-results-v2.explorer.ttl-suffix', { seconds: item.ttlSeconds })}`
+          ? `${base} · ${t('analysis-results.explorer.ttl-suffix', { seconds: item.ttlSeconds })}`
           : base;
       },
       sortingField: 'destTable',
@@ -1228,7 +1253,7 @@ const AnalysisResultsPage = memo(() => {
     },
     {
       id: 'description',
-      header: t('analysis-results-v2.explorer.col-description'),
+      header: t('analysis-results.explorer.col-description'),
       cell: item => item.description || '—',
       width: 300
     }
@@ -1237,7 +1262,7 @@ const AnalysisResultsPage = memo(() => {
   const sourceTableColumnDefinitions = useMemo(() => [
     {
       id: 'table_name',
-      header: t('analysis-results-v2.explorer.col-source-table'),
+      header: t('analysis-results.explorer.col-source-table'),
       cell: item => (
         <Link onFollow={() => handleSourceTableClick(item)}>
           {item.table}
@@ -1248,7 +1273,7 @@ const AnalysisResultsPage = memo(() => {
     },
     {
       id: 'engines',
-      header: t('analysis-results-v2.explorer.col-engines'),
+      header: t('analysis-results.explorer.col-engines'),
       cell: item => (
         <SpaceBetween direction="horizontal" size="xxs">
           {[...item.engines].map(e => (
@@ -1265,7 +1290,7 @@ const AnalysisResultsPage = memo(() => {
     },
     {
       id: 'dest_tables',
-      header: t('analysis-results-v2.explorer.col-destination-tables'),
+      header: t('analysis-results.explorer.col-destination-tables'),
       cell: item => (
         <Box fontSize="body-s">{[...item.destTables].join(', ')}</Box>
       ),
@@ -1273,7 +1298,7 @@ const AnalysisResultsPage = memo(() => {
     },
     {
       id: 'patterns',
-      header: t('analysis-results-v2.explorer.col-patterns'),
+      header: t('analysis-results.explorer.col-patterns'),
       cell: item => (
         <Badge>{item.patterns.length}</Badge>
       ),
@@ -1282,17 +1307,17 @@ const AnalysisResultsPage = memo(() => {
     },
     {
       id: 'convergence',
-      header: t('analysis-results-v2.explorer.col-convergence'),
+      header: t('analysis-results.explorer.col-convergence'),
       cell: item => (
         item.convergesFrom.size > 0 ? (
-          <Badge color="blue">{t('analysis-results-v2.explorer.merged-badge', { count: item.convergesFrom.size })}</Badge>
+          <Badge color="blue">{t('analysis-results.explorer.merged-badge', { count: item.convergesFrom.size })}</Badge>
         ) : '—'
       ),
       width: 150
     },
     {
       id: 'operations',
-      header: t('analysis-results-v2.explorer.col-operations'),
+      header: t('analysis-results.explorer.col-operations'),
       cell: item => {
         const opSummary = {};
         item.patterns.forEach(p => { opSummary[p.operation] = (opSummary[p.operation] || 0) + 1; });
@@ -1319,21 +1344,21 @@ const AnalysisResultsPage = memo(() => {
 
     // Build metrics items dynamically
     const metricsItems = [];
-    if (ap.engine) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.engine'), value: <Badge color={ENGINE_BADGE_COLORS[ap.engine] || 'grey'}>{ENGINE_LABELS[ap.engine] || ap.engine}{ap.isCacheLayer ? t('cache-layer.engine-badge-suffix') : ''}</Badge> });
-    if (ap.operation) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.operation'), value: ap.operation });
-    if (ap.destTable) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.destination-table'), value: ap.destTable });
-    if (ap.gsiName) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.gsi'), value: ap.gsiName });
-    if (ap.indexUsed) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.index-used'), value: ap.indexUsed });
-    if (ap.sourceTables?.length > 0) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.source-tables'), value: ap.sourceTables.join(', ') });
-    if (ap.designRps != null) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.design-rps'), value: ap.designRps });
-    if (ap.itemSize != null) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.item-size'), value: `${ap.itemSize} bytes` });
-    if (ap.avgItems != null) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.avg-items-returned'), value: ap.avgItems });
-    if (ap.patternGroup) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.pattern-group'), value: ap.patternGroup });
+    if (ap.engine) metricsItems.push({ label: t('analysis-results.pattern-detail.engine'), value: <Badge color={ENGINE_BADGE_COLORS[ap.engine] || 'grey'}>{ENGINE_LABELS[ap.engine] || ap.engine}{ap.isCacheLayer ? t('cache-layer.engine-badge-suffix') : ''}</Badge> });
+    if (ap.operation) metricsItems.push({ label: t('analysis-results.pattern-detail.operation'), value: ap.operation });
+    if (ap.destTable) metricsItems.push({ label: t('analysis-results.pattern-detail.destination-table'), value: ap.destTable });
+    if (ap.gsiName) metricsItems.push({ label: t('analysis-results.pattern-detail.gsi'), value: ap.gsiName });
+    if (ap.indexUsed) metricsItems.push({ label: t('analysis-results.pattern-detail.index-used'), value: ap.indexUsed });
+    if (ap.sourceTables?.length > 0) metricsItems.push({ label: t('analysis-results.pattern-detail.source-tables'), value: ap.sourceTables.join(', ') });
+    if (ap.designRps != null) metricsItems.push({ label: t('analysis-results.pattern-detail.design-rps'), value: ap.designRps });
+    if (ap.itemSize != null) metricsItems.push({ label: t('analysis-results.pattern-detail.item-size'), value: `${ap.itemSize} bytes` });
+    if (ap.avgItems != null) metricsItems.push({ label: t('analysis-results.pattern-detail.avg-items-returned'), value: ap.avgItems });
+    if (ap.patternGroup) metricsItems.push({ label: t('analysis-results.pattern-detail.pattern-group'), value: ap.patternGroup });
     // #429 part 2: the cache layer's key design (TTL, data type) -- the only
     // place that information exists is the cache design's key_designs[],
     // joined in by cacheLayerAccessPatterns.
-    if (ap.ttlSeconds != null) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.ttl'), value: t('analysis-results-v2.explorer.ttl-suffix', { seconds: ap.ttlSeconds }) });
-    if (ap.keyDataType) metricsItems.push({ label: t('analysis-results-v2.pattern-detail.key-data-type'), value: ap.keyDataType });
+    if (ap.ttlSeconds != null) metricsItems.push({ label: t('analysis-results.pattern-detail.ttl'), value: t('analysis-results.explorer.ttl-suffix', { seconds: ap.ttlSeconds }) });
+    if (ap.keyDataType) metricsItems.push({ label: t('analysis-results.pattern-detail.key-data-type'), value: ap.keyDataType });
 
     return (
       <SpaceBetween size="l">
@@ -1354,7 +1379,7 @@ const AnalysisResultsPage = memo(() => {
         )}
 
         {/* Pattern Metrics */}
-        <Container header={<Header variant="h3">{t('analysis-results-v2.pattern-detail.title')}</Header>}>
+        <Container header={<Header variant="h3">{t('analysis-results.pattern-detail.title')}</Header>}>
           <KeyValuePairs
             columns={3}
             items={metricsItems}
@@ -1363,12 +1388,12 @@ const AnalysisResultsPage = memo(() => {
 
         {/* Source queries */}
         {sourceQueries.length > 0 && (
-          <Container header={<Header variant="h3">{t('analysis-results-v2.pattern-detail.source-queries', { count: sourceQueries.length })}</Header>}>
+          <Container header={<Header variant="h3">{t('analysis-results.pattern-detail.source-queries', { count: sourceQueries.length })}</Header>}>
             <Table
               columnDefinitions={[
                 {
                   id: 'query_id',
-                  header: t('analysis-results-v2.pattern-detail.query-id'),
+                  header: t('analysis-results.pattern-detail.query-id'),
                   cell: (item) => (
                     <Link
                       fontSize="body-s"
@@ -1384,25 +1409,25 @@ const AnalysisResultsPage = memo(() => {
                 },
                 {
                   id: 'type',
-                  header: t('analysis-results-v2.pattern-detail.type'),
+                  header: t('analysis-results.pattern-detail.type'),
                   cell: (item) => <Badge>{item.query_type || t('common.labels.sql')}</Badge>,
                   width: 80
                 },
                 {
                   id: 'calls_per_second',
-                  header: t('analysis-results-v2.pattern-detail.calls-per-sec'),
+                  header: t('analysis-results.pattern-detail.calls-per-sec'),
                   cell: (item) => item.calls_per_second?.toFixed(2) || '—',
                   width: 100
                 },
                 {
                   id: 'tables',
-                  header: t('analysis-results-v2.pattern-detail.tables'),
+                  header: t('analysis-results.pattern-detail.tables'),
                   cell: (item) => item.tables_accessed?.map(shortTable).join(', ') || '—',
                   width: 200
                 },
                 {
                   id: 'query_text',
-                  header: t('analysis-results-v2.pattern-detail.query-text'),
+                  header: t('analysis-results.pattern-detail.query-text'),
                   cell: (item) => {
                     if (!item.query_text) return '—';
                     return (
@@ -1445,7 +1470,7 @@ const AnalysisResultsPage = memo(() => {
 
         {/* OpenSearch source query */}
         {sourceQueries.length === 0 && ap.sourceQuery && (
-          <Container header={<Header variant="h3">{t('analysis-results-v2.pattern-detail.source-sql')}</Header>}>
+          <Container header={<Header variant="h3">{t('analysis-results.pattern-detail.source-sql')}</Header>}>
             <Box
               fontSize="body-s"
               fontFamily="monospace"
@@ -1466,7 +1491,7 @@ const AnalysisResultsPage = memo(() => {
 
         {/* Target design: key condition or DSL */}
         {(ap.keyCondition || ap.opensearchDsl) && (
-          <Container header={<Header variant="h3">{t('analysis-results-v2.pattern-detail.target-access-pattern')}</Header>}>
+          <Container header={<Header variant="h3">{t('analysis-results.pattern-detail.target-access-pattern')}</Header>}>
             <Box
               fontSize="body-s"
               fontFamily="monospace"
@@ -1488,7 +1513,7 @@ const AnalysisResultsPage = memo(() => {
 
         {/* GSI detail if present */}
         {ap.gsiName && ap.destDef && (
-          <Container header={<Header variant="h3">{t('analysis-results-v2.source-table.gsi-prefix')}{ap.gsiName}</Header>}>
+          <Container header={<Header variant="h3">{t('analysis-results.source-table.gsi-prefix')}{ap.gsiName}</Header>}>
             {(ap.destDef.gsis || ap.destDef.gsi_indexes || [])
               .filter(g => (g.gsi_name || g.index_name) === ap.gsiName)
               .map((gsi, i) => {
@@ -1496,12 +1521,12 @@ const AnalysisResultsPage = memo(() => {
                 const sk = Array.isArray(gsi.sort_key) ? gsi.sort_key[0] : gsi.sort_key;
 
                 const gsiItems = [
-                  { label: t('analysis-results-v2.pattern-detail.partition-key'), value: pk ? `${pk.attribute_name} (${pk.attribute_type})` : '—' },
-                  { label: t('analysis-results-v2.pattern-detail.projection'), value: gsi.projection || t('common.labels.all') }
+                  { label: t('analysis-results.pattern-detail.partition-key'), value: pk ? `${pk.attribute_name} (${pk.attribute_type})` : '—' },
+                  { label: t('analysis-results.pattern-detail.projection'), value: gsi.projection || t('common.labels.all') }
                 ];
 
                 if (sk) {
-                  gsiItems.splice(1, 0, { label: t('analysis-results-v2.pattern-detail.sort-key'), value: `${sk.attribute_name} (${sk.attribute_type})` });
+                  gsiItems.splice(1, 0, { label: t('analysis-results.pattern-detail.sort-key'), value: `${sk.attribute_name} (${sk.attribute_type})` });
                 }
 
                 return (
@@ -1519,7 +1544,7 @@ const AnalysisResultsPage = memo(() => {
         {!ap.inScope && ap.outOfScopeReason && (
           <Container>
             <Box color="text-status-error" fontSize="body-m">
-              <strong>{t('analysis-results-v2.pattern-detail.out-of-scope-reason')}:</strong> {ap.outOfScopeReason}
+              <strong>{t('analysis-results.pattern-detail.out-of-scope-reason')}:</strong> {ap.outOfScopeReason}
             </Box>
           </Container>
         )}
@@ -1576,19 +1601,19 @@ const AnalysisResultsPage = memo(() => {
                       columns={4}
                       items={[
                         {
-                          label: t('analysis-results-v2.source-table.table'),
+                          label: t('analysis-results.source-table.table'),
                           value: dg.destTable
                         },
                         {
-                          label: t('analysis-results-v2.source-table.patterns'),
+                          label: t('analysis-results.source-table.patterns'),
                           value: dg.patterns.length
                         },
                         ...(pk ? [{
-                          label: t('analysis-results-v2.pattern-detail.partition-key'),
+                          label: t('analysis-results.pattern-detail.partition-key'),
                           value: <><code>{pk.attribute_name}</code> ({pk.attribute_type})</>
                         }] : []),
                         ...(sk ? [{
-                          label: t('analysis-results-v2.pattern-detail.sort-key'),
+                          label: t('analysis-results.pattern-detail.sort-key'),
                           value: <><code>{sk.attribute_name}</code> ({sk.attribute_type})</>
                         }] : []),
                         ...(gsis.length > 0 ? [{
@@ -1648,7 +1673,7 @@ const AnalysisResultsPage = memo(() => {
                       variant="embedded"
                       empty={
                         <Box textAlign="center" color="inherit">
-                          {t('analysis-results-v2.source-table.no-patterns')}
+                          {t('analysis-results.source-table.no-patterns')}
                         </Box>
                       }
                     />
@@ -1879,7 +1904,7 @@ const AnalysisResultsPage = memo(() => {
           breadcrumbs={<BreadcrumbGroup items={breadcrumbItems} />}
           navigation={
             <SideNavigation
-              activeHref={`/analysis/results-v2/${jobId}`}
+              activeHref={`/analysis/results/${jobId}`}
               header={SideNavigationConfigurations.header}
               items={SideNavigationConfigurations.items}
             />
@@ -1887,7 +1912,7 @@ const AnalysisResultsPage = memo(() => {
           content={
             <Box textAlign="center" padding={{ top: 'xxxl' }}>
               <Spinner size="large" />
-              <Box margin={{ top: 'm' }} color="text-body-secondary">{t('analysis-results-v2.states.loading')}</Box>
+              <Box margin={{ top: 'm' }} color="text-body-secondary">{t('analysis-results.states.loading')}</Box>
             </Box>
           }
           toolsHide
@@ -1911,7 +1936,7 @@ const AnalysisResultsPage = memo(() => {
         breadcrumbs={<BreadcrumbGroup items={breadcrumbItems} />}
         navigation={
           <SideNavigation
-            activeHref={`/analysis/results-v2/${jobId}`}
+            activeHref={`/analysis/results/${jobId}`}
             header={SideNavigationConfigurations.header}
             items={SideNavigationConfigurations.items}
           />
@@ -1929,35 +1954,35 @@ const AnalysisResultsPage = memo(() => {
                 <SpaceBetween direction="horizontal" size="xs">
                   <Button iconName="refresh" variant="normal" onClick={fetchData} loading={loading} />
                   <Button iconName="download" variant="normal" onClick={handleExportToHTML}>
-                    {t('analysis-results-v2.actions.export-to-html')}
+                    {t('analysis-results.actions.export-to-html')}
                   </Button>
-                  <Button href={`/analysis/monitor/summary/${jobId}`}>{t('analysis-results-v2.actions.back-to-assessment')}</Button>
+                  <Button href={`/analysis/monitor/summary/${jobId}`}>{t('analysis-results.actions.back-to-assessment')}</Button>
                 </SpaceBetween>
               }
             >
-              {t('analysis-results-v2.header.title')}
+              {t('analysis-results.header.title')}
             </Header>
 
             {/* Executive Summary */}
-            <Container header={<Header variant="h2">{t('analysis-results-v2.executive-summary.title')}</Header>}>
+            <Container header={<Header variant="h2">{t('analysis-results.executive-summary.title')}</Header>}>
               <SpaceBetween size="m">
                 <Box variant="p" fontSize="body-m">
                   {synthesis?.summary || 'No summary available.'}
                 </Box>
                 {summaryFallback.isFallback && (
                   <SummaryFallbackNotice
-                    text={t('analysis-results-v2.executive-summary.fallback-notice', {
+                    text={t('analysis-results.executive-summary.fallback-notice', {
                       reason: fallbackWithheldReason(summaryFallback.warnings),
                     })}
                   />
                 )}
                 <ColumnLayout columns={4} variant="text-grid">
                   <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results-v2.executive-summary.database')}</Box>
+                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.database')}</Box>
                     <Box fontSize="heading-m" fontWeight="bold">{synthesis?.database_name || '—'}</Box>
                   </Box>
                   <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results-v2.executive-summary.target-engines')}</Box>
+                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.target-engines')}</Box>
                     <Box fontSize="heading-m">
                       <SpaceBetween direction="horizontal" size="xxs">
                         {/* #358: the cache layer is listed here too (labeled
@@ -2001,25 +2026,25 @@ const AnalysisResultsPage = memo(() => {
                     ))}
                   </Box>
                   <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results-v2.executive-summary.projected-cost')}</Box>
+                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.projected-cost')}</Box>
                     <Box fontSize="heading-m" fontWeight="bold">
                       {projectedCost > 0 ? `$${projectedCost.toFixed(2)}/mo` : '—'}
                     </Box>
                   </Box>
                   <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results-v2.executive-summary.current-cost')}</Box>
+                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.current-cost')}</Box>
                     <Box fontSize="heading-m" fontWeight="bold">
-                      {costBaseline.known ? costBaseline.currentCostStat : t('analysis-results-v2.executive-summary.cost-baseline-unknown')}
+                      {costBaseline.known ? costBaseline.currentCostStat : t('analysis-results.executive-summary.cost-baseline-unknown')}
                     </Box>
                   </Box>
                   <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results-v2.executive-summary.savings')}</Box>
+                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.savings')}</Box>
                     <Box fontSize="heading-m" fontWeight="bold">
-                      {costBaseline.known ? costBaseline.savingsStat : t('analysis-results-v2.executive-summary.savings-unknown')}
+                      {costBaseline.known ? costBaseline.savingsStat : t('analysis-results.executive-summary.savings-unknown')}
                     </Box>
                   </Box>
                   <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results-v2.executive-summary.access-patterns')}</Box>
+                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.access-patterns')}</Box>
                     <Box fontSize="heading-m" fontWeight="bold">
                       {totalAccessPatterns > 0 ? totalAccessPatterns : ownerQueryCount || '—'}
                     </Box>
@@ -2030,7 +2055,7 @@ const AnalysisResultsPage = memo(() => {
                         unexplained. */}
                     {totalAccessPatterns > 0 && ownerQueryCount > 0 && totalAccessPatterns !== ownerQueryCount && (
                       <Box fontSize="body-s" color="text-body-secondary" padding={{ top: 'xxs' }}>
-                        {t('analysis-results-v2.executive-summary.access-patterns-of-queries', { count: ownerQueryCount })}
+                        {t('analysis-results.executive-summary.access-patterns-of-queries', { count: ownerQueryCount })}
                       </Box>
                     )}
                     {/* #361: the cache layer's own patterns are real, but
@@ -2038,7 +2063,7 @@ const AnalysisResultsPage = memo(() => {
                         instead of folding them into the total/pie above. */}
                     {cachePatternCount > 0 && (
                       <Box fontSize="body-s" color="text-body-secondary" padding={{ top: 'xxs' }}>
-                        {t('analysis-results-v2.executive-summary.cache-patterns-note', { count: cachePatternCount })}
+                        {t('analysis-results.executive-summary.cache-patterns-note', { count: cachePatternCount })}
                       </Box>
                     )}
                   </Box>
@@ -2046,11 +2071,20 @@ const AnalysisResultsPage = memo(() => {
               </SpaceBetween>
             </Container>
 
+            {/* Deliverables (#957): download the job's deliverables/ folder. */}
+            <DeliverablesPanel
+              files={deliverables.files}
+              loading={deliverables.loading}
+              error={deliverables.error}
+              baseUrl={ApiConfigurations.baseUrl}
+              t={t}
+            />
+
             {/* Query Flow (Sankey) */}
             {sankeyData && (
               <Container header={
-                <Header variant="h2" description={t('analysis-results-v2.query-flow.description')}>
-                  {t('analysis-results-v2.query-flow.title')}
+                <Header variant="h2" description={t('analysis-results.query-flow.description')}>
+                  {t('analysis-results.query-flow.title')}
                 </Header>
               }>
                 <ChartSankey
@@ -2095,7 +2129,7 @@ const AnalysisResultsPage = memo(() => {
 
             {/* Cost Breakdown */}
             {costBreakdown.length > 0 && (
-              <Container header={<Header variant="h2" description={t('analysis-results-v2.cost-breakdown.description')}>{t('analysis-results-v2.cost-breakdown.title')}</Header>}>
+              <Container header={<Header variant="h2" description={t('analysis-results.cost-breakdown.description')}>{t('analysis-results.cost-breakdown.title')}</Header>}>
                 <SpaceBetween size="m">
                   <ColumnLayout columns={costBreakdown.length} variant="text-grid">
                     {costBreakdown.map((cb, idx) => {
@@ -2127,6 +2161,10 @@ const AnalysisResultsPage = memo(() => {
             )}
 
 
+            {/* Migration roadmap (#957): report.json's waves, the same ones the
+                PDF and the engineering report show. */}
+            <MigrationWavePlan synthesis={synthesis} t={t} />
+
             {/* ============================================ */}
             {/* Access Pattern Explorer                      */}
             {/* ============================================ */}
@@ -2145,7 +2183,7 @@ const AnalysisResultsPage = memo(() => {
                       hasActiveFilters
                         ? `(${filteredOwnerPatterns.length + filteredCacheLayerPatterns.length} of ${explorerTotal})`
                         : cachePatternCount > 0
-                          ? `(${t('analysis-results-v2.explorer.header-count', {
+                          ? `(${t('analysis-results.explorer.header-count', {
                               count: explorerTotal,
                               total: explorerTotal,
                               owned: totalAccessPatterns,
@@ -2153,21 +2191,21 @@ const AnalysisResultsPage = memo(() => {
                             })})`
                           : `(${totalAccessPatterns})`
                     }
-                    description={t('analysis-results-v2.explorer.description')}
+                    description={t('analysis-results.explorer.description')}
                     actions={
                       <SpaceBetween direction="horizontal" size="xs">
                         <SegmentedControl
                           selectedId={browseMode}
                           onChange={({ detail }) => { setBrowseMode(detail.selectedId); setCurrentPage(1); setSelectedItems([]); }}
                           options={[
-                            { id: 'pattern', text: t('analysis-results-v2.explorer.by-access-pattern') },
-                            { id: 'source', text: t('analysis-results-v2.explorer.by-source-table') },
+                            { id: 'pattern', text: t('analysis-results.explorer.by-access-pattern') },
+                            { id: 'source', text: t('analysis-results.explorer.by-source-table') },
                           ]}
                         />
                       </SpaceBetween>
                     }
                   >
-                    {t('analysis-results-v2.explorer.title')}
+                    {t('analysis-results.explorer.title')}
                   </Header>
                 }
               >
@@ -2176,11 +2214,11 @@ const AnalysisResultsPage = memo(() => {
                   {/* Visual navigators: engine bar + operation donut */}
                   <ColumnLayout columns={2}>
                     <Box>
-                      <Box variant="awsui-key-label" margin={{ bottom: 'xs' }}>{t('analysis-results-v2.explorer.filter-by-engine')}</Box>
+                      <Box variant="awsui-key-label" margin={{ bottom: 'xs' }}>{t('analysis-results.explorer.filter-by-engine')}</Box>
                       {renderEngineBar()}
                     </Box>
                     <Box>
-                      <Box variant="awsui-key-label" margin={{ bottom: 'xs' }}>{t('analysis-results-v2.explorer.filter-by-operation-type')}</Box>
+                      <Box variant="awsui-key-label" margin={{ bottom: 'xs' }}>{t('analysis-results.explorer.filter-by-operation-type')}</Box>
                       <Multiselect
                         selectedOptions={opFilter}
                         onChange={({ detail }) => {
@@ -2278,44 +2316,44 @@ const AnalysisResultsPage = memo(() => {
                     onChange={({ detail }) => { setFilterQuery(detail); setCurrentPage(1); }}
                     filteringProperties={filterProperties}
                     filteringOptions={filterOptions}
-                    filteringPlaceholder={t('analysis-results-v2.explorer.filter-placeholder')}
-                    countText={t('analysis-results-v2.explorer.count-text', { count: filteredPatterns.length })}
+                    filteringPlaceholder={t('analysis-results.explorer.filter-placeholder')}
+                    countText={t('analysis-results.explorer.count-text', { count: filteredPatterns.length })}
                     expandToViewport
                     i18nStrings={{
-                      filteringAriaLabel: t('analysis-results-v2.explorer.filtering-aria-label'),
-                      dismissAriaLabel: t('analysis-results-v2.explorer.dismiss-aria-label'),
-                      filteringPlaceholder: t('analysis-results-v2.explorer.filter-placeholder'),
-                      groupValuesText: t('analysis-results-v2.explorer.group-values-text'),
-                      groupPropertiesText: t('analysis-results-v2.explorer.group-properties-text'),
-                      operatorsText: t('analysis-results-v2.explorer.operators-text'),
-                      operationAndText: t('analysis-results-v2.explorer.operation-and-text'),
-                      operationOrText: t('analysis-results-v2.explorer.operation-or-text'),
-                      operatorLessText: t('analysis-results-v2.explorer.operator-less-text'),
-                      operatorLessOrEqualText: t('analysis-results-v2.explorer.operator-less-or-equal-text'),
-                      operatorGreaterText: t('analysis-results-v2.explorer.operator-greater-text'),
-                      operatorGreaterOrEqualText: t('analysis-results-v2.explorer.operator-greater-or-equal-text'),
-                      operatorContainsText: t('analysis-results-v2.explorer.operator-contains-text'),
-                      operatorDoesNotContainText: t('analysis-results-v2.explorer.operator-does-not-contain-text'),
-                      operatorEqualsText: t('analysis-results-v2.explorer.operator-equals-text'),
-                      operatorDoesNotEqualText: t('analysis-results-v2.explorer.operator-does-not-equal-text'),
-                      editTokenHeader: t('analysis-results-v2.explorer.edit-token-header'),
-                      propertyText: t('analysis-results-v2.explorer.property-text'),
-                      operatorText: t('analysis-results-v2.explorer.operator-text'),
-                      valueText: t('analysis-results-v2.explorer.value-text'),
+                      filteringAriaLabel: t('analysis-results.explorer.filtering-aria-label'),
+                      dismissAriaLabel: t('analysis-results.explorer.dismiss-aria-label'),
+                      filteringPlaceholder: t('analysis-results.explorer.filter-placeholder'),
+                      groupValuesText: t('analysis-results.explorer.group-values-text'),
+                      groupPropertiesText: t('analysis-results.explorer.group-properties-text'),
+                      operatorsText: t('analysis-results.explorer.operators-text'),
+                      operationAndText: t('analysis-results.explorer.operation-and-text'),
+                      operationOrText: t('analysis-results.explorer.operation-or-text'),
+                      operatorLessText: t('analysis-results.explorer.operator-less-text'),
+                      operatorLessOrEqualText: t('analysis-results.explorer.operator-less-or-equal-text'),
+                      operatorGreaterText: t('analysis-results.explorer.operator-greater-text'),
+                      operatorGreaterOrEqualText: t('analysis-results.explorer.operator-greater-or-equal-text'),
+                      operatorContainsText: t('analysis-results.explorer.operator-contains-text'),
+                      operatorDoesNotContainText: t('analysis-results.explorer.operator-does-not-contain-text'),
+                      operatorEqualsText: t('analysis-results.explorer.operator-equals-text'),
+                      operatorDoesNotEqualText: t('analysis-results.explorer.operator-does-not-equal-text'),
+                      editTokenHeader: t('analysis-results.explorer.edit-token-header'),
+                      propertyText: t('analysis-results.explorer.property-text'),
+                      operatorText: t('analysis-results.explorer.operator-text'),
+                      valueText: t('analysis-results.explorer.value-text'),
                       cancelActionText: t('common.actions.cancel'),
-                      applyActionText: t('analysis-results-v2.explorer.apply-action-text'),
-                      allPropertiesLabel: t('analysis-results-v2.explorer.all-properties-label'),
-                      tokenLimitShowMore: t('analysis-results-v2.explorer.token-limit-show-more'),
-                      tokenLimitShowFewer: t('analysis-results-v2.explorer.token-limit-show-fewer'),
-                      clearFiltersText: t('analysis-results-v2.explorer.clear-filters-text'),
-                      removeTokenButtonAriaLabel: (token) => t('analysis-results-v2.explorer.remove-token-aria-label', { propertyLabel: token.propertyLabel, operator: token.operator, value: token.value }),
-                      enteredTextLabel: (text) => t('analysis-results-v2.explorer.entered-text-label', { text }),
+                      applyActionText: t('analysis-results.explorer.apply-action-text'),
+                      allPropertiesLabel: t('analysis-results.explorer.all-properties-label'),
+                      tokenLimitShowMore: t('analysis-results.explorer.token-limit-show-more'),
+                      tokenLimitShowFewer: t('analysis-results.explorer.token-limit-show-fewer'),
+                      clearFiltersText: t('analysis-results.explorer.clear-filters-text'),
+                      removeTokenButtonAriaLabel: (token) => t('analysis-results.explorer.remove-token-aria-label', { propertyLabel: token.propertyLabel, operator: token.operator, value: token.value }),
+                      enteredTextLabel: (text) => t('analysis-results.explorer.entered-text-label', { text }),
                     }}
                   />
 
                   {hasActiveFilters && (
                     <div className="active-filters">
-                      <Button variant="link" onClick={clearAllFilters}>{t('analysis-results-v2.explorer.clear-all-filters')}</Button>
+                      <Button variant="link" onClick={clearAllFilters}>{t('analysis-results.explorer.clear-all-filters')}</Button>
                     </div>
                   )}
 
@@ -2343,8 +2381,8 @@ const AnalysisResultsPage = memo(() => {
                       onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                       empty={
                         <Box textAlign="center" padding="l">
-                          <Box variant="strong">{t('analysis-results-v2.explorer.no-matching-patterns')}</Box>
-                          <Box variant="p" color="text-body-secondary">{t('analysis-results-v2.explorer.try-adjusting-filters')}</Box>
+                          <Box variant="strong">{t('analysis-results.explorer.no-matching-patterns')}</Box>
+                          <Box variant="p" color="text-body-secondary">{t('analysis-results.explorer.try-adjusting-filters')}</Box>
                         </Box>
                       }
                     />
@@ -2363,8 +2401,8 @@ const AnalysisResultsPage = memo(() => {
                       onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                       empty={
                         <Box textAlign="center" padding="l">
-                          <Box variant="strong">{t('analysis-results-v2.explorer.no-matching-source-tables')}</Box>
-                          <Box variant="p" color="text-body-secondary">{t('analysis-results-v2.explorer.try-adjusting-filters')}</Box>
+                          <Box variant="strong">{t('analysis-results.explorer.no-matching-source-tables')}</Box>
+                          <Box variant="p" color="text-body-secondary">{t('analysis-results.explorer.try-adjusting-filters')}</Box>
                         </Box>
                       }
                     />
@@ -2398,7 +2436,7 @@ const AnalysisResultsPage = memo(() => {
                         variant="h3"
                         counter={`(${filteredCacheLayerPatterns.length})`}
                       >
-                        {t('analysis-results-v2.explorer.cache-layer-section-title', {
+                        {t('analysis-results.explorer.cache-layer-section-title', {
                           engine: ENGINE_LABELS[cacheOverlay?.engine] || cacheOverlay?.engine,
                         })}
                       </Header>
@@ -2419,7 +2457,7 @@ const AnalysisResultsPage = memo(() => {
                         variant="h3"
                         counter={`(${cacheSourceTableGroups.length})`}
                       >
-                        {t('analysis-results-v2.explorer.cache-layer-section-title', {
+                        {t('analysis-results.explorer.cache-layer-section-title', {
                           engine: ENGINE_LABELS[cacheOverlay?.engine] || cacheOverlay?.engine,
                         })}
                       </Header>
@@ -2445,11 +2483,11 @@ const AnalysisResultsPage = memo(() => {
                 the deck's "only show UNRATED when present" rule, rather than
                 an always-empty fifth tab on every ordinary run. */}
             {(openRisks.length > 0 || resolvedRisksList.length > 0 || overallRiskLevel) && (
-              <Container header={<Header variant="h2" description={t('analysis-results-v2.risk-assessment.description')}>{t('analysis-results-v2.risk-assessment.title')}</Header>}>
+              <Container header={<Header variant="h2" description={t('analysis-results.risk-assessment.description')}>{t('analysis-results.risk-assessment.title')}</Header>}>
                 <SpaceBetween size="m">
                   {overallRiskLevel && (
                     <StatusIndicator type={riskSeverityStatus(overallRiskLevel)}>
-                      {t('analysis-results-v2.risk-assessment.overall-risk')}: {overallRiskLevel}
+                      {t('analysis-results.risk-assessment.overall-risk')}: {overallRiskLevel}
                     </StatusIndicator>
                   )}
                   <Tabs
@@ -2462,10 +2500,10 @@ const AnalysisResultsPage = memo(() => {
                       const status = riskSeverityStatus(severity);
                       return {
                         id: severity,
-                        label: t('analysis-results-v2.risk-assessment.tab-label', { severity, count: severityCount }),
+                        label: t('analysis-results.risk-assessment.tab-label', { severity, count: severityCount }),
                         content: risksAtSeverity.length === 0 ? (
                           <Box color="text-body-secondary" padding="s">
-                            {t('analysis-results-v2.risk-assessment.no-risks-at-severity')}
+                            {t('analysis-results.risk-assessment.no-risks-at-severity')}
                           </Box>
                         ) : (
                           <SpaceBetween size="s">
@@ -2495,12 +2533,12 @@ const AnalysisResultsPage = memo(() => {
                                     <Box fontSize="body-s">{body}</Box>
                                     {showMitigation && (
                                       <Box fontSize="body-s" color="text-body-secondary">
-                                        <b>{t('analysis-results-v2.risk-assessment.mitigation')}:</b> {risk.mitigation}
+                                        <b>{t('analysis-results.risk-assessment.mitigation')}:</b> {risk.mitigation}
                                       </Box>
                                     )}
                                     {affectedTables.length > 0 && (
                                       <Box fontSize="body-s" color="text-body-secondary">
-                                        {t('analysis-results-v2.risk-assessment.affected-tables')}: {affectedTables.join(', ')}
+                                        {t('analysis-results.risk-assessment.affected-tables')}: {affectedTables.join(', ')}
                                       </Box>
                                     )}
                                   </SpaceBetween>
@@ -2513,7 +2551,7 @@ const AnalysisResultsPage = memo(() => {
                     })}
                   />
                   {resolvedRisksList.length > 0 && (
-                    <ExpandableSection headerText={t('analysis-results-v2.risk-assessment.resolved-count', { count: resolvedRiskCountOf(synthesis, resolvedRisksList) })}>
+                    <ExpandableSection headerText={t('analysis-results.risk-assessment.resolved-count', { count: resolvedRiskCountOf(synthesis, resolvedRisksList) })}>
                       <SpaceBetween size="s">
                         {resolvedRisksList.map((risk, idx) => {
                           const { body } = splitRiskDescription(risk.description);
@@ -2526,7 +2564,7 @@ const AnalysisResultsPage = memo(() => {
                                   <StatusIndicator type={riskSeverityStatus(risk.severity)}>{risk.severity}</StatusIndicator>
                                   {risk.resolved_on ? (
                                     <Box fontSize="body-s" color="text-body-secondary">
-                                      {t('analysis-results-v2.risk-assessment.resolved-where', { from: fromEngine, to: toEngine })}
+                                      {t('analysis-results.risk-assessment.resolved-where', { from: fromEngine, to: toEngine })}
                                     </Box>
                                   ) : (
                                     <Box fontSize="body-s" color="text-body-secondary">{fromEngine}</Box>
@@ -2535,7 +2573,7 @@ const AnalysisResultsPage = memo(() => {
                                 <Box fontSize="body-s">{body}</Box>
                                 {risk.reason && (
                                   <Box fontSize="body-s" color="text-body-secondary">
-                                    {t('analysis-results-v2.risk-assessment.resolved-reason', { reason: risk.reason })}
+                                    {t('analysis-results.risk-assessment.resolved-reason', { reason: risk.reason })}
                                   </Box>
                                 )}
                               </SpaceBetween>
@@ -2553,7 +2591,7 @@ const AnalysisResultsPage = memo(() => {
             {/* Engine-specific Trade-offs */}
             {Object.entries(engineTradeOffs).some(([, tradeOffList]) => tradeOffList.length > 0) && (
               <Container
-                header={<Header variant="h2">{t('analysis-results-v2.tradeoffs.title')}</Header>}
+                header={<Header variant="h2">{t('analysis-results.tradeoffs.title')}</Header>}
               >
                 <Tabs
                   tabs={Object.entries(engineTradeOffs)
@@ -2591,7 +2629,7 @@ const AnalysisResultsPage = memo(() => {
                                       )}
                                       {(tradeOff.source_tables?.length > 0 || tradeOff.target_tables?.length > 0) && (
                                         <Box fontSize="body-s" padding={{ left: 'xl' }}>
-                                          <Link variant="secondary" fontSize="body-s" onFollow={() => {}}>{t('analysis-results-v2.tradeoffs.mapping')}</Link>
+                                          <Link variant="secondary" fontSize="body-s" onFollow={() => {}}>{t('analysis-results.tradeoffs.mapping')}</Link>
                                           <Box margin={{ top: 'xxxs' }}>
                                             <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
                                               {tradeOff.source_tables?.length > 0 && (
@@ -2637,14 +2675,14 @@ const AnalysisResultsPage = memo(() => {
                                       )}
                                       {tradeOff.query_ids?.length > 0 && (
                                         <Box fontSize="body-s" margin={{ top: 's' }} padding={{ left: 'xl' }}>
-                                          <Link variant="secondary" fontSize="body-s" onFollow={() => {}}>{t('analysis-results-v2.tradeoffs.sql-ids')}</Link>
+                                          <Link variant="secondary" fontSize="body-s" onFollow={() => {}}>{t('analysis-results.tradeoffs.sql-ids')}</Link>
                                           <Box margin={{ top: 'xxxs' }}>
                                             <SpaceBetween direction="horizontal" size="xxs">
                                               {tradeOff.query_ids.map((qid, qi) => (
                                                 <span key={qi}
                                                   role="button"
                                                   tabIndex={0}
-                                                  aria-label={t('analysis-results-v2.query-routing.open-label', { id: qid })}
+                                                  aria-label={t('analysis-results.query-routing.open-label', { id: qid })}
                                                   onClick={() => fetchQueryJourney(qid)}
                                                   onKeyDown={(e) => {
                                                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchQueryJourney(qid); }
@@ -2722,9 +2760,9 @@ const AnalysisResultsPage = memo(() => {
                 header={
                   <Header
                     variant="h2"
-                    description={t('analysis-results-v2.aurora-design.description')}
+                    description={t('analysis-results.aurora-design.description')}
                   >
-                    {t('analysis-results-v2.aurora-design.title')}
+                    {t('analysis-results.aurora-design.title')}
                   </Header>
                 }
               >
@@ -2733,7 +2771,7 @@ const AnalysisResultsPage = memo(() => {
                     const queryCount = design.queryGroups.reduce((sum, g) => sum + g.queries.length, 0);
                     return {
                       id: design.engine,
-                      label: t('analysis-results-v2.aurora-design.tab-label', {
+                      label: t('analysis-results.aurora-design.tab-label', {
                         name: design.displayName,
                         count: design.tables.length,
                       }),
@@ -2742,18 +2780,18 @@ const AnalysisResultsPage = memo(() => {
                           {design.migrationStrategy && (
                             <Box fontSize="body-s" color="text-body-secondary">
                               {t(
-                                `analysis-results-v2.aurora-design.migration-strategy-${design.migrationStrategy}`,
+                                `analysis-results.aurora-design.migration-strategy-${design.migrationStrategy}`,
                                 { defaultValue: design.migrationStrategy }
                               )}
                             </Box>
                           )}
 
                           <ExpandableSection
-                            headerText={t('analysis-results-v2.aurora-design.tables-header', { count: design.tables.length })}
+                            headerText={t('analysis-results.aurora-design.tables-header', { count: design.tables.length })}
                             defaultExpanded={false}
                           >
                             {design.tables.length === 0 ? (
-                              <Box color="text-body-secondary" fontSize="body-s">{t('analysis-results-v2.aurora-design.no-tables')}</Box>
+                              <Box color="text-body-secondary" fontSize="body-s">{t('analysis-results.aurora-design.no-tables')}</Box>
                             ) : (
                               <SpaceBetween size="s">
                                 {design.tables.map(table => (
@@ -2767,8 +2805,8 @@ const AnalysisResultsPage = memo(() => {
                                       <Table
                                         variant="embedded"
                                         columnDefinitions={[
-                                          { id: 'name', header: t('analysis-results-v2.aurora-design.col-column'), cell: c => c.name },
-                                          { id: 'type', header: t('analysis-results-v2.aurora-design.col-aurora-type'), cell: c => c.auroraType },
+                                          { id: 'name', header: t('analysis-results.aurora-design.col-column'), cell: c => c.name },
+                                          { id: 'type', header: t('analysis-results.aurora-design.col-aurora-type'), cell: c => c.auroraType },
                                         ]}
                                         items={table.columns}
                                       />
@@ -2776,11 +2814,11 @@ const AnalysisResultsPage = memo(() => {
                                         columns={1}
                                         items={[
                                           {
-                                            label: t('analysis-results-v2.aurora-design.primary-key'),
+                                            label: t('analysis-results.aurora-design.primary-key'),
                                             value: table.primaryKey.join(', ') || '—',
                                           },
                                           ...(table.indexes.length > 0 ? [{
-                                            label: t('analysis-results-v2.aurora-design.indexes', { count: table.indexes.length }),
+                                            label: t('analysis-results.aurora-design.indexes', { count: table.indexes.length }),
                                             value: (
                                               <SpaceBetween size="xxs">
                                                 {table.indexes.map((ix, idx) => (
@@ -2790,7 +2828,7 @@ const AnalysisResultsPage = memo(() => {
                                             ),
                                           }] : []),
                                           ...(table.foreignKeys.length > 0 ? [{
-                                            label: t('analysis-results-v2.aurora-design.foreign-keys', { count: table.foreignKeys.length }),
+                                            label: t('analysis-results.aurora-design.foreign-keys', { count: table.foreignKeys.length }),
                                             value: (
                                               <SpaceBetween size="xxs">
                                                 {table.foreignKeys.map((fk, idx) => (
@@ -2810,12 +2848,12 @@ const AnalysisResultsPage = memo(() => {
 
                           {design.ddl && (
                             <ExpandableSection
-                              headerText={t('analysis-results-v2.aurora-design.ddl-header')}
+                              headerText={t('analysis-results.aurora-design.ddl-header')}
                               defaultExpanded={false}
                             >
                               {aceLoading ? (
                                 <Box textAlign="center" padding="l">
-                                  <StatusIndicator type="loading">{t('analysis-results-v2.query-journey.loading-editor')}</StatusIndicator>
+                                  <StatusIndicator type="loading">{t('analysis-results.query-journey.loading-editor')}</StatusIndicator>
                                 </Box>
                               ) : (
                                 <CodeEditor
@@ -2825,8 +2863,8 @@ const AnalysisResultsPage = memo(() => {
                                   preferences={{ wrapLines: false, theme: 'cloud_editor_dark' }}
                                   editorContentHeight={400}
                                   i18nStrings={codeEditorI18nStrings(t, {
-                                    loadingState: t('analysis-results-v2.query-journey.loading'),
-                                    errorState: t('analysis-results-v2.query-journey.error'),
+                                    loadingState: t('analysis-results.query-journey.loading'),
+                                    errorState: t('analysis-results.query-journey.error'),
                                     errorStateRecovery: t('common.actions.retry'),
                                   })}
                                   readOnly
@@ -2837,7 +2875,7 @@ const AnalysisResultsPage = memo(() => {
 
                           {design.optimizations.length > 0 && (
                             <ExpandableSection
-                              headerText={t('analysis-results-v2.aurora-design.optimizations-header', { count: design.optimizations.length })}
+                              headerText={t('analysis-results.aurora-design.optimizations-header', { count: design.optimizations.length })}
                               defaultExpanded={false}
                             >
                               <SpaceBetween size="xs">
@@ -2860,17 +2898,17 @@ const AnalysisResultsPage = memo(() => {
                           )}
 
                           <ExpandableSection
-                            headerText={t('analysis-results-v2.aurora-design.queries-header', { count: queryCount })}
+                            headerText={t('analysis-results.aurora-design.queries-header', { count: queryCount })}
                             defaultExpanded={queryCount > 0}
                           >
                             {design.queryGroups.length === 0 ? (
-                              <Box color="text-body-secondary" fontSize="body-s">{t('analysis-results-v2.aurora-design.no-queries')}</Box>
+                              <Box color="text-body-secondary" fontSize="body-s">{t('analysis-results.aurora-design.no-queries')}</Box>
                             ) : (
                               <SpaceBetween size="s">
                                 {design.queryGroups.map(group => (
                                   <ExpandableSection
                                     key={group.sourceTable}
-                                    headerText={t('analysis-results-v2.aurora-design.source-table-header', {
+                                    headerText={t('analysis-results.aurora-design.source-table-header', {
                                       table: group.sourceTable,
                                       count: group.queries.length,
                                     })}
@@ -2882,22 +2920,22 @@ const AnalysisResultsPage = memo(() => {
                                       columnDefinitions={[
                                         {
                                           id: 'excerpt',
-                                          header: t('analysis-results-v2.aurora-design.col-query'),
+                                          header: t('analysis-results.aurora-design.col-query'),
                                           cell: q => <Box fontFamily="monospace" fontSize="body-s">{q.excerpt}</Box>,
                                         },
                                         {
                                           id: 'type',
-                                          header: t('analysis-results-v2.aurora-design.col-type'),
+                                          header: t('analysis-results.aurora-design.col-type'),
                                           cell: q => q.queryType || '—',
                                         },
                                         {
                                           id: 'rps',
-                                          header: t('analysis-results-v2.aurora-design.col-calls-per-second'),
+                                          header: t('analysis-results.aurora-design.col-calls-per-second'),
                                           cell: q => (typeof q.callsPerSecond === 'number' ? q.callsPerSecond.toFixed(2) : '—'),
                                         },
                                         {
                                           id: 'reason',
-                                          header: t('analysis-results-v2.aurora-design.col-reason'),
+                                          header: t('analysis-results.aurora-design.col-reason'),
                                           cell: q => q.reason || '—',
                                         },
                                       ]}
@@ -2948,7 +2986,7 @@ const AnalysisResultsPage = memo(() => {
       >
         {queryJourneyLoading ? (
           <Box textAlign="center" padding="xxl">
-            <StatusIndicator type="loading">{t('analysis-results-v2.query-journey.loading')}</StatusIndicator>
+            <StatusIndicator type="loading">{t('analysis-results.query-journey.loading')}</StatusIndicator>
           </Box>
         ) : queryJourneyData?.error ? (
           <Box textAlign="center" padding="l">
@@ -3020,7 +3058,7 @@ const AnalysisResultsPage = memo(() => {
                       ]}
                     />
                     {queryJourneyData?.source?.query_text && (
-                      <Container header={<Header variant="h3">{t('analysis-results-v2.pattern-detail.query-text')}</Header>}>
+                      <Container header={<Header variant="h3">{t('analysis-results.pattern-detail.query-text')}</Header>}>
                         <Box fontSize="body-s" fontFamily="monospace" padding="s" style={{
                           backgroundColor: '#f2f3f3',
                           borderRadius: '4px',
@@ -3074,7 +3112,7 @@ const AnalysisResultsPage = memo(() => {
               },
               {
                 id: 'why-this-engine',
-                label: t('analysis-results-v2.query-trace.tab'),
+                label: t('analysis-results.query-trace.tab'),
                 content: (
                   <QueryDecisionTrace
                     trace={queryTrace.data}
@@ -3089,7 +3127,7 @@ const AnalysisResultsPage = memo(() => {
                 label: 'JSON',
                 content: aceLoading ? (
                   <Box textAlign="center" padding="l">
-                    <StatusIndicator type="loading">{t('analysis-results-v2.query-journey.loading-editor')}</StatusIndicator>
+                    <StatusIndicator type="loading">{t('analysis-results.query-journey.loading-editor')}</StatusIndicator>
                   </Box>
                 ) : (
                   <CodeEditor
@@ -3102,8 +3140,8 @@ const AnalysisResultsPage = memo(() => {
                     }}
                     editorContentHeight={600}
                     i18nStrings={codeEditorI18nStrings(t, {
-                      loadingState: t('analysis-results-v2.query-journey.loading'),
-                      errorState: t('analysis-results-v2.query-journey.error'),
+                      loadingState: t('analysis-results.query-journey.loading'),
+                      errorState: t('analysis-results.query-journey.error'),
                       errorStateRecovery: t('common.actions.retry')
                     })}
                     loading={queryJourneyLoading}
@@ -3146,7 +3184,7 @@ const AnalysisResultsPage = memo(() => {
             </div>
           </Box>
           <Box textAlign="center" color="text-body-secondary">
-            {t('analysis-results-v2.export.progress-step', { current: exportProgress.current, total: exportProgress.total })}
+            {t('analysis-results.export.progress-step', { current: exportProgress.current, total: exportProgress.total })}
           </Box>
         </SpaceBetween>
       </Modal>

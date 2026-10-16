@@ -1,10 +1,10 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import ChartSankey from '../ChartSankey-01';
+import ChartSankey from '../ChartSankey';
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
-// The palette ChartSankey-01.js used to fall back to for any node id it did not
+// The palette ChartSankey.js used to fall back to for any node id it did not
 // know. Aurora's node ids are aurora_mysql / aurora_postgresql (never a bare
 // "aurora"), so both used to land here -- and DynamoDB's #3184e8 is close enough
 // that the two read as the same colour on the Results page, the Assignment gate

@@ -5,10 +5,23 @@ import en from '../locales/en.json';
 
 const PAGES = [
   {
-    name: 'AnalysisResults-02.js',
-    file: '../pages/AnalysisResults-02.js',
-    canaryKey: 'analysis-results-v2.explorer.col-description',
+    name: 'AnalysisResults.js',
+    file: '../pages/AnalysisResults.js',
+    canaryKey: 'analysis-results.explorer.col-description',
     canaryValue: 'Description',
+  },
+  {
+    // #957: the results page's migration roadmap and download panel.
+    name: 'MigrationWavePlan.js',
+    file: '../components/MigrationWavePlan.js',
+    canaryKey: 'analysis-results.waves.title',
+    canaryValue: 'Migration roadmap',
+  },
+  {
+    name: 'DeliverablesPanel.js',
+    file: '../components/DeliverablesPanel.js',
+    canaryKey: 'analysis-results.deliverables.title',
+    canaryValue: 'Deliverables',
   },
   {
     // #269 round-1 review: extended to also cover the Assignment review page,

@@ -18,9 +18,14 @@ function idsOf(items) {
 }
 
 describe('buildDashboardActionItems', () => {
-  it('always offers view-results and view-analysis', () => {
+  it('always offers view-results', () => {
     const items = buildDashboardActionItems(t, []);
-    expect(idsOf(items)).toEqual(expect.arrayContaining(['view-results', 'view-analysis']));
+    expect(idsOf(items)).toContain('view-results');
+  });
+
+  it('no longer offers view-analysis: the engine-analysis page it opened was removed (#957)', () => {
+    const items = buildDashboardActionItems(t, []);
+    expect(idsOf(items)).not.toContain('view-analysis');
   });
 
   it('never offers the retired "stop" placeholder action', () => {

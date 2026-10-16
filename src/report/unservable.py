@@ -31,7 +31,7 @@ UNSERVABLE_INTRO = (
 
 # The existing re-run path: the assignment review (the customer gate). One
 # sentence for both reports, the deck and the UI callout
-# (src/ui/src/locales/en.json, analysis-results-v2.unservable.rerun); the
+# (src/ui/src/locales/en.json, analysis-results.unservable.rerun); the
 # interactive report repeats it (src/ui/src/utils/ExportReport.js).
 UNSERVABLE_RERUN_TEXT = (
     "To re-run, open the assignment review: change a query's engine or take it out of scope, "

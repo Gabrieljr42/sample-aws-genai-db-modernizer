@@ -20,9 +20,9 @@ import { closeCallsOf } from "../utils/reportFacts";
 
 function gapText(pair, t) {
   if (pair.min_gap === pair.max_gap) {
-    return t('analysis-results-v2.close-calls.gap', { count: pair.max_gap, gap: pair.max_gap });
+    return t('analysis-results.close-calls.gap', { count: pair.max_gap, gap: pair.max_gap });
   }
-  return t('analysis-results-v2.close-calls.gap-range', { low: pair.min_gap, high: pair.max_gap });
+  return t('analysis-results.close-calls.gap-range', { low: pair.min_gap, high: pair.max_gap });
 }
 
 function pairText(pair, margin, t) {
@@ -32,23 +32,23 @@ function pairText(pair, margin, t) {
   const ties = pair.exact_tie_count || 0;
   const parts = [];
   if (n) {
-    parts.push(t('analysis-results-v2.close-calls.pair', { count: n, engine, alternative, margin, gap: gapText(pair, t) }));
-    if (ties) parts.push(t('analysis-results-v2.close-calls.ties', { count: ties, engine, alternative }));
+    parts.push(t('analysis-results.close-calls.pair', { count: n, engine, alternative, margin, gap: gapText(pair, t) }));
+    if (ties) parts.push(t('analysis-results.close-calls.ties', { count: ties, engine, alternative }));
   } else {
-    parts.push(t('analysis-results-v2.close-calls.ties-only', { count: ties, engine, alternative }));
+    parts.push(t('analysis-results.close-calls.ties-only', { count: ties, engine, alternative }));
   }
   if (pair.group_mean_count) {
-    parts.push(t('analysis-results-v2.close-calls.groups', { count: pair.group_mean_count }));
+    parts.push(t('analysis-results.close-calls.groups', { count: pair.group_mean_count }));
   }
   // Both kinds listed: always "every one of them"; otherwise agree with the one count.
-  const serve = t('analysis-results-v2.close-calls.can-serve', { count: n && ties ? 2 : (n || ties), alternative });
+  const serve = t('analysis-results.close-calls.can-serve', { count: n && ties ? 2 : (n || ties), alternative });
   return `${parts.join('; ')}. ${serve}`;
 }
 
 function headerText(cc, t) {
-  const head = t('analysis-results-v2.close-calls.header', { count: cc.close_call_query_count });
+  const head = t('analysis-results.close-calls.header', { count: cc.close_call_query_count });
   return cc.settled_tie_count
-    ? `${head}${t('analysis-results-v2.close-calls.header-ties', { count: cc.settled_tie_count })}`
+    ? `${head}${t('analysis-results.close-calls.header-ties', { count: cc.settled_tie_count })}`
     : head;
 }
 
@@ -61,29 +61,29 @@ const CloseCallCallout = memo(({ synthesis, jobId, onOpen, t }) => {
       header={headerText(cc, t)}
     >
       <SpaceBetween size="s">
-        <Box>{t('analysis-results-v2.close-calls.intro', { margin: cc.margin_points })}</Box>
+        <Box>{t('analysis-results.close-calls.intro', { margin: cc.margin_points })}</Box>
         {cc.engine_pairs.map(pair => (
           <Box key={`${pair.engine}-${pair.alternative}`}>
             <div>{pairText(pair, cc.margin_points, t)}</div>
             <SpaceBetween direction="horizontal" size="xs">
-              <span>{t('analysis-results-v2.close-calls.closest')}</span>
+              <span>{t('analysis-results.close-calls.closest')}</span>
               {(pair.query_ids || []).map(qid => (
                 <Link
                   key={qid}
-                  ariaLabel={t('analysis-results-v2.close-calls.open-label', { id: qid })}
+                  ariaLabel={t('analysis-results.close-calls.open-label', { id: qid })}
                   onFollow={(e) => { e.preventDefault(); onOpen(qid); }}
                 >
                   <span style={{ fontFamily: 'monospace' }}>{qid}</span>
                 </Link>
               ))}
               {pair.more_query_count > 0 && (
-                <span>{t('analysis-results-v2.close-calls.more', { count: pair.more_query_count })}</span>
+                <span>{t('analysis-results.close-calls.more', { count: pair.more_query_count })}</span>
               )}
             </SpaceBetween>
           </Box>
         ))}
-        <Box>{t('analysis-results-v2.close-calls.override')}</Box>
-        <Link href={`/analysis/assignments/${jobId}`}>{t('analysis-results-v2.close-calls.assignment-link')}</Link>
+        <Box>{t('analysis-results.close-calls.override')}</Box>
+        <Link href={`/analysis/assignments/${jobId}`}>{t('analysis-results.close-calls.assignment-link')}</Link>
       </SpaceBetween>
     </Alert>
   );

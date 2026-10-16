@@ -42,14 +42,14 @@ function RoutingBadges({ kinds, hasLedger, t }) {
   // above the table says why).
   if (!hasLedger) return '—';
   if (!kinds) {
-    return <Box color="text-body-secondary" fontSize="body-s">{t('analysis-results-v2.query-routing.kept-first')}</Box>;
+    return <Box color="text-body-secondary" fontSize="body-s">{t('analysis-results.query-routing.kept-first')}</Box>;
   }
   const labels = [];
-  if (kinds.moved) labels.push(t('analysis-results-v2.query-routing.kind-moved'));
-  if (kinds.openTie) labels.push(t('analysis-results-v2.query-routing.kind-open-tie'));
-  else if (kinds.tied) labels.push(t('analysis-results-v2.query-routing.kind-tie-settled'));
-  if (kinds.overridden) labels.push(t('analysis-results-v2.query-routing.kind-overridden'));
-  if (kinds.pinned) labels.push(t('analysis-results-v2.query-routing.kind-pinned'));
+  if (kinds.moved) labels.push(t('analysis-results.query-routing.kind-moved'));
+  if (kinds.openTie) labels.push(t('analysis-results.query-routing.kind-open-tie'));
+  else if (kinds.tied) labels.push(t('analysis-results.query-routing.kind-tie-settled'));
+  if (kinds.overridden) labels.push(t('analysis-results.query-routing.kind-overridden'));
+  if (kinds.pinned) labels.push(t('analysis-results.query-routing.kind-pinned'));
   return (
     <SpaceBetween direction="horizontal" size="xxs">
       {labels.map(label => <Badge key={label} color="blue">{label}</Badge>)}
@@ -72,10 +72,10 @@ const QueryRoutingTable = memo(({ rows, loading, error, hasLedger, truncated, on
   const columnDefinitions = [
     {
       id: 'query',
-      header: t('analysis-results-v2.query-routing.col-query'),
+      header: t('analysis-results.query-routing.col-query'),
       cell: item => (
         <Link
-          ariaLabel={t('analysis-results-v2.query-routing.open-label', { id: item.queryId })}
+          ariaLabel={t('analysis-results.query-routing.open-label', { id: item.queryId })}
           onFollow={(e) => { e.preventDefault(); onOpen(item.queryId); }}
         >
           <span style={{ fontFamily: 'monospace' }} title={item.queryId}>{shortId(item.queryId)}</span>
@@ -85,23 +85,23 @@ const QueryRoutingTable = memo(({ rows, loading, error, hasLedger, truncated, on
     },
     {
       id: 'statement',
-      header: t('analysis-results-v2.query-routing.col-statement'),
+      header: t('analysis-results.query-routing.col-statement'),
       cell: item => <Box fontSize="body-s"><span style={{ fontFamily: 'monospace' }}>{item.excerpt || '—'}</span></Box>,
     },
     {
       id: 'tables',
-      header: t('analysis-results-v2.query-routing.col-tables'),
+      header: t('analysis-results.query-routing.col-tables'),
       cell: item => (item.tables.length > 0 ? item.tables.join(', ') : '—'),
     },
     {
       id: 'engine',
-      header: t('analysis-results-v2.query-routing.col-engine'),
+      header: t('analysis-results.query-routing.col-engine'),
       cell: item => item.engineName || '—',
       width: 160,
     },
     {
       id: 'routing',
-      header: t('analysis-results-v2.query-routing.col-routing'),
+      header: t('analysis-results.query-routing.col-routing'),
       cell: item => <RoutingBadges kinds={item.kinds} hasLedger={hasLedger} t={t} />,
       width: 220,
     },
@@ -114,56 +114,56 @@ const QueryRoutingTable = memo(({ rows, loading, error, hasLedger, truncated, on
         <Header
           variant="h2"
           counter={counter}
-          description={t('analysis-results-v2.query-routing.description')}
+          description={t('analysis-results.query-routing.description')}
         >
-          {t('analysis-results-v2.query-routing.title')}
+          {t('analysis-results.query-routing.title')}
         </Header>
       }
     >
       {error ? (
-        <StatusIndicator type="error">{t('analysis-results-v2.query-routing.error', { message: error })}</StatusIndicator>
+        <StatusIndicator type="error">{t('analysis-results.query-routing.error', { message: error })}</StatusIndicator>
       ) : (
         <SpaceBetween size="m">
           <SpaceBetween direction="horizontal" size="s">
             <TextFilter
               filteringText={filterText}
-              filteringPlaceholder={t('analysis-results-v2.query-routing.filter-placeholder')}
-              filteringAriaLabel={t('analysis-results-v2.query-routing.filter-label')}
+              filteringPlaceholder={t('analysis-results.query-routing.filter-placeholder')}
+              filteringAriaLabel={t('analysis-results.query-routing.filter-label')}
               onChange={({ detail }) => { setFilterText(detail.filteringText); setPage(1); }}
             />
             <SegmentedControl
-              label={t('analysis-results-v2.query-routing.mode-label')}
+              label={t('analysis-results.query-routing.mode-label')}
               selectedId={mode}
               onChange={({ detail }) => { setMode(detail.selectedId); setPage(1); }}
               options={[
-                { id: 'all', text: t('analysis-results-v2.query-routing.mode-all') },
-                { id: 'listed', text: t('analysis-results-v2.query-routing.mode-listed') },
+                { id: 'all', text: t('analysis-results.query-routing.mode-all') },
+                { id: 'listed', text: t('analysis-results.query-routing.mode-listed') },
               ]}
             />
           </SpaceBetween>
           {!hasLedger && !loading && (
-            <Box color="text-body-secondary">{t('analysis-results-v2.query-trace.no-ledger')}</Box>
+            <Box color="text-body-secondary">{t('analysis-results.query-trace.no-ledger')}</Box>
           )}
           {truncated && (
-            <StatusIndicator type="info">{t('analysis-results-v2.query-routing.truncated', { count: (rows || []).length })}</StatusIndicator>
+            <StatusIndicator type="info">{t('analysis-results.query-routing.truncated', { count: (rows || []).length })}</StatusIndicator>
           )}
           <Table
             variant="embedded"
-            ariaLabels={{ tableLabel: t('analysis-results-v2.query-routing.title') }}
+            ariaLabels={{ tableLabel: t('analysis-results.query-routing.title') }}
             trackBy="queryId"
             loading={loading}
-            loadingText={t('analysis-results-v2.query-routing.loading')}
+            loadingText={t('analysis-results.query-routing.loading')}
             columnDefinitions={columnDefinitions}
             items={pageRows}
-            empty={<Box textAlign="center" padding="l">{t('analysis-results-v2.query-routing.empty')}</Box>}
+            empty={<Box textAlign="center" padding="l">{t('analysis-results.query-routing.empty')}</Box>}
           />
           {pagesCount > 1 && (
             <Box float="right">
               <Pagination
                 ariaLabels={{
-                  nextPageLabel: t('analysis-results-v2.query-routing.next-page'),
-                  previousPageLabel: t('analysis-results-v2.query-routing.previous-page'),
-                  pageLabel: n => t('analysis-results-v2.query-routing.page', { page: n }),
+                  nextPageLabel: t('analysis-results.query-routing.next-page'),
+                  previousPageLabel: t('analysis-results.query-routing.previous-page'),
+                  pageLabel: n => t('analysis-results.query-routing.page', { page: n }),
                 }}
                 currentPageIndex={currentPage}
                 pagesCount={pagesCount}

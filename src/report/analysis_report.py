@@ -564,7 +564,7 @@ def build_export_data(
 ) -> dict:
     """Assemble the ``DATA`` object the interactive report's client code reads.
 
-    Mirrors what ``AnalysisResults-02.js`` builds from four REST calls, but sourced
+    Mirrors what ``AnalysisResults.js`` builds from four REST calls, but sourced
     from the ``ArtifactStore`` directly. Raises only if the synthesis report itself
     is missing; every other artifact degrades to an empty section.
 
@@ -805,7 +805,7 @@ def _cache_patterns_note(count: int) -> str:
     """ "+N cache-layer pattern(s)" note under the "Access Patterns" stat (#405).
 
     Mirrors ``cachePatternsNote`` in ExportReport.js, which mirrors the Results
-    page's ``analysis-results-v2.executive-summary.cache-patterns-note`` caption
+    page's ``analysis-results.executive-summary.cache-patterns-note`` caption
     (``src/ui/src/locales/en.json``). This report is i18n-exempt (standalone,
     English-only), so the English singular/plural text is inlined directly
     instead of going through i18next.
@@ -962,7 +962,7 @@ def render_analysis_report_html(export_data: dict, filename: str = "") -> str:
     # that introduces them breaks the combined total down into owned vs. cache
     # layer. Mirrors the embedded script's own formatExplorerCount (generated
     # from ExportReport.js by sync_report_template.py) and the Results page
-    # explorer header (analysis-results-v2.explorer.header-count).
+    # explorer header (analysis-results.explorer.header-count).
     if cache_pattern_count > 0:
         explorer_header_count = (
             f"{total_patterns + cache_pattern_count} "

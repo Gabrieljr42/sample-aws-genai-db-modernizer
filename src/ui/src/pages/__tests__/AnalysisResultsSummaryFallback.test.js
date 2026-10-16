@@ -6,7 +6,7 @@
  * from `formatting.fallback_withheld_reason` (#393).
  *
  * Round-2 review: exercises the real `SummaryFallbackNotice` component
- * (src/ui/src/components/SummaryFallbackNotice.js) that AnalysisResults-02.js
+ * (src/ui/src/components/SummaryFallbackNotice.js) that AnalysisResults.js
  * itself renders, with the same props it passes, rather than a mirrored
  * stand-in. Cloudscape's own components ship ESM that this repo's Jest
  * config cannot transform (confirmed by AppRoutes.test.js, which stubs out
@@ -42,7 +42,7 @@ jest.mock('@cloudscape-design/components/expandable-section', () => ({
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
-// Mirrors AnalysisResults-02.js's own Executive Summary block:
+// Mirrors AnalysisResults.js's own Executive Summary block:
 // `{summaryFallback.isFallback && (<SummaryFallbackNotice text={t(...,
 // { reason: fallbackWithheldReason(summaryFallback.warnings) })} />)}`.
 function ExecutiveSummaryFallback({ source, warnings }) {

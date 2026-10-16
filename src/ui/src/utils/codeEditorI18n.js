@@ -1,8 +1,7 @@
 /**
  * Shared `i18nStrings` for every Cloudscape `CodeEditor` in this app (#478)
- * -- six today: the Results page's Aurora DDL viewer and its
- * query-journey JSON viewer, and `JobMonitoring`/`JobMonitoringSummary`'s
- * own artifact viewers (inline and in the "view full artifact" modal).
+ * -- two today: the Results page's Aurora DDL viewer and its
+ * query-journey JSON viewer.
  *
  * Cloudscape's `CodeEditor` builds its status bar and ARIA description from
  * `i18nStrings.errorsTab` / `warningsTab` / `cursorPosition` internally

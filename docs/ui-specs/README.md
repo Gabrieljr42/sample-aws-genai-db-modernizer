@@ -469,15 +469,15 @@ Every kept route has a routing-table test in `src/ui/src/__tests__/AppRoutes.tes
 | `/` | — (redirect) | Keep | Entry redirect to `/dashboard`. |
 | `/dashboard` | `Dashboard.js` | Keep | Job list and hub; linked from the side nav and from every page's "back to dashboard" action. |
 | `/analysis/create` | `CreateAnalysis.js` | Keep | Starts a new analysis; linked from the side nav and the Dashboard's "New analysis" button. |
-| `/analysis/monitor/:jobId` | `JobMonitoring.js` | Keep | In-flight job progress; linked from `EngineAnalysis`'s breadcrumb. |
+| `/analysis/monitor/:jobId` | `JobMonitoring.js` | **Removed** (#957) | No link reached it except the engine-analysis page's breadcrumb; its "Download logs" and "Download artifact" buttons only logged to the console. `JobMonitoringSummary.js` is the job page. |
 | `/analysis/monitor/summary/:jobId` | `JobMonitoringSummary.js` | Keep | Post-phase hub; linked from `CreateAnalysis`, `AssignmentGate`, `Dashboard`. |
 | `/analysis/assignments/:jobId` | `AssignmentGate.js` | Keep | Assignment approval gate; linked from `JobMonitoringSummary`; the intended UI for the `/assign` gate (the command currently prints a wrong URL, #439). |
-| `/analysis/engine-analysis/:jobId` | `EngineAnalysis.js` | Keep | Per-engine analysis drill-down; linked from `Dashboard`. |
+| `/analysis/engine-analysis/:jobId` | `EngineAnalysis.js` | **Removed** (#957) | Pre-assignment per-engine figures (query count, average fit) that contradicted the results page; reached only from the Dashboard's "View analysis" action, removed with it. |
 | `/analysis/patterns/:jobId` (requires `?target=`) | `PatternAnalysis.js` | Keep | Access-pattern drill-down; linked from `JobMonitoringSummary` and `AssignmentGate`, always with a `target`. |
-| `/analysis/results-v2/:jobId` | `AnalysisResults-02.js` | Keep | Final deliverable page; linked from `JobMonitoring` and `JobMonitoringSummary`. |
-| `/analysis/results/:jobId` | — (redirect to results-v2) | Keep | Thin redirect so old bookmarks still resolve (#185). |
-| `/analysis/report/:jobId` | — (redirect to results-v2) | Keep | Thin redirect so old bookmarks still resolve (#356). |
-| `/settings` | `Settings.js` | Keep (flagged) | Route and backend (`src/api/routes/settings.py`, with its own test) exist, but the page never calls that API — Save/Test just `console.log` — and its "AWS Configuration" fields (S3 bucket, DynamoDB table, IAM role) are vestiges of the retired hosted deployment. Tracked in #437; the side-nav link to it is also broken (`href: "/settings/s"` in `GlobalConfigurations.js`, which doesn't match the `/settings` route, #438). |
+| `/analysis/results/:jobId` | `AnalysisResults.js` | Keep | Final deliverable page (named `/analysis/results-v2/:jobId` and `AnalysisResults-02.js` until #957); linked from `JobMonitoringSummary` and the Dashboard's "View results" action. Shows the migration wave plan from report.json's waves and a download panel for the job's `deliverables/` folder. |
+| `/analysis/results-v2/:jobId` | — (redirect to `/analysis/results/:jobId`) | Keep | Thin redirect so old bookmarks still resolve (#957). |
+| `/analysis/report/:jobId` | — (redirect to `/analysis/results/:jobId`) | Keep | Thin redirect so old bookmarks still resolve (#356). The earlier `/analysis/results/:jobId` page it replaced was retired in #185; that URL now serves the current page. |
+| `/settings` | `Settings.js` | Keep (flagged) | Route and backend (`src/api/routes/settings.py`, with its own test) exist, but the page never calls that API — Save/Test just `console.log` — and its "AWS Configuration" fields (S3 bucket, DynamoDB table, IAM role) are vestiges of the retired hosted deployment. Tracked in #437. The side-nav link pointed at `/settings/s`, which matched no route (#438); it now opens `/settings`. |
 | `/analysis/local` | `LocalAnalysis.js` | **Removed** | Fetched static files (`/data/collector-output.json`, `/data/analysis-*.json`) that no script or build step has ever produced; always rendered empty. Dead since the local API backend replaced this prototype. |
 | `/debug` | `Debug.js` | **Removed** | Dev-only raw API console, not part of the `/modernize` flow or any deliverable. |
 | `*` | — (redirect to `/`) | Keep | Fallback for unknown paths. |
@@ -485,7 +485,9 @@ Every kept route has a routing-table test in `src/ui/src/__tests__/AppRoutes.tes
 
 Side navigation (`src/ui/src/config/GlobalConfigurations.js`,
 `SideNavigationConfigurations`) dropped the "Local analysis" and "API Debug"
-entries along with their pages.
+entries along with their pages. The Dashboard's "View analysis" action went
+with the engine-analysis page (#957). Every side-nav link opens its own route
+(`src/ui/src/__tests__/AppRoutes.test.js`).
 
 ---
 

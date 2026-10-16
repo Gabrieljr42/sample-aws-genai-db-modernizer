@@ -1,16 +1,16 @@
-.progress-state-02 {
+.progress-state {
   position: relative;
   width: 100%;
   padding: 10px 0;
 }
 
-.progress-state-02-steps {
+.progress-state-steps {
   display: flex;
   width: 100%;
   gap: 0;
 }
 
-.progress-state-02-step {
+.progress-state-step {
   flex: 1;
   position: relative;
   height: 40px;
@@ -18,7 +18,7 @@
   align-items: center;
 }
 
-.progress-state-02-step-arrow {
+.progress-state-step-arrow {
   position: relative;
   width: 100%;
   height: 100%;
@@ -30,26 +30,26 @@
   transition: background-color 0.3s ease;
 }
 
-.progress-state-02-step:first-child .progress-state-02-step-arrow {
+.progress-state-step:first-child .progress-state-step-arrow {
   clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 50%, calc(100% - 20px) 100%, 0 100%);
   border-radius: 25px 0 0 25px;
 }
 
-.progress-state-02-step:last-child .progress-state-02-step-arrow {
+.progress-state-step:last-child .progress-state-step-arrow {
   clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 20px 50%);
   border-radius: 0 25px 25px 0;
 }
 
-.progress-state-02-step.active .progress-state-02-step-arrow {
+.progress-state-step.active .progress-state-step-arrow {
   background-color: #0972D3;
 }
 
-.progress-state-02-step.current .progress-state-02-step-arrow {
+.progress-state-step.current .progress-state-step-arrow {
   background-color: #0972D3;
   box-shadow: 0 0 10px rgba(9, 114, 211, 0.5);
 }
 
-.progress-state-02-step-label {
+.progress-state-step-label {
   font-size: 12px;
   color: var(--ps02-label-inactive, #9ba7b6);
   white-space: nowrap;
@@ -60,7 +60,7 @@
   transition: color 0.3s ease;
 }
 
-.progress-state-02-step.active .progress-state-02-step-label {
+.progress-state-step.active .progress-state-step-label {
   color: var(--ps02-label-active, #ffffff);
   font-weight: 500;
 }

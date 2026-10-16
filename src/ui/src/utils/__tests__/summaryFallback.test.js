@@ -2,7 +2,7 @@
  * #269: when a generated executive summary is replaced by its deterministic
  * fallback, the UI must say so -- `summaryFallbackInfo` is the one place that
  * decides it, shared by the reality-check summary (AssignmentGate.js), the
- * synthesis summary (AnalysisResults-02.js), and the standalone HTML export
+ * synthesis summary (AnalysisResults.js), and the standalone HTML export
  * (ExportReport.js).
  */
 import { summaryFallbackInfo } from '../summaryFallback';

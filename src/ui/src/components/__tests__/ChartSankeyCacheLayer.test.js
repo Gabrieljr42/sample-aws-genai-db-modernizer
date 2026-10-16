@@ -1,5 +1,5 @@
 /**
- * #330: the assignment Sankey (ChartSankey-01.js) omitted the ElastiCache
+ * #330: the assignment Sankey (ChartSankey.js) omitted the ElastiCache
  * cache layer entirely -- it was only ever mentioned in a caption below the
  * diagram. These tests cover the cache-layer-specific rendering added here:
  * the cache node (fed by its owner engines' flows, never a flow source) is
@@ -11,7 +11,7 @@
  */
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import ChartSankey from '../ChartSankey-01';
+import ChartSankey from '../ChartSankey';
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 

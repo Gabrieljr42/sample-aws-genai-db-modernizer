@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import ChartSankey from '../ChartSankey-01';
+import ChartSankey from '../ChartSankey';
 import { ENGINE_LABELS } from '../../utils/engineNames';
 
 global.IS_REACT_ACT_ENVIRONMENT = true;

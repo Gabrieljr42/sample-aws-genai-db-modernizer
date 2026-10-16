@@ -3,7 +3,7 @@
 // statuses (RUNNING, SUCCEEDED, FAILED, CANCELLED, WAITING, PENDING,
 // COMPLETED) and lower-case per-stage/agent statuses (completed, running,
 // in-progress, failed, error, pending, success, cancelled, waiting) -- both
-// are covered here so Dashboard.js and JobMonitoring.js never disagree on
+// are covered here so every page that shows a status agrees on
 // what a status means (#383, #518 round 1).
 
 const STATUS_TYPE_MAP = {
@@ -54,7 +54,7 @@ export const KNOWN_STATUSES = Object.keys(STATUS_TYPE_MAP);
 // backend's own `_TERMINAL_STATUSES` (src/api/routes/assessments.py):
 // DELETE /assessments/{job_id} only cancels a RUNNING/WAITING/PENDING job
 // (#518), so once a job reaches one of these there is nothing left to
-// cancel. Dashboard.js and JobMonitoring.js both hide their cancel actions
+// cancel. The Dashboard hides its cancel action
 // for these statuses (#519) instead of letting the user click one for nothing.
 const TERMINAL_STATUSES = new Set(['SUCCEEDED', 'CANCELLED', 'FAILED']);
 
@@ -76,7 +76,7 @@ const ALREADY_FINISHED_PREFIX = 'assessment already';
 /**
  * True when a cancel-assessment response message says the job was already
  * finished, so the call was a no-op rather than an actual cancellation.
- * Dashboard.js and JobMonitoring.js both use this to show an info notice
+ * The Dashboard uses this to show an info notice
  * instead of a false "has been cancelled" success message.
  */
 export function isAlreadyFinishedMessage(message) {

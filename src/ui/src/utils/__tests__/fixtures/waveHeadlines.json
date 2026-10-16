@@ -1,0 +1,203 @@
+{
+  "_comment": "Waves and the wave headline (count phrase + table phrase) src/report/roadmap.py prints for each. tests/unit/report/test_wave_headline_parity.py checks the Python side; utils/__tests__/migrationWaves.test.js checks the UI side.",
+  "synthesis": {
+    "migration_waves": [
+      {
+        "wave": 1,
+        "title": "Move to Aurora MySQL",
+        "engines": [
+          "aurora_mysql"
+        ],
+        "moves_from": [
+          "mysql"
+        ],
+        "homogeneity": "homogeneous",
+        "tables": [
+          "wp.a",
+          "wp.b",
+          "wp.v1"
+        ],
+        "table_count": 3,
+        "query_count": 65,
+        "cutover_query_count": 107,
+        "workload_share_percent": 60.7476,
+        "share_basis": "queries",
+        "rationale": "Whole schema first.",
+        "gate": "Parity validated."
+      },
+      {
+        "wave": 2,
+        "title": "Cache hot reads with ElastiCache",
+        "engines": [
+          "elasticache"
+        ],
+        "moves_from": [],
+        "fronts": "aurora_mysql",
+        "tables": [],
+        "table_count": 0,
+        "query_count": 20,
+        "workload_share_percent": 83.4,
+        "share_basis": "calls",
+        "rationale": "Hot reads.",
+        "gate": "Hit rate."
+      },
+      {
+        "wave": 3,
+        "title": "Move key-value access to DynamoDB",
+        "engines": [
+          "dynamodb"
+        ],
+        "moves_from": [
+          "aurora_mysql"
+        ],
+        "tables": [
+          "wp.a",
+          "wp.c",
+          "wp.d",
+          "wp.e"
+        ],
+        "table_count": 4,
+        "query_count": 1,
+        "workload_share_percent": 0.9,
+        "share_basis": "queries",
+        "table_owners": [
+          {
+            "table": "wp.a",
+            "owner": "aurora_mysql"
+          }
+        ],
+        "rationale": "Key lookups.",
+        "gate": "Dual writes."
+      },
+      {
+        "wave": 4,
+        "title": "Search on OpenSearch",
+        "engines": [
+          "opensearch"
+        ],
+        "moves_from": [
+          "aurora_mysql"
+        ],
+        "tables": [
+          "wp.f"
+        ],
+        "table_count": 1,
+        "query_count": 2,
+        "workload_share_percent": 60.0,
+        "share_basis": "queries",
+        "rationale": "Search.",
+        "gate": ""
+      },
+      {
+        "wave": 5,
+        "title": "Single-query cutover",
+        "engines": [
+          "aurora_postgresql"
+        ],
+        "moves_from": [
+          "postgresql"
+        ],
+        "homogeneity": "homogeneous",
+        "tables": [
+          "s.only"
+        ],
+        "table_count": 1,
+        "query_count": 1,
+        "cutover_query_count": 1,
+        "workload_share_percent": 100.0,
+        "share_basis": "queries",
+        "rationale": "One.",
+        "gate": "One gate."
+      }
+    ],
+    "facts": {
+      "waves": [
+        {
+          "wave": 1,
+          "engines": [
+            "aurora_mysql"
+          ],
+          "migrating": false,
+          "served_tables": 3,
+          "moving_tables": null,
+          "kept_in_sync_tables": null,
+          "moving_by_engine": null,
+          "served_by_engine": null,
+          "kept_in_sync": [],
+          "shared_in_wave": [],
+          "views": 1,
+          "tables_only": 2,
+          "critical_high_risks": 0
+        },
+        {
+          "wave": 2,
+          "engines": [
+            "elasticache"
+          ],
+          "migrating": false,
+          "served_tables": 0,
+          "moving_tables": 0,
+          "kept_in_sync_tables": 0,
+          "moving_by_engine": null,
+          "served_by_engine": null,
+          "kept_in_sync": [],
+          "shared_in_wave": [],
+          "views": null,
+          "tables_only": null,
+          "critical_high_risks": 0
+        },
+        {
+          "wave": 3,
+          "engines": [
+            "dynamodb"
+          ],
+          "migrating": true,
+          "served_tables": 4,
+          "moving_tables": 3,
+          "kept_in_sync_tables": 1,
+          "moving_by_engine": {
+            "dynamodb": 3
+          },
+          "served_by_engine": {
+            "dynamodb": 4
+          },
+          "kept_in_sync": [
+            {
+              "table": "wp.a",
+              "owner": "aurora_mysql"
+            }
+          ],
+          "shared_in_wave": [],
+          "views": null,
+          "tables_only": null,
+          "critical_high_risks": 0
+        },
+        {
+          "wave": 5,
+          "engines": [
+            "aurora_postgresql"
+          ],
+          "migrating": false,
+          "served_tables": 1,
+          "moving_tables": null,
+          "kept_in_sync_tables": null,
+          "moving_by_engine": null,
+          "served_by_engine": null,
+          "kept_in_sync": [],
+          "shared_in_wave": [],
+          "views": null,
+          "tables_only": null,
+          "critical_high_risks": 0
+        }
+      ],
+      "migration_wave_count": 5
+    }
+  },
+  "expected_headlines": {
+    "1": "all 107 queries at cutover; 65 (60.7%) remain on Aurora MySQL at the end, 3 source tables and views (2 tables, 1 view)",
+    "2": "20 queries (83.4% of calls)",
+    "3": "1 query (0.9% of query patterns), 4 served, 3 move",
+    "4": "2 queries (60% of query patterns), 1 source table",
+    "5": "all 1 query at cutover; 1 (100%) remain on Aurora PostgreSQL at the end, 1 source table and views"
+  }
+}

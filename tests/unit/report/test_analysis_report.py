@@ -1,7 +1,7 @@
 """Assembler + renderer for the interactive analysis report.
 
 The point of these tests is that ``build_export_data`` reproduces the shape
-``AnalysisResults-02.js`` builds from four REST calls, without going through the
+``AnalysisResults.js`` builds from four REST calls, without going through the
 API — which cannot serve an ATX job at all (every route resolves the database name
 through Step Functions, and an A2A-orchestrated job has no execution).
 """
