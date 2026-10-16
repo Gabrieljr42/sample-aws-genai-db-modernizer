@@ -31,6 +31,7 @@ from src.tools.analysis.documentdb_pattern_catalog import (
     CatalogAntiPattern,
     CatalogPattern,
 )
+from src.tools.analysis.key_access import is_junction_table
 from src.tools.analysis.llm_advisor_base import LlmAdvisorBase
 from src.tools.analysis.scoring import (
     TableProfile,
@@ -144,7 +145,7 @@ def detect_embedding_candidates(collector_output: dict) -> list[EmbeddingCandida
             )
 
             # Relationship type
-            is_junction = _is_junction_table(child_t)
+            is_junction = is_junction_table(child_t)
             rel_type = (
                 "many_to_many"
                 if is_junction
@@ -165,12 +166,6 @@ def detect_embedding_candidates(collector_output: dict) -> list[EmbeddingCandida
                 )
             )
     return candidates
-
-
-def _is_junction_table(t: dict) -> bool:
-    fks = t.get("foreign_keys") or []
-    pk = t.get("primary_key") or []
-    return len(fks) >= 2 and len(pk) >= 2
 
 
 def detect_polymorphic_tables(collector_output: dict) -> list[str]:

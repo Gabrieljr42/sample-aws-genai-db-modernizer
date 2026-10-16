@@ -38,6 +38,7 @@ from src.tools.analysis.aurora_common_pattern_catalog import (
     TEXT_DATA_TYPES,
     TRANSACTION_WRITE_TYPES,
 )
+from src.tools.analysis.key_access import KeyAccessReader
 from src.tools.analysis.pattern_catalog_base import HIGH_INGEST_CPS_THRESHOLD
 from src.tools.analysis.scoring import TableProfile
 from src.tools.sql.query_facts import query_facts, source_engine_of
@@ -88,10 +89,13 @@ def _build_anti_pattern(
     )
 
 
-def _is_single_row_pk_lookup(query: dict) -> bool:
-    """Detect single-row PK lookup: SELECT, no joins, single table, rows_returned_avg <= 1."""
+def _is_single_row_pk_lookup(query: dict, key_lookup: bool) -> bool:
+    """A single-row read by a full primary or unique key (``key_lookup``, the
+    access-pattern class read from the SQL facts, #920): no joins, one table, at most
+    one row on average. Without the key test, any one-row result counted
+    (``SELECT COUNT(*) WHERE status = ?``)."""
     qt = (query.get("query_type") or "").upper()
-    if qt != "SELECT":
+    if qt != "SELECT" or not key_lookup:
         return False
     if query.get("has_joins", False):
         return False
@@ -203,6 +207,12 @@ def analyze_aurora_common_use_cases(
     # aurora-anti-07: high-volume-text-search (per-table)
     text_search_per_table: dict[str, dict] = {}
 
+    # aurora-common-12: key-value-lookup (a read by a full primary or unique key, #920)
+    kv_query_ids: list[str] = []
+    kv_table_ids: list[str] = []
+    # How each query reaches its rows by key, from the SQL facts (#920).
+    reader = KeyAccessReader.from_collector(collector_output, source_engine)
+
     # --- Single pass ---
     for q in queries:
         qid = q.get("query_id", "")
@@ -220,8 +230,14 @@ def analyze_aurora_common_use_cases(
             continue
         join_count = int(q.get("join_count") or 0)
         rows_avg = float(q.get("rows_returned_avg") or 0.0)
+        key_lookup = reader.access(q).key_lookup_read
 
         # ---- Pattern detection ----
+
+        # aurora-common-12: key-value-lookup, a B-tree point read by a full key
+        if key_lookup:
+            kv_query_ids.append(qid)
+            kv_table_ids.extend(tables)
 
         # aurora-common-01: complex-join (3+ tables or join_count >= 3)
         if has_joins and (join_count >= 3 or len(tables) >= 3):
@@ -249,7 +265,7 @@ def analyze_aurora_common_use_cases(
             cs_table_ids.extend(tables)
 
         # aurora-common-07: multi-row-mutation
-        if qt in {"UPDATE", "DELETE"} and not _is_single_row_pk_lookup(q):
+        if qt in {"UPDATE", "DELETE"}:
             if has_joins or rows_avg > 1 or len(tables) > 1:
                 mm_query_ids.append(qid)
                 mm_table_ids.extend(tables)
@@ -284,7 +300,7 @@ def analyze_aurora_common_use_cases(
         # ---- Anti-pattern detection ----
 
         # aurora-anti-01: high-frequency-pk-lookup
-        if _is_single_row_pk_lookup(q) and cps > HIGH_FREQUENCY_PK_LOOKUP_CPS:
+        if _is_single_row_pk_lookup(q, key_lookup) and cps > HIGH_FREQUENCY_PK_LOOKUP_CPS:
             pk_query_ids.append(qid)
             pk_table_ids.extend(tables)
 
@@ -297,7 +313,9 @@ def analyze_aurora_common_use_cases(
             and len(tables) == 1
         ):
             # Exclude single-row PK lookups that already qualify for anti-01
-            is_pk_lookup = _is_single_row_pk_lookup(q) and cps > HIGH_FREQUENCY_PK_LOOKUP_CPS
+            is_pk_lookup = (
+                _is_single_row_pk_lookup(q, key_lookup) and cps > HIGH_FREQUENCY_PK_LOOKUP_CPS
+            )
             if not is_pk_lookup:
                 cr_query_ids.append(qid)
                 cr_table_ids.extend(tables)
@@ -439,6 +457,13 @@ def analyze_aurora_common_use_cases(
         patterns.append(
             _build_pattern(
                 "aurora-common-11", Confidence.MEDIUM, bl_query_ids, bl_table_ids, total_query_count
+            )
+        )
+
+    if kv_query_ids:
+        patterns.append(
+            _build_pattern(
+                "aurora-common-12", Confidence.HIGH, kv_query_ids, kv_table_ids, total_query_count
             )
         )
 

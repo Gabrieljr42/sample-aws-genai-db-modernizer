@@ -7,14 +7,16 @@ detectors = [
 triage_signal = "session_store"
 penalty = 0
 
-# Detection signals: session_keywords, user_scoped_access, ttl_candidate, high_frequency_read_write
+# Detection (#920): DynamoDB's analysis needs a session or token statement whose
+# access-pattern class is keyed (a key lookup or key-scoped read or write), not any
+# statement that names a token. ElastiCache's overlay detector is unchanged.
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-06"
 score = 90
-why = "User session data with high read/write throughput per user. TTL-based expiry is common but not required — manual deletes or application-managed cleanup are also valid patterns."
+why = "User session data read and written by its session or user key at high throughput: GetItem and PutItem on the key, with Time to Live to expire old sessions, though manual or application-managed cleanup also works (Amazon DynamoDB Developer Guide, Time to Live)."
 concerns = [
     "Without TTL, application must manage session cleanup to avoid unbounded growth",
 ]

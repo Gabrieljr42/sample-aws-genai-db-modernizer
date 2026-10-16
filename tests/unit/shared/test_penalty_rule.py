@@ -49,6 +49,7 @@ EXPECTED_BASIS = {
     "multi-index-joins": "needs_redesign",
     "correlated-subquery-joins": "reads_more_than_returns",
     "frequent-full-scan": "reads_more_than_returns",
+    "ordered-scan": "reads_more_than_returns",
     "heavy-cross-collection-joins": "reads_more_than_returns",
     "high-volume-text-search": "reads_more_than_returns",
     "substring-match": "reads_more_than_returns",
@@ -225,6 +226,18 @@ CASES = [
         "dynamodb",
         _q("pos", "SELECT * FROM orders ORDER BY created_at DESC", ["orders"], rows=500),
         _q("neg", KEY_READ, ["orders"], rows=1),
+    ),
+    (
+        # A top-N over a whole table at any call rate: a Scan returns no order, so the
+        # first rows in key order need every item read (#920, PR B).
+        "ordered-scan",
+        "dynamodb",
+        _q("pos", "SELECT * FROM orders ORDER BY id ASC LIMIT $1", ["orders"], cps=0.001),
+        _q(
+            "neg",
+            "SELECT * FROM order_items WHERE order_id = $1 ORDER BY id LIMIT $2",
+            ["order_items"],
+        ),
     ),
     (
         "complex-aggregation",

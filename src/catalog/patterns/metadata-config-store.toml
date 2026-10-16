@@ -6,14 +6,16 @@ detectors = [
 triage_signal = "metadata_config"
 penalty = 0
 
-# Detection signals: small_table, high_read_ratio, low_write_frequency, simple_pk_lookup
+# Detection (#920): a keyed SELECT (key lookup or key-scoped class) with no aggregate, at most
+# 10 rows and 0.1 calls/s or more, on tables of at most 10,000 rows that the workload reads
+# at least 10 times as often as it writes (key_access.READ_MOSTLY_RATIO). Not any small read.
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-05"
 score = 90
-why = "Small reference tables with frequent reads. Also valid for high read+write metadata stores (e.g., feature flags, config, lookup tables). DynamoDB DAX or on-demand with low RCU cost."
+why = "Small, rarely written reference tables read by key (feature flags, config, lookup tables): GetItem or BatchGetItem on the key, with DynamoDB Accelerator for microsecond reads at an extra node cost (Amazon DynamoDB Developer Guide, Working with items; In-memory acceleration with DAX)."
 
 [engines.documentdb]
 kind = "unscored"

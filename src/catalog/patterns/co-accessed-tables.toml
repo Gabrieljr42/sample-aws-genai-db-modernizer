@@ -5,14 +5,15 @@ detectors = [
 ]
 penalty = 0
 
-# Detection signals: co_accessed_tables, high_frequency_join, simple_fk_join
+# Detection (#920): a key-anchored join of two or three tables at 50 calls/hour or more
+# (CO_ACCESS_FREQUENCY_THRESHOLD), not any multi-table query.
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-07c"
 score = 70
-why = "Tables frequently accessed together in the same queries (co-access frequency > 50 calls/hour). Strong signal for denormalization into a single DynamoDB table."
+why = "Tables frequently accessed together in the same queries (co-access frequency > 50 calls/hour). Strong signal for denormalization into one item collection that a single Query returns (Amazon DynamoDB Developer Guide, Best practices for modeling relational data)."
 concerns = ["Denormalization increases write amplification for updates"]
 
 [engines.documentdb]

@@ -403,6 +403,10 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
         ),
         _DETECTION,
     ),
+    "src/tools/analysis/key_access.py": (
+        frozenset({"READ_MOSTLY_RATIO"}),
+        _DETECTION + ": reads per write that make a table read-mostly reference data (#920)",
+    ),
     "src/tools/analysis/variant_attributes.py": (
         frozenset({"_ATTRIBUTE_TABLE_MAX_COLUMNS"}),
         _DETECTION + ": the widest an entity-attribute-value table can be (#920)",

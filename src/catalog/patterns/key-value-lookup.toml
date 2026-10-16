@@ -2,18 +2,21 @@
 id = "key-value-lookup"
 detectors = [
     "src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases",
+    "src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases",
 ]
 triage_signal = "key_value_lookups"
 penalty = 0
 
-# Detection signals: single_row_select, primary_key_equality, high_frequency, low_latency
+# Detection (#920): a SELECT whose access-pattern class is a key lookup, a full primary or
+# unique key pinned to a value (src/tools/analysis/key_access.py), read from the SQL
+# facts, not the collector's filter_columns.
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-01"
 score = 100
-why = "Single-item lookups by primary key."
+why = "Single-item reads by the full primary key: GetItem, or BatchGetItem for up to 100 keys and 16 MB, at single-digit-millisecond latency at any scale (Amazon DynamoDB Developer Guide, Working with items; Amazon DynamoDB API Reference, BatchGetItem)."
 concerns = ["Large item sizes (>400KB) require splitting"]
 
 [engines.documentdb]
@@ -33,14 +36,26 @@ supported = true
 why = "ElastiCache's analysis does not report this pattern; it adds no cross-engine penalty."
 
 [engines.aurora_postgresql]
-kind = "unscored"
+kind = "fit"
 supported = true
-why = "Aurora PostgreSQL's analysis does not report this pattern; it adds no cross-engine penalty."
+catalog = "aurora_common"
+catalog_id = "aurora-common-12"
+score = 80
+why = "A read of one row, or an IN-list batch, by its full primary or unique key: a B-tree index point read, served from memory once cached, with read replicas to scale the reads (PostgreSQL documentation, Index Types; MySQL Reference Manual, Comparison of B-Tree and Hash Indexes)."
+concerns = [
+    "Above 100 calls per second a key-value engine is the native path (high-frequency-pk-lookup)",
+]
 
 [engines.aurora_mysql]
-kind = "unscored"
+kind = "fit"
 supported = true
-why = "Aurora MySQL's analysis does not report this pattern; it adds no cross-engine penalty."
+catalog = "aurora_common"
+catalog_id = "aurora-common-12"
+score = 80
+why = "A read of one row, or an IN-list batch, by its full primary or unique key: a B-tree index point read, served from memory once cached, with read replicas to scale the reads (PostgreSQL documentation, Index Types; MySQL Reference Manual, Comparison of B-Tree and Hash Indexes)."
+concerns = [
+    "Above 100 calls per second a key-value engine is the native path (high-frequency-pk-lookup)",
+]
 
 [engines.neptune]
 kind = "future"

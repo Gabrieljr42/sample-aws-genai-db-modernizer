@@ -2,7 +2,7 @@
   "about": "Routing regression guard (tests/e2e/test_routing_baseline.py). Update deliberately with: uv run python -m tests.e2e.routing_baseline --write --reason \"...\"",
   "tolerance_pp": 5.0,
   "query_tolerance": "max(5, 0.25 x baseline count) queries",
-  "reason": "#920 catalog accuracy A: DocumentDB's variant-attribute fits need a key-anchored read of an entity with variable attributes, DynamoDB's call-rate fits are gone, one penalty_basis rule sizes every penalty; the per-query drift is in the PR.",
+  "reason": "#920 catalog accuracy B (stacked on A): DynamoDB's key patterns read their key from the SQL facts (key-value-lookup, range-query, metadata-config-store, parent-child/co-access/junction, time-series, session-store), the ordered-scan anti-pattern prices a top-N Scan, and Aurora scores a key lookup from its own B-tree point read (80) instead of standard-crud's 60.",
   "history": [
     "Initial baseline from #296 (cache overlay): ElastiCache owns no query, Reality Check protects only mandatory queries, OpenSearch absorbs only search/aggregation queries.",
     "Rebased on main d97a401 (#296 review 2): adds per-engine owned query counts and the cached-read count, guarded by max(5, 25% of baseline) queries; routing unchanged.",
@@ -23,7 +23,8 @@
     "#502: Phase 1 settles the committed engine set with the resolver's own per-query scores (not the reality check's separate fit scorer), removing exactly one worst-ranked candidate per round and re-evaluating the rest fresh against the smaller set; Phase 2 places every query within that final set via the same shared eligibility rule. Wordpress and discourse both keep two real owner engines instead of collapsing to one.",
     "migration waves scope tables by served queries, not table-level ownership (#562): wordpress wave 3 table_count went 5 (as of #502) -> 7 (current main, an unrelated drift from intervening commits) -> 17 (this PR); discourse wave 3 table_count 181->200. wordpress's owner_queries/workload_percent also move from the stale pre-#562 baseline (64/43, last regenerated at #502) to current main's actual, already-true values (63/44) -- that drift predates this change too; routing_snapshot.json needs no update, confirming zero per-query reassignment.",
     "Add the synthetic SQL Server sample, trailgear (#618); wordpress and discourse unchanged",
-    "#920 catalog accuracy A: DocumentDB's variant-attribute fits need a key-anchored read of an entity with variable attributes, DynamoDB's call-rate fits are gone, one penalty_basis rule sizes every penalty; the per-query drift is in the PR."
+    "#920 catalog accuracy A: DocumentDB's variant-attribute fits need a key-anchored read of an entity with variable attributes, DynamoDB's call-rate fits are gone, one penalty_basis rule sizes every penalty; the per-query drift is in the PR.",
+    "#920 catalog accuracy B (stacked on A): DynamoDB's key patterns read their key from the SQL facts (key-value-lookup, range-query, metadata-config-store, parent-child/co-access/junction, time-series, session-store), the ordered-scan anti-pattern prices a top-N Scan, and Aurora scores a key lookup from its own B-tree point read (80) instead of standard-crud's 60."
   ],
   "samples": {
     "wordpress": {
@@ -32,14 +33,14 @@
       "assignment_version": 2,
       "queries_in_scope": 107,
       "owner_share_percent": {
-        "aurora_mysql": 62.6,
-        "dynamodb": 37.4
+        "aurora_mysql": 60.7,
+        "dynamodb": 39.3
       },
       "owner_queries": {
-        "aurora_mysql": 67,
-        "dynamodb": 40
+        "aurora_mysql": 65,
+        "dynamodb": 42
       },
-      "source_compatible_share_percent": 62.6,
+      "source_compatible_share_percent": 60.7,
       "owner_engines": 2,
       "cache_overlay": {
         "queries": 20,
@@ -50,7 +51,7 @@
           "engines": [
             "aurora_mysql"
           ],
-          "workload_percent": 62.6,
+          "workload_percent": 60.7,
           "cached_call_share_percent": 0.0,
           "table_count": 50
         },
@@ -66,9 +67,9 @@
           "engines": [
             "dynamodb"
           ],
-          "workload_percent": 37.4,
+          "workload_percent": 39.3,
           "cached_call_share_percent": 0.0,
-          "table_count": 14
+          "table_count": 13
         }
       ],
       "utility_queries_off_aurora": 0
@@ -79,16 +80,16 @@
       "assignment_version": 2,
       "queries_in_scope": 1654,
       "owner_share_percent": {
-        "aurora_postgresql": 62.0,
-        "documentdb": 3.1,
-        "dynamodb": 34.9
+        "aurora_postgresql": 52.6,
+        "documentdb": 2.9,
+        "dynamodb": 44.5
       },
       "owner_queries": {
-        "aurora_postgresql": 1025,
-        "documentdb": 52,
-        "dynamodb": 577
+        "aurora_postgresql": 870,
+        "documentdb": 48,
+        "dynamodb": 736
       },
-      "source_compatible_share_percent": 62.0,
+      "source_compatible_share_percent": 52.6,
       "owner_engines": 3,
       "cache_overlay": {
         "queries": 3,
@@ -99,7 +100,7 @@
           "engines": [
             "aurora_postgresql"
           ],
-          "workload_percent": 62.0,
+          "workload_percent": 52.6,
           "cached_call_share_percent": 0.0,
           "table_count": 312
         },
@@ -116,9 +117,9 @@
             "dynamodb",
             "documentdb"
           ],
-          "workload_percent": 38.0,
+          "workload_percent": 47.4,
           "cached_call_share_percent": 0.0,
-          "table_count": 86
+          "table_count": 124
         }
       ],
       "utility_queries_off_aurora": 0
@@ -129,14 +130,14 @@
       "assignment_version": 2,
       "queries_in_scope": 95,
       "owner_share_percent": {
-        "aurora_postgresql": 77.9,
-        "dynamodb": 22.1
+        "aurora_postgresql": 70.5,
+        "dynamodb": 29.5
       },
       "owner_queries": {
-        "aurora_postgresql": 74,
-        "dynamodb": 21
+        "aurora_postgresql": 67,
+        "dynamodb": 28
       },
-      "source_compatible_share_percent": 77.9,
+      "source_compatible_share_percent": 70.5,
       "owner_engines": 2,
       "cache_overlay": {
         "queries": 16,
@@ -147,7 +148,7 @@
           "engines": [
             "aurora_postgresql"
           ],
-          "workload_percent": 77.9,
+          "workload_percent": 70.5,
           "cached_call_share_percent": 0.0,
           "table_count": 31
         },
@@ -163,9 +164,9 @@
           "engines": [
             "dynamodb"
           ],
-          "workload_percent": 22.1,
+          "workload_percent": 29.5,
           "cached_call_share_percent": 0.0,
-          "table_count": 10
+          "table_count": 13
         }
       ],
       "utility_queries_off_aurora": 0

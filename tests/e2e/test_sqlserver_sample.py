@@ -102,11 +102,15 @@ def test_aurora_choice_is_a_close_call_tipped_by_workload_features(
     #920: 7300 to 7320. The one penalty rule moves both totals by the same 15
     points (the shared Aurora entries: high-frequency-pk-lookup 30 -> 20 on one
     query, simple-cache-read 25 -> 20 on another), so the 20-point lead is
-    unchanged."""
+    unchanged.
+
+    #920 catalog PR B: 7396 to 7413. Aurora's own key-value-lookup fit (80, a B-tree
+    point read) now scores the key lookups on both engines, which lifts both totals
+    about the same; the lead is 17 and the features still decide."""
     choice = _assignment(trailgear_run, 1)["aurora_engine_choice"]
     assert choice["source_engine"] == "sqlserver"
     mysql, pg = choice["totals"]["aurora_mysql"], choice["totals"]["aurora_postgresql"]
-    assert (mysql, pg) == (7300.0, 7320.0)
+    assert (mysql, pg) == (7396.0, 7413.0)
     assert abs(pg - mysql) <= 0.05 * max(mysql, pg), "close enough for features to decide"
     assert choice["margin"] == round(pg - mysql, 2)
     assert choice["engine"] == "aurora_postgresql"
@@ -191,7 +195,10 @@ def test_the_shipment_queries_no_longer_tie(trailgear_run: PipelineResult) -> No
     deliverable as pending the customer's choice. Since #920 DynamoDB scores
     dbo.Shipment 77 (its call-rate fits no longer average its table score down)
     and DocumentDB 74 (its column-shape fits are gone), so all three go to
-    DynamoDB with no tie, and no deliverable lists a pending choice. The sample
+    DynamoDB with no tie. Catalog PR B raises DynamoDB to 80: dbo.Shipment now also
+    has DynamoDB's keyed range-query and co-accessed-tables patterns (the unshipped
+    orders read, ``Status = N'PAID'`` plus an ``OrderDate`` range with a subquery on
+    Shipment, and a key-anchored order join that reads Shipment), and no deliverable lists a pending choice. The sample
     no longer reaches the unresolved-tie-in-the-deliverables path; the rendering
     of a tie stays covered by ``tests/unit/report/test_tied_queries_deliverables.py``,
     and restoring the e2e path is a generator retune, recorded on the #920 PR."""
@@ -205,7 +212,7 @@ def test_the_shipment_queries_no_longer_tie(trailgear_run: PipelineResult) -> No
     for q in shipment:
         scores = snapshot[q]["s"]
         assert (scores["dynamodb"], scores["aurora_postgresql"], scores["documentdb"]) == (
-            77,
+            80,
             76,
             74,
         ), q
@@ -221,8 +228,10 @@ def test_the_shipment_queries_no_longer_tie(trailgear_run: PipelineResult) -> No
 def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineResult) -> None:
     """DocumentDB does not survive the reality check, so every tie between it
     and Aurora PostgreSQL alone is resolved onto Aurora PostgreSQL, and the
-    reason says why. Since #920 those are two individual key reads (a
-    ProductCategory row and a Supplier row); the category group no longer ties."""
+    reason says why. Since #920 those are a ProductCategory key read and the
+    StockLevel ``MERGE`` (catalog PR B gives the Supplier read by key DynamoDB's
+    key-value-lookup, 87 against Aurora PostgreSQL's 76, and ties the MERGE at 74); the
+    category group no longer ties."""
     v1 = _by_id(_assignment(trailgear_run, 1))
     final = _by_id(_assignment(trailgear_run, _final_version(trailgear_run)))
     resolved = [
@@ -231,7 +240,7 @@ def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineR
     assert sorted(resolved) == sorted(
         [
             _qid(trailgear_run, "[ParentCategoryID], [Name], [Slug] FROM [ProductCategory]"),
-            _qid(trailgear_run, "FROM [Supplier] WHERE [SupplierID]"),
+            _qid(trailgear_run, "MERGE [StockLevel] AS tgt"),
         ]
     )
     for q in resolved:

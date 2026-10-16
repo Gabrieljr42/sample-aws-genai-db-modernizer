@@ -21,6 +21,7 @@ def _make_input(tables, queries):
     return AnalysisInput(
         job_id="test-job",
         collector_output={
+            "metadata": {"source_database": {"engine": "postgresql"}},
             "database_schema": {"tables": tables},
             "queries": {"query_patterns": queries},
         },
@@ -42,7 +43,7 @@ def ecommerce_fixture():
                 {"column_name": "total", "data_type": "numeric"},
                 {"column_name": "created_at", "data_type": "timestamp"},
             ],
-            "primary_key": {"columns": ["id"]},
+            "primary_key": ["id"],
             "foreign_keys": [
                 {"referenced_table": "customers", "columns": ["customer_id"]},
                 {"referenced_table": "products", "columns": ["product_id"]},
@@ -59,7 +60,7 @@ def ecommerce_fixture():
                 {"column_name": "name", "data_type": "varchar"},
                 {"column_name": "email", "data_type": "varchar"},
             ],
-            "primary_key": {"columns": ["id"]},
+            "primary_key": ["id"],
             "foreign_keys": [],
             "row_count": 50000,
             "size_mb": 10.0,
@@ -128,7 +129,7 @@ def high_freq_pk_fixture():
                 {"column_name": "id", "data_type": "uuid"},
                 {"column_name": "data", "data_type": "jsonb"},
             ],
-            "primary_key": {"columns": ["id"]},
+            "primary_key": ["id"],
             "foreign_keys": [],
             "row_count": 10000,
             "size_mb": 5.0,
@@ -164,7 +165,7 @@ def pg_features_fixture():
                 {"column_name": "name", "data_type": "varchar"},
                 {"column_name": "metadata", "data_type": "jsonb"},
             ],
-            "primary_key": {"columns": ["id"]},
+            "primary_key": ["id"],
             "foreign_keys": [{"referenced_table": "categories", "columns": ["parent_id"]}],
             "row_count": 1000,
             "size_mb": 1.0,
@@ -390,7 +391,7 @@ class TestAuroraPgCostEstimation:
                             "columns": [],
                             "row_count": 10,
                             "size_mb": 1.0,
-                            "primary_key": {"columns": ["id"]},
+                            "primary_key": ["id"],
                             "foreign_keys": [],
                         }
                     ]

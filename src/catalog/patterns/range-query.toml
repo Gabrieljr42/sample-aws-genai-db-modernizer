@@ -6,14 +6,17 @@ detectors = [
 triage_signal = "range_queries"
 penalty = 0
 
-# Detection signals: partition_key_equality_plus_range, between_clause, order_by_with_limit, bounded_result_set
+# Detection (#920): a SELECT with a scope that pins a key column of a table to a value and
+# bounds another column of the same table by a range (the facade's ranges, the one range
+# definition): a partition-key equality plus a sort-key range. Not any range plus ORDER BY.
+# (src/tools/analysis/key_access.py, partition_range)
 [engines.dynamodb]
 kind = "fit"
 supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-02"
 score = 90
-why = "Queries that filter on a partition key with a range condition on a sort key. Maps directly to DynamoDB Query with KeyConditionExpression."
+why = "Queries that pin a partition key value and bound a sort key by a range: a DynamoDB Query with a KeyConditionExpression, returned in sort-key order, at most 1 MB per page; with a local secondary index an item collection is limited to 10 GB (Amazon DynamoDB API Reference, Query; Amazon DynamoDB Developer Guide, Local secondary indexes)."
 concerns = [
     "Result sets exceeding 1MB require pagination, which is not the same as SQL",
     "Complex filter expressions evaluated after read (consume RCUs)",

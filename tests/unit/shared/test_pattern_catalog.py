@@ -357,6 +357,7 @@ class TestConstantsAreTheCatalogsView:
             ("dynamodb-ap-02", "complex-aggregation", 0.7),
             ("dynamodb-ap-03", "unbounded-result-set", 0.2),
             ("dynamodb-ap-04", "wide-transaction", 0.3),
+            ("dynamodb-ap-05", "ordered-scan", 0.5),
         ]
 
     def test_documentdb(self) -> None:
@@ -422,6 +423,7 @@ class TestConstantsAreTheCatalogsView:
             ("aurora-common-09", "simple-join", 70),
             ("aurora-common-10", "standard-crud", 60),
             ("aurora-common-11", "batch-in-list", 70),
+            ("aurora-common-12", "key-value-lookup", 80),
         ]
         assert _ids(common.AURORA_COMMON_ANTI_PATTERNS, "severity_weight") == [
             ("aurora-anti-01", "high-frequency-pk-lookup", 0.8),
@@ -482,6 +484,7 @@ class TestConstantsAreTheCatalogsView:
             "wide-transaction": 10,
             # #920: the anti-patterns that cost 0 before the one penalty rule.
             "frequent-full-scan": 20,
+            "ordered-scan": 20,
             "unbounded-result-set": 10,
             "heavy-cross-collection-joins": 20,
             "correlated-subquery-joins": 20,

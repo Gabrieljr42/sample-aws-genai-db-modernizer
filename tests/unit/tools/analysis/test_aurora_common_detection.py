@@ -21,7 +21,7 @@ class TestSubqueryDetection:
                 {
                     "table_id": "orders",
                     "columns": [],
-                    "primary_key": {"columns": ["id"]},
+                    "primary_key": ["id"],
                     "foreign_keys": [],
                     "row_count": 1000,
                     "size_mb": 1.0,
@@ -50,7 +50,7 @@ class TestSubqueryDetection:
                 {
                     "table_id": "customers",
                     "columns": [],
-                    "primary_key": {"columns": ["id"]},
+                    "primary_key": ["id"],
                     "foreign_keys": [],
                     "row_count": 5000,
                     "size_mb": 2.0,
@@ -79,7 +79,7 @@ class TestSubqueryDetection:
                 {
                     "table_id": "products",
                     "columns": [],
-                    "primary_key": {"columns": ["id"]},
+                    "primary_key": ["id"],
                     "foreign_keys": [],
                     "row_count": 10000,
                     "size_mb": 5.0,
@@ -109,7 +109,7 @@ class TestSubqueryDetection:
                 {
                     "table_id": "checks",
                     "columns": [],
-                    "primary_key": {"columns": ["id"]},
+                    "primary_key": ["id"],
                     "foreign_keys": [],
                     "row_count": 100,
                     "size_mb": 0.1,

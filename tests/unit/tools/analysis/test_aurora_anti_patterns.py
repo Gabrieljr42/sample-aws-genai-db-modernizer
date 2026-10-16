@@ -30,7 +30,10 @@ REPO = Path(__file__).resolve().parents[4]
 
 
 def _make_collector(tables, queries):
+    # The queries use PostgreSQL's $1 placeholders: the SQL facts read them in the
+    # source's dialect (#920: the key-lookup detector reads the pinned key from them).
     return {
+        "metadata": {"source_database": {"engine": "postgresql"}},
         "database_schema": {"tables": tables},
         "queries": {"query_patterns": queries},
     }
@@ -44,7 +47,7 @@ def _make_collector(tables, queries):
 class TestLoweredThresholds:
     def test_pk_lookup_fires_at_35_cps(self):
         """anti-01 fires: single-row PK SELECT at 35 CPS, 0 FKs, 0 joins."""
-        tables = [{"table_id": "t1", "foreign_keys": [], "columns": []}]
+        tables = [{"table_id": "t1", "foreign_keys": [], "columns": [], "primary_key": ["id"]}]
         queries = [
             {
                 "query_id": "q1",
@@ -894,7 +897,7 @@ class TestAntiPatternExclusionLogic:
                 {
                     "table_id": "users",
                     "columns": [{"column_name": "id", "data_type": "integer"}],
-                    "primary_key": {"columns": ["id"]},
+                    "primary_key": ["id"],
                     "foreign_keys": [],
                     "row_count": 10000,
                     "size_mb": 5.0,
@@ -928,7 +931,7 @@ class TestAntiPatternExclusionLogic:
                         {"column_name": "id", "data_type": "integer"},
                         {"column_name": "key", "data_type": "varchar"},
                     ],
-                    "primary_key": {"columns": ["id"]},
+                    "primary_key": ["id"],
                     "foreign_keys": [],
                     "row_count": 50,
                     "size_mb": 0.01,

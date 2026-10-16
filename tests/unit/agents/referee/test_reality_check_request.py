@@ -276,7 +276,9 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
 
     #920: DocumentDB's variant-attribute patterns now need a key-anchored read of
     an entity with variable attributes, so DocumentDB first-assigns 6 wordpress
-    queries, not 7, and the check moves 3 to Aurora MySQL and 3 to DynamoDB. The query
+    queries, not 7, and the check moves 3 to Aurora MySQL and 3 to DynamoDB. Catalog PR B
+    (#920: the keyed DynamoDB detectors and Aurora's own key-lookup fit) brings it to 8:
+    5 to Aurora MySQL and 3 to DynamoDB. The query
     this test used to flag (``d72966f8``, a ``REPLACE INTO wp_wc_product_meta_lookup``)
     no longer reaches DocumentDB: its wide table was product-catalog by column count
     alone, and DynamoDB's call-rate fit is gone, so it stays on Aurora MySQL. The flag
@@ -300,7 +302,7 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
         ]
         moved = {q["query_id"]: c["to_engine"] for c in from_documentdb for q in c["moved_queries"]}
         assert sorted(moved.values()).count("dynamodb") == 3
-        assert sorted(moved.values()).count("aurora_mysql") == 3
+        assert sorted(moved.values()).count("aurora_mysql") == 5
         flagged = next(q for q in moved if q.startswith(self.FLAGGED))
         assert moved[flagged] == "dynamodb"
 
