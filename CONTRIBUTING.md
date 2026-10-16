@@ -264,6 +264,8 @@ Common scopes in this project:
 
 4. **Update documentation** if needed
 
+5. **Self-review** against the [Before asking for review](AGENTS.md#before-asking-for-review) checklist in AGENTS.md, and run `./ci/pre_merge.sh`
+
 ### PR Title Format
 
 Use the same format as commit messages:
