@@ -196,7 +196,10 @@ IN_LIST_KEYWORDS: tuple[str, ...] = (
 
 DUPLICATE_KEY_KEYWORDS: tuple[str, ...] = ("on duplicate key", "replace into")
 
-GROUP_CONCAT_KEYWORDS: tuple[str, ...] = ("group_concat(",)
+# A string aggregate, whatever the dialect calls it: MySQL's GROUP_CONCAT, the
+# STRING_AGG of PostgreSQL and SQL Server, Oracle's and DB2's LISTAGG (#920: both
+# Aurora engines have one).
+_STRING_AGGREGATE_RE = re.compile(r"\b(?:group_concat|string_agg|listagg)\s*\(", re.IGNORECASE)
 
 STORED_ROUTINE_KEYWORDS: tuple[str, ...] = (
     "call ",
@@ -204,6 +207,10 @@ STORED_ROUTINE_KEYWORDS: tuple[str, ...] = (
     "create procedure",
     "create function",
 )
+# SQL Server runs a stored procedure with EXEC or EXECUTE as the statement (with an
+# optional ``@rc =`` for its return code); ``EXEC ('...')`` runs a string instead. Only
+# for a SQL Server source: PostgreSQL's and MySQL's EXECUTE runs a prepared statement.
+_TSQL_EXEC_RE = re.compile(r"^exec(?:ute)?\s+(?:@\w+\s*=\s*)?[\[\w]", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # PostgreSQL syntax (the Aurora PostgreSQL analysis's detectors, moved here
@@ -745,11 +752,11 @@ class QueryFacts:
         return self._has(*_TIMESTAMP_HINTS) and self._parsed.timestamp_column
 
     @cached_property
-    def update_target_join(self) -> bool:
-        """MySQL's multi-table ``UPDATE a JOIN b ... SET`` (``SqlFacts.update_target_join``);
-        not ``UPDATE ... FROM ... JOIN``.
+    def multi_table_write(self) -> bool:
+        """An UPDATE or DELETE whose rows come from a join with another table, in any
+        dialect (``SqlFacts.multi_table_write``).
         """
-        return self._has("update") and self._has("join") and self._parsed.update_target_join
+        return self._has("update", "delete") and self._parsed.multi_table_write
 
     @cached_property
     def json_access(self) -> bool:
@@ -815,16 +822,24 @@ class QueryFacts:
         return _contains_any(self._lower, DUPLICATE_KEY_KEYWORDS)
 
     @cached_property
-    def group_concat_call(self) -> bool:
-        """``group_concat(``."""
-        return _contains_any(self._lower, GROUP_CONCAT_KEYWORDS)
+    def string_aggregate_call(self) -> bool:
+        """``GROUP_CONCAT(``, ``STRING_AGG(`` or ``LISTAGG(`` outside comments and
+        string literals."""
+        return self._has("group_concat", "string_agg", "listagg") and bool(
+            _STRING_AGGREGATE_RE.search(scan_sql(self._text))
+        )
 
     @cached_property
     def stored_routine_keyword(self) -> bool:
         """A :data:`STORED_ROUTINE_KEYWORDS` substring (``call ``, ``delimiter``, ``create
-        procedure``, ``create function``).
+        procedure``, ``create function``), or, for a SQL Server source, a statement that
+        is an ``EXEC``/``EXECUTE`` of a procedure.
         """
-        return _contains_any(self._lower, STORED_ROUTINE_KEYWORDS)
+        if _contains_any(self._lower, STORED_ROUTINE_KEYWORDS):
+            return True
+        if self._source_engine.strip().lower() != "sqlserver" or not self._has("exec"):
+            return False
+        return any(_TSQL_EXEC_RE.match(t) for t in _leading_comment_readings(self._text))
 
     @cached_property
     def array_operation(self) -> bool:

@@ -51,7 +51,7 @@ _REGEX = {
     "top_n": regex_facts.regex_top_n,
     "timestamp_column": regex_facts.regex_timestamp_column,
     "json_access": regex_facts.regex_json_access,
-    "update_target_join": regex_facts.regex_update_target_join,
+    "multi_table_write": regex_facts.regex_multi_table_write,
 }
 
 

@@ -5,7 +5,10 @@
 # engine (a `fit` entry's `score`, or a `native`/`unscored` entry's `class_score`), or 0 when none
 # of them rates it: the numbers stay in the pattern files (Decision 8), this file only says which
 # patterns describe each class. An anti-pattern listed here (frequent-full-scan) documents why an
-# engine gets 0, it never adds a score. Classes are listed in
+# engine gets 0, it never adds a score. A pattern in a class's `only_when` counts only for a query
+# showing its fact (the classifier reads each from the SQL facade); a write is rated only on a
+# system of record, so OpenSearch and ElastiCache are never credited for one (ADR-031 Decision 2
+# step 3, #936). No class lists a write pattern (`write_pattern`). Classes are listed in
 # severity order: when one statement shows several shapes, the later class wins.
 #
 # Shadow only: the scores are computed next to today's per-table scores and written per job
@@ -37,7 +40,8 @@ id = "ad_hoc_filter"
 label = "Ad hoc filter"
 leaning = "relational, document or search"
 why = "Filters on non-key attributes with no anchoring key (a timestamp range included), and an unkeyed bulk write."
-patterns = ["secondary-attribute-filter", "standard-crud", "multi-row-mutation"]
+# A read pattern rates the class; multi-row-mutation (a write) is not listed (#936).
+patterns = ["secondary-attribute-filter", "standard-crud"]
 
 [[classes]]
 id = "unanchored_join"
@@ -53,12 +57,16 @@ leaning = "relational or analytics"
 why = "GROUP BY with an aggregate function, an aggregate over rows no key anchors, or a windowed aggregate."
 patterns = ["aggregation-analytics", "window-function", "reporting-query", "group-concat-pivot", "aggregation-pipeline", "time-aggregation"]
 # time-aggregation rates date-bucket aggregations only: it counts for a query whose GROUP BY
-# truncates or extracts a date/time (the facade's time_bucket fact, #920).
-only_when = { "time-aggregation" = "time_bucket" }
+# truncates or extracts a date/time (the facade's time_bucket fact, #920). window-function rates
+# a query that has a window function, not every aggregation (#920, catalog PR C).
+only_when = { "time-aggregation" = "time_bucket", "window-function" = "window_function" }
 
 [[classes]]
 id = "text_search"
 label = "Text search"
 leaning = "search"
-why = "With no key anchoring the rows: a leading-wildcard or parameterised LIKE, a regular expression, a similarity function or a full-text match."
+why = "With no key anchoring the rows: a leading-wildcard LIKE, a regular expression, a similarity function or a full-text match."
 patterns = ["full-text-search", "wildcard-search", "fuzzy-search", "regex-search", "full-text-native", "fulltext-search"]
+# Each text pattern rates only the text search it describes (#920, catalog PR C): a LIKE '%x%'
+# is not rated by an engine's full-text index, which does not serve it.
+only_when = { "full-text-search" = "full_text", "full-text-native" = "full_text", "fulltext-search" = "full_text", "wildcard-search" = "leading_wildcard", "regex-search" = "pattern_match", "fuzzy-search" = "similarity_match" }

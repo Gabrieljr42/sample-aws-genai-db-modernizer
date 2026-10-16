@@ -18,8 +18,8 @@ why = "DynamoDB cannot run this pattern: a query another engine reports it for l
 [engines.documentdb]
 kind = "native"
 supported = true
-why = "The $text operator runs full-text search natively. Class score (#728): 75, the same built-in text-index operator shape Aurora PostgreSQL's native full text is rated at (full-text-native, 75); not a dedicated search engine."
-class_score = 75
+why = "The $text operator runs full-text search natively within its documented limits: one text index per collection, English only, no array fields, no compound index with other fields and no term exclusion (Amazon DocumentDB Developer Guide, Performing text search). Class score (#728): 60, a narrow text index, not a search engine."
+class_score = 60
 
 # Detection signals: tsvector, tsquery, to_tsvector, plainto_tsquery, @@, match against
 [engines.opensearch]
@@ -43,13 +43,13 @@ why = "ElastiCache cannot run this pattern: a query another engine reports it fo
 [engines.aurora_postgresql]
 kind = "native"
 supported = true
-why = "tsvector/tsquery full-text search is native SQL. Class score (#728): 75, Aurora PostgreSQL's own native full-text rating (full-text-native, 75)."
+why = "tsvector and tsquery full-text search with a GIN index is native SQL (PostgreSQL documentation, Full Text Search, Preferred Index Types for Text Search). Class score (#728): 75, a built-in text index for moderate search, below a dedicated search engine's relevance ranking."
 class_score = 75
 
 [engines.aurora_mysql]
 kind = "native"
 supported = true
-why = "FULLTEXT indexes with MATCH ... AGAINST are native SQL. Class score (#728): 80, Aurora MySQL's own native full-text rating (fulltext-search, 80)."
+why = "FULLTEXT indexes with MATCH ... AGAINST, in natural-language and boolean modes, are native SQL (MySQL Reference Manual, Full-Text Search Functions). Class score (#728): 80, a built-in text index for moderate search, below a dedicated search engine's relevance ranking."
 class_score = 80
 
 [engines.neptune]

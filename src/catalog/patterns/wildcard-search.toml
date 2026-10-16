@@ -18,8 +18,8 @@ why = "DynamoDB cannot run this pattern: a query another engine reports it for l
 [engines.documentdb]
 kind = "native"
 supported = true
-why = "$regex expresses LIKE natively; a leading wildcard runs as a scan, scored by the substring-match pattern (#493). Class score (#728): 75, the same built-in text-index operator shape Aurora PostgreSQL's native full text is rated at (full-text-native, 75); not a dedicated search engine."
-class_score = 75
+why = "$regex expresses LIKE natively, but only a prefix regular expression without the i, m or o options uses an index, so a leading wildcard is a collection scan (Amazon DocumentDB Developer Guide, Query planner). Class score (#728): 45, a scan of every document; what the scan costs a frequent query on a large table stays substring-match's penalty (#493)."
+class_score = 45
 
 # Detection signals: like %, ilike %
 [engines.opensearch]
@@ -43,14 +43,14 @@ why = "ElastiCache cannot run this pattern: a query another engine reports it fo
 [engines.aurora_postgresql]
 kind = "native"
 supported = true
-why = "LIKE/ILIKE is native SQL; pg_trgm's GIN/GiST index also indexes a leading wildcard (the substring-match pattern, #493). Class score (#728): 75, Aurora PostgreSQL's own native full-text rating (full-text-native, 75)."
-class_score = 75
+why = "LIKE and ILIKE are native SQL, and a pg_trgm GIN or GiST index serves them with a leading wildcard too, an extension to create (PostgreSQL documentation, pg_trgm, Index Support; the substring-match pattern, #493). Class score (#728): 80, an index serves the match."
+class_score = 80
 
 [engines.aurora_mysql]
 kind = "native"
 supported = true
-why = "LIKE is native SQL; a leading wildcard runs as a scan, scored by the substring-match pattern (#493). Class score (#728): 80, Aurora MySQL's own native full-text rating (fulltext-search, 80)."
-class_score = 80
+why = "LIKE is native SQL, but a B-tree index serves LIKE only when the pattern does not start with a wildcard and a FULLTEXT index serves only MATCH ... AGAINST, so a leading wildcard reads every row (MySQL Reference Manual, Comparison of B-Tree and Hash Indexes). Class score (#728): 45, a scan of every row; what the scan costs a frequent query on a large table stays substring-match's penalty (#493)."
+class_score = 45
 
 [engines.neptune]
 kind = "future"

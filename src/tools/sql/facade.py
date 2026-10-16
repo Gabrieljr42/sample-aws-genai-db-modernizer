@@ -73,6 +73,7 @@ from src.tools.sql.regex_facts import (
     regex_join_count,
     regex_json_access,
     regex_like_parameter,
+    regex_multi_table_write,
     regex_offset_window_function,
     regex_order_by,
     regex_pattern_match,
@@ -82,7 +83,6 @@ from src.tools.sql.regex_facts import (
     regex_similarity_match,
     regex_timestamp_column,
     regex_top_n,
-    regex_update_target_join,
     regex_wildcard_leading,
     regex_wildcard_likes,
     regex_window_function,
@@ -295,9 +295,12 @@ class SqlFacts:
             ``jsonb_*``, ``JSON_VALUE``, ``OPENJSON``, ``FOR JSON``, ``IS
             JSON``), a cast to ``json``/``jsonb``, or a JSON containment
             (``@>`` against a string literal); not PostgreSQL's ``?`` key test.
-        update_target_join: MySQL's multi-table ``UPDATE``, whose target itself joins
-            (``UPDATE a JOIN b ON ... SET ...``). PostgreSQL's and SQL Server's
-            ``UPDATE ... FROM ... JOIN`` is not one.
+        multi_table_write: An ``UPDATE`` or ``DELETE`` whose rows come from a join
+            with another table, in any dialect: MySQL's ``UPDATE a JOIN b ON ... SET``
+            (or ``UPDATE a, b SET``) and ``DELETE a FROM a JOIN b``, the ``UPDATE ...
+            FROM`` of PostgreSQL and SQL Server, PostgreSQL's ``DELETE ... USING`` and
+            SQL Server's ``DELETE a FROM a JOIN b``. A subquery in ``SET`` or
+            ``WHERE`` is not one (#920: both Aurora engines run it set-based).
         wildcard_likes: Each ``LIKE``/``ILIKE`` that makes ``wildcard_leading``
             true, in order, with the column it tests and whether it is a word
             search (:class:`~src.tools.sql.regex_facts.WildcardLike`, #493);
@@ -328,7 +331,7 @@ class SqlFacts:
     top_n: bool = False
     timestamp_column: bool = False
     json_access: bool = False
-    update_target_join: bool = False
+    multi_table_write: bool = False
     wildcard_likes: tuple[WildcardLike, ...] = ()
 
 
@@ -646,7 +649,7 @@ def _regex_facts(sql: str, reason: FallbackReason, dialect: str) -> SqlFacts:
         top_n=regex_top_n(sql),
         timestamp_column=regex_timestamp_column(sql),
         json_access=regex_json_access(sql),
-        update_target_join=regex_update_target_join(sql),
+        multi_table_write=regex_multi_table_write(sql),
     )
 
 
@@ -683,7 +686,7 @@ def _facts_from_statements(
         fulltext_search="fulltext" in kinds,
         pattern_match="pattern" in kinds,
         similarity_match="similarity" in kinds,
-        window_function=bool(windows),
+        window_function=_has_window(nodes),
         ranking_window_function=any(isinstance(w, _RANKING_FUNCTIONS) for w in windows),
         offset_window_function=any(isinstance(w, _OFFSET_FUNCTIONS) for w in windows),
         windowed_aggregate=_has_windowed_aggregate(nodes),
@@ -700,12 +703,7 @@ def _facts_from_statements(
             TIMESTAMP_COLUMN_NAME_RE.fullmatch(name) for name in _column_names(nodes)
         ),
         json_access=any(_is_json_access(node) for node in nodes),
-        update_target_join=any(
-            isinstance(node, exp.Update)
-            and isinstance(node.this, exp.Table)
-            and bool(node.this.args.get("joins"))
-            for node in nodes
-        ),
+        multi_table_write=any(_is_multi_table_write(node) for node in nodes),
     )
 
 
@@ -751,6 +749,38 @@ def _is_json_access(node: exp.Expr) -> bool:
     if isinstance(node, exp.Anonymous):
         return bool(node.name.lower().startswith("json"))
     return False
+
+
+def _is_multi_table_write(node: exp.Expr) -> bool:
+    """An UPDATE or DELETE whose rows come from a join with another table
+    (``SqlFacts.multi_table_write``)."""
+    if isinstance(node, exp.Update):
+        joined = isinstance(node.this, exp.Table) and bool(node.this.args.get("joins"))
+        source = node.args.get("from_")
+        return joined or (source is not None and not _names_only_the_target(node, source))
+    if isinstance(node, exp.Delete):
+        using = node.args.get("using")
+        joined = isinstance(node.this, exp.Table) and bool(node.this.args.get("joins"))
+        return bool(node.args.get("tables")) or joined or (isinstance(using, list) and bool(using))
+    return False
+
+
+def _names_only_the_target(update: exp.Update, source: exp.From) -> bool:
+    """A SQL Server ``UPDATE p SET ... FROM [dbo].[Product] p``: the ``FROM`` names the
+    target again (by its name or the alias the target is written as) and reads no other
+    table, so the write is single-table (#983 review)."""
+    table = source.this
+    if not isinstance(table, exp.Table) or table.args.get("joins") or source.expressions:
+        return False
+    target = update.this.name.lower() if isinstance(update.this, exp.Table) else ""
+    # The same instance: the FROM's alias is the target, or it has no alias and its
+    # name is. ``UPDATE posts SET ... FROM posts p2`` is a self-join, a second instance.
+    return bool(target) and target == (table.alias or table.name).lower()
+
+
+def _has_window(nodes: Iterable[exp.Expr]) -> bool:
+    """A function over a window (``SqlFacts.window_function``, ``AccessFacts.window_function``)."""
+    return any(isinstance(node, exp.Window) for node in nodes)
 
 
 def _has_windowed_aggregate(nodes: Iterable[exp.Expr]) -> bool:
@@ -882,6 +912,10 @@ class ScopeSource:
     function: bool = False
 
 
+# The text searches :func:`_text_search_kind` tells apart (#893).
+TextSearchKind = Literal["leading_wildcard", "parameter", "fulltext", "pattern", "similarity"]
+
+
 @dataclass(frozen=True)
 class ScopeFacts:
     """The facts of one SELECT (or UPDATE/DELETE) scope.
@@ -904,6 +938,10 @@ class ScopeFacts:
     ``CONTAINS`` or a full-text or similarity function. ``like_parameter``: a
     ``LIKE``/``ILIKE`` whose whole pattern is a bind parameter (``LIKE ?``): its
     value is unknown, so it is neither a leading wildcard nor a prefix.
+    ``text_search_kinds``: which of those this scope's own predicates and projection
+    hold (:data:`TextSearchKind`, the one definition behind ``text_search`` and
+    ``like_parameter``), so a class score can rate each kind by its own access path
+    (#920).
     ``time_bucket``: a ``GROUP BY`` item (written out, or a projection named by its
     alias or position) that truncates or extracts a date/time: ``date_trunc``,
     ``TRUNC``, ``DATE()``, a cast to ``date``, ``YEAR``/``MONTH``/``DAY``/...,
@@ -925,6 +963,7 @@ class ScopeFacts:
     text_search: bool = False
     like_parameter: bool = False
     time_bucket: bool = False
+    text_search_kinds: frozenset[TextSearchKind] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -937,7 +976,8 @@ class AccessFacts:
     combines values (``SUM(...) OVER``, ``COUNT(*) OVER ()``) anywhere; the
     ranking and offset window functions (``ROW_NUMBER``, ``RANK``, ``LAG``, ...)
     combine nothing, so alone they are not one (the ``has_aggregation``
-    definition of :class:`SqlFacts`). When the facade falls back, ``parsed_by``
+    definition of :class:`SqlFacts`). ``window_function``: any function over a
+    window, ranking ones included (``SqlFacts.window_function``). When the facade falls back, ``parsed_by``
     is ``"regex"`` and ``scopes`` is empty: no fact is guessed from the text.
     """
 
@@ -947,6 +987,7 @@ class AccessFacts:
     windowed_aggregate: bool
     parsed_by: ParsedBy
     fallback_reason: FallbackReason | None
+    window_function: bool = False
 
 
 def query_readings(sql: str, source_engine: str) -> tuple[SqlFacts, AccessFacts]:
@@ -1019,6 +1060,7 @@ def _access_facts(statements: list[exp.Expr]) -> AccessFacts:
         windowed_aggregate=_has_windowed_aggregate(node for s in statements for node in s.walk()),
         parsed_by="sqlglot",
         fallback_reason=None,
+        window_function=_has_window(node for s in statements for node in s.walk()),
     )
 
 
@@ -1030,9 +1072,6 @@ def _cte_bodies(statement: exp.Expr, index_of: dict[int, int]) -> dict[str, int]
         if isinstance(body, exp.Select) and id(body) in index_of:
             bodies[cte.alias_or_name.lower()] = index_of[id(body)]
     return bodies
-
-
-TextSearchKind = Literal["leading_wildcard", "parameter", "fulltext", "pattern", "similarity"]
 
 
 def _text_search_kind(node: exp.Expr) -> TextSearchKind | None:
@@ -1495,4 +1534,5 @@ def _scope_facts(
         text_search=any(_is_text_search(n) for n in own),
         like_parameter=any(_text_search_kind(n) == "parameter" for n in own),
         time_bucket=_has_time_bucket(root),
+        text_search_kinds=frozenset(k for n in own if (k := _text_search_kind(n)) is not None),
     )

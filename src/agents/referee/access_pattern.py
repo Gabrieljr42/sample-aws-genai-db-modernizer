@@ -36,10 +36,11 @@ shows several shapes, in different scopes or in one, the later class wins):
    windowed aggregate (``SUM(...) OVER``; a ranking or offset window function such
    as ``ROW_NUMBER`` combines nothing, the facade's ``SqlFacts`` definition).
 7. ``text_search``: in a scope no key anchors, a ``LIKE`` whose pattern starts with a
-   wildcard or is a bind parameter (``LIKE ?``: the digest hides the pattern), a
-   regular-expression match, a similarity function or a full-text match. On keyed
-   rows the same predicate only filters one item collection, so it never outranks
-   the key anchor; the reason says so.
+   wildcard, a regular-expression match, a similarity function or a full-text match.
+   On keyed rows the same predicate only filters one item collection, so it never
+   outranks the key anchor; the reason says so. A ``LIKE`` whose whole pattern is a
+   bind parameter (``LIKE ?``: the digest hides the pattern) shows no text search, so
+   no text search is visible, so its scope is classed by its other predicates (#912, #920).
 
 Two labels are not access patterns and take no class score: ``utility`` (a
 statement that reads or writes no table: ``SET``, ``SHOW``, transaction control,
@@ -212,7 +213,11 @@ def _table_keys(table: Mapping) -> TableKeys:
 @dataclass(frozen=True)
 class AccessClassification:
     """A query's class, a short, plain-language reason, and the query facts a class
-    score may depend on (``time_bucket``: a GROUP BY over a date/time truncation)."""
+    score may depend on (``src.shared.catalog.access_classes.QUERY_FACTS``):
+    ``time_bucket`` (a GROUP BY over a date/time truncation), the text searches its
+    scopes show (``full_text``, ``leading_wildcard``, ``pattern_match``,
+    ``similarity_match``), ``window_function`` and ``write`` (an INSERT, UPDATE,
+    DELETE or MERGE)."""
 
     name: str
     reason: str
@@ -302,10 +307,12 @@ def _scope_class(
     reached = _reached(scope, facts, anchored) if len(aliases) > 1 else set(anchored)
     keyed = bool(anchored) and reached >= set(aliases)
     note = _key_note(scope, pinned, anchored)
-    pattern_match = facts.text_search or facts.like_parameter
-    if pattern_match and not keyed:
+    # A LIKE whose whole pattern is a bind parameter shows no text search: its value is
+    # unknown (#912), so the scope is classed by its other predicates, and the triage
+    # text-search signal still names it (#920).
+    if facts.text_search and not keyed:
         return TEXT_SEARCH, "text or pattern match with no key anchoring the rows"
-    if pattern_match:
+    if facts.text_search or facts.like_parameter:
         note += "; its pattern match only filters the keyed rows"
 
     # A GROUP BY that combines no values only de-duplicates the rows read (like
@@ -394,6 +401,7 @@ def _reached(scope: _ScopeTables, facts: ScopeFacts, anchored: set[str]) -> set[
 
 
 _DATA_QUERY_TYPES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE", "MERGE"})
+_WRITE_KINDS = frozenset({"insert", "update", "delete", "merge"})
 
 
 def classify_facts(
@@ -434,10 +442,31 @@ def classify_facts(
     if not found:
         return AccessClassification(UTILITY, "reads or writes no table data")
     name, reason = max(found, key=lambda item: _SEVERITY[item[0]])
-    query_facts = (
-        frozenset({"time_bucket"}) if any(s.time_bucket for s in facts.scopes) else frozenset()
-    )
-    return AccessClassification(name, reason, query_facts)
+    if name == AD_HOC_FILTER and any(s.like_parameter and not s.text_search for s in facts.scopes):
+        reason += " (its LIKE pattern is a bind parameter, so no text search is visible, #912)"
+    return AccessClassification(name, reason, _class_facts(facts))
+
+
+# The facade's text-search kinds, by the query-fact name a class score reads
+# (``src.shared.catalog.access_classes.QUERY_FACTS``).
+_TEXT_FACTS = {
+    "fulltext": "full_text",
+    "leading_wildcard": "leading_wildcard",
+    "pattern": "pattern_match",
+    "similarity": "similarity_match",
+}
+
+
+def _class_facts(facts: AccessFacts) -> frozenset[str]:
+    """The query facts a class score may depend on (``AccessClassification.facts``)."""
+    found = {_TEXT_FACTS[k] for s in facts.scopes for k in s.text_search_kinds if k in _TEXT_FACTS}
+    if any(s.time_bucket for s in facts.scopes):
+        found.add("time_bucket")
+    if facts.window_function:
+        found.add("window_function")
+    if facts.kind in _WRITE_KINDS:
+        found.add("write")
+    return frozenset(found)
 
 
 def classify_query(

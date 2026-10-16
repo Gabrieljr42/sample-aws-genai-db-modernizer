@@ -18,8 +18,8 @@ why = "DynamoDB cannot run this pattern: a query another engine reports it for l
 [engines.documentdb]
 kind = "native"
 supported = true
-why = "$regex is a native query operator. Class score (#728): 75, the same built-in text-index operator shape Aurora PostgreSQL's native full text is rated at (full-text-native, 75); not a dedicated search engine."
-class_score = 75
+why = "$regex is a native operator, but only a prefix regular expression without the i, m or o options uses an index; any other is a collection scan (Amazon DocumentDB Developer Guide, Query planner). Class score (#728): 45, a scan of every document (no fact tells a prefix regular expression apart yet)."
+class_score = 45
 
 # Detection signals: regexp, rlike, ~ , ~*
 [engines.opensearch]
@@ -43,14 +43,14 @@ why = "ElastiCache cannot run this pattern: a query another engine reports it fo
 [engines.aurora_postgresql]
 kind = "native"
 supported = true
-why = "~ and ~* regular-expression matching is native SQL. Class score (#728): 75, Aurora PostgreSQL's own native full-text rating (full-text-native, 75)."
+why = "The ~ and ~* operators are native SQL, and a pg_trgm GIN or GiST index serves them as far as trigrams can be extracted from the expression; one with none reads the whole index (PostgreSQL documentation, pg_trgm, Index Support). Class score (#728): 75, index-assisted, less reliably than a LIKE."
 class_score = 75
 
 [engines.aurora_mysql]
 kind = "native"
 supported = true
-why = "REGEXP/RLIKE is native SQL. Class score (#728): 80, Aurora MySQL's own native full-text rating (fulltext-search, 80)."
-class_score = 80
+why = "REGEXP and RLIKE are native SQL, but they are not among the comparisons a B-tree index serves, so every row is read and tested (MySQL Reference Manual, Comparison of B-Tree and Hash Indexes). Class score (#728): 45, a scan of every row."
+class_score = 45
 
 [engines.neptune]
 kind = "future"

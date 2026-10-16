@@ -32,6 +32,17 @@ def _co(queries: list[str] | None = None, tables: list[dict] | None = None) -> d
     }
 
 
+def _assert_recursive_cte(co: dict, source: str, expected: bool) -> None:
+    """#920: MySQL 8.0 has WITH RECURSIVE too, so a recursive CTE no longer tips the
+    Aurora choice; the fact is read for both Aurora engines' cte-recursive pattern
+    instead, and the feature list never names it."""
+    from src.tools.sql.query_facts import query_facts
+
+    text = co["queries"]["query_patterns"][0]["query_text"]
+    assert query_facts(text, source).recursive_cte is expected
+    assert "recursive_ctes" not in detect_heterogeneous_features(co, source)
+
+
 class TestChooseHeterogeneousEngine:
     def test_clear_mysql_win(self):
         winner, trace = choose_heterogeneous_engine(
@@ -92,10 +103,10 @@ class TestChooseHeterogeneousEngine:
         winner, trace = choose_heterogeneous_engine(
             ["aurora_mysql", "aurora_postgresql"],
             totals,
-            features={"recursive_ctes": True, "sequences": False},
+            features={"sequences": True, "merge_statements": False},
         )
         assert winner == "aurora_postgresql"
-        assert trace["deciding_features"] == ["recursive_ctes"]
+        assert trace["deciding_features"] == ["sequences"]
         assert "tipped by" in trace["reason"]
 
     def test_near_tie_with_no_feature_falls_back_to_higher_total(self):
@@ -492,13 +503,11 @@ class TestDetectHeterogeneousFeatures:
                 ") SELECT * FROM emp_tree"
             ]
         )
-        features = detect_heterogeneous_features(co, "sqlserver")
-        assert features["recursive_ctes"] is True
+        _assert_recursive_cte(co, "sqlserver", True)
 
     def test_non_recursive_cte_not_flagged(self):
         co = _co(["WITH recent AS (SELECT * FROM orders) SELECT * FROM recent"])
-        features = detect_heterogeneous_features(co, "sqlserver")
-        assert features["recursive_ctes"] is False
+        _assert_recursive_cte(co, "sqlserver", False)
 
     def test_merge_statement_detected(self):
         co = _co(
@@ -564,8 +573,7 @@ class TestDetectHeterogeneousFeatures:
                 ") SELECT * FROM recent, emp_tree"
             ]
         )
-        features = detect_heterogeneous_features(co, "sqlserver")
-        assert features["recursive_ctes"] is True
+        _assert_recursive_cte(co, "sqlserver", True)
 
     def test_sequence_keyword_only_in_a_comment_is_not_detected(self):
         co = _co(["SELECT * FROM orders -- see NEXT VALUE FOR legacy_seq\n"])
@@ -611,11 +619,11 @@ class TestBabelfishIsLastResort:
         winner, trace = choose_heterogeneous_engine(
             ["aurora_mysql", "aurora_postgresql"],
             {"aurora_mysql": 1000.0, "aurora_postgresql": 980.0},
-            features={"babelfish_compatible": True, "recursive_ctes": True},
+            features={"babelfish_compatible": True, "sequences": True},
         )
         assert winner == "aurora_postgresql"
         # The workload-based feature is named; babelfish is not needed to decide.
-        assert trace["deciding_features"] == ["recursive_ctes"]
+        assert trace["deciding_features"] == ["sequences"]
 
     def test_babelfish_alone_breaks_a_remaining_tie(self):
         winner, trace = choose_heterogeneous_engine(
@@ -717,8 +725,7 @@ class TestScannerHandlesRealSqlServerSyntax:
                 ") SELECT * FROM [Tree]"
             ]
         )
-        features = detect_heterogeneous_features(co, "sqlserver")
-        assert features["recursive_ctes"] is True
+        _assert_recursive_cte(co, "sqlserver", True)
 
     def test_recursive_cte_with_a_double_quoted_name(self):
         co = _co(
@@ -731,8 +738,7 @@ class TestScannerHandlesRealSqlServerSyntax:
                 ') SELECT * FROM "Tree"'
             ]
         )
-        features = detect_heterogeneous_features(co, "oracle")
-        assert features["recursive_ctes"] is True
+        _assert_recursive_cte(co, "oracle", True)
 
     def test_nested_block_comment_does_not_leak_a_merge(self):
         # The real MERGE statement sits between the inner comment's close and the

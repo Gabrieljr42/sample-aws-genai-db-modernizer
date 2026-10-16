@@ -30,7 +30,6 @@ WORKLOAD_FEATURES = [
     "json_usage",
     "merge_statements",
     "multiple_schemas",
-    "recursive_ctes",
     "sequences",
 ]
 
@@ -106,17 +105,27 @@ def test_aurora_choice_is_a_close_call_tipped_by_workload_features(
 
     #920 catalog PR B: 7396 to 7413. Aurora's own key-value-lookup fit (80, a B-tree
     point read) now scores the key lookups on both engines, which lifts both totals
-    about the same; the lead is 17 and the features still decide."""
+    about the same; the lead is 17 and the features still decide.
+
+    #920 catalog PR C: 7396 to 7413, an exact tie. The 17 points were PostgreSQL's
+    recursive-CTE credit on ``TicketMessage``, which MySQL 8.0 has too: Aurora MySQL's
+    analysis now reports ``cte-recursive`` there (fit 90 against PostgreSQL's 95, plus
+    the shared +15 bonus), and both engines' ``TicketMessage`` pattern score reaches
+    the 100 cap, so PostgreSQL's 5-point edge in the fit does not show in this sample.
+    The ``EXEC`` procedure calls are now ``stored-routine`` on both engines (their
+    tables do not resolve, so no table score moves). A recursive CTE no longer tips
+    the call (ADR-031 Decision 6), and the remaining workload features (JSON, MERGE,
+    multiple schemas, sequences) decide it, still for Aurora PostgreSQL."""
     choice = _assignment(trailgear_run, 1)["aurora_engine_choice"]
     assert choice["source_engine"] == "sqlserver"
     mysql, pg = choice["totals"]["aurora_mysql"], choice["totals"]["aurora_postgresql"]
-    assert (mysql, pg) == (7396.0, 7413.0)
+    assert (mysql, pg) == (7413.0, 7413.0)
     assert abs(pg - mysql) <= 0.05 * max(mysql, pg), "close enough for features to decide"
     assert choice["margin"] == round(pg - mysql, 2)
     assert choice["engine"] == "aurora_postgresql"
     assert choice["deciding_features"] == WORKLOAD_FEATURES
     assert "babelfish_compatible" not in choice["deciding_features"]
-    assert choice["reason"].startswith("close on total adjusted score")
+    assert choice["reason"].startswith("exact tie on total adjusted score")
     assert "tipped by: JSON usage, MERGE statements, multiple schemas" in choice["reason"]
 
 
@@ -141,10 +150,11 @@ def test_every_deliverable_source_carries_the_same_choice(trailgear_run: Pipelin
     assert "15.0.4322.2" in wave1["rationale"]
     assert "Microsoft" not in wave1["rationale"]
     assert "has no Aurora engine of its own dialect" in report["summary"]
+    # #920 catalog PR C: recursive CTEs no longer tip the choice (MySQL 8.0 has them).
     sentence = (
         "Aurora MySQL scored {aurora_mysql:.1f} and Aurora PostgreSQL {aurora_postgresql:.1f} "
         "in total adjusted query fit; tipped by JSON usage, MERGE statements, multiple "
-        "schemas, recursive CTEs, sequences"
+        "schemas, sequences"
     ).format(**report["assignment_summary"]["aurora_engine_choice"]["totals"])
     decision = trailgear_run.html("decision-report").read_text()
     engineering = next(

@@ -2,8 +2,12 @@
 id = "multi-table-update"
 detectors = [
     "src.tools.analysis.aurora_mysql_analysis_tools:analyze_aurora_mysql_use_cases",
+    "src.tools.analysis.aurora_pg_analysis_tools:analyze_aurora_pg_use_cases",
 ]
 penalty = 0
+
+# Writes only: no parity anchor borrows from it and no access class lists it (#936).
+write_pattern = true
 
 [engines.dynamodb]
 kind = "unscored"
@@ -26,9 +30,15 @@ supported = true
 why = "ElastiCache's analysis does not report this pattern; it adds no cross-engine penalty."
 
 [engines.aurora_postgresql]
-kind = "unscored"
+kind = "fit"
 supported = true
-why = "Aurora PostgreSQL's analysis does not report this pattern; it adds no cross-engine penalty."
+catalog = "aurora_pg"
+catalog_id = "aurora-pg-09"
+score = 75
+why = "A write whose rows come from a join with another table (UPDATE ... FROM, DELETE ... USING), run set-based in one statement; an UPDATE or DELETE changes its one target table, and changing several tables in one statement takes a chain of data-modifying WITH queries where MySQL's multiple-table UPDATE needs none (PostgreSQL documentation, UPDATE; WITH Queries, Data-Modifying Statements in WITH)."
+concerns = [
+    "Large multi-table updates may hold locks for extended periods.",
+]
 
 # Detection signals: UPDATE t1 JOIN t2 SET ... (MySQL multi-table syntax)
 [engines.aurora_mysql]
@@ -37,7 +47,7 @@ supported = true
 catalog = "aurora_mysql"
 catalog_id = "aurora-mysql-06"
 score = 80
-why = "Multi-table UPDATE using MySQL's JOIN syntax (UPDATE t1 JOIN t2 SET ...). Aurora MySQL executes this atomically in a single statement — no NoSQL equivalent exists."
+why = "A write whose rows come from a join with another table (UPDATE t1 JOIN t2 SET ..., DELETE t1 FROM t1 JOIN t2), run set-based in one statement; MySQL's multiple-table UPDATE can also change several tables at once (MySQL Reference Manual, UPDATE Statement)."
 concerns = [
     "Large multi-table updates may hold locks for extended periods.",
 ]

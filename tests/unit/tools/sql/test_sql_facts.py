@@ -38,7 +38,7 @@ _ADDED_FACT_FALLBACKS = {
     "top_n": regex_facts.regex_top_n,
     "timestamp_column": regex_facts.regex_timestamp_column,
     "json_access": regex_facts.regex_json_access,
-    "update_target_join": regex_facts.regex_update_target_join,
+    "multi_table_write": regex_facts.regex_multi_table_write,
 }
 
 
@@ -315,21 +315,23 @@ class TestTheFactsAddedFor893:
             ("SELECT * FROM t FOR XML PATH", "sqlserver", "json_access", False),
             ("SELECT * FROM t WHERE doc IS JSON", "oracle", "json_access", True),
             ("SELECT json_value FROM t", "mysql", "json_access", False),
-            ("UPDATE a JOIN b ON b.id = a.id SET a.x = ?", "mysql", "update_target_join", True),
-            ("UPDATE a INNER JOIN b USING (id) SET a.x = 1", "mysql", "update_target_join", True),
+            ("UPDATE a JOIN b ON b.id = a.id SET a.x = ?", "mysql", "multi_table_write", True),
+            ("UPDATE a INNER JOIN b USING (id) SET a.x = 1", "mysql", "multi_table_write", True),
+            # #920: the fact was MySQL's syntax only (update_target_join); the UPDATE ...
+            # FROM of SQL Server and PostgreSQL is the same multi-table write.
             (
                 "UPDATE t SET t.a = 1 FROM [T] t JOIN [U] u ON u.id = t.id",
                 "sqlserver",
-                "update_target_join",
-                False,
+                "multi_table_write",
+                True,
             ),
             (
                 "UPDATE posts p SET a = 1 FROM topics t WHERE t.id = p.topic_id",
                 "postgresql",
-                "update_target_join",
-                False,
+                "multi_table_write",
+                True,
             ),
-            ("UPDATE a SET x = 1 WHERE id = ?", "mysql", "update_target_join", False),
+            ("UPDATE a SET x = 1 WHERE id = ?", "mysql", "multi_table_write", False),
         ],
     )
     def test_each_fact(self, sql, engine, fact, expected):

@@ -8,6 +8,9 @@ penalty = 0
 # It used to be DynamoDB's catch-all fit, matched by joins, aggregates and full scans
 # alike. That on-demand capacity suits sporadic traffic is cost evidence, for the cost
 # dimension (ADR-031 Decision 5, #494); the query is scored on its own access pattern.
+# Writes only: no parity anchor borrows from it and no access class lists it (#936).
+write_pattern = true
+
 [engines.dynamodb]
 kind = "unscored"
 supported = true

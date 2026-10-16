@@ -2,6 +2,7 @@
 id = "cte-recursive"
 detectors = [
     "src.tools.analysis.aurora_pg_analysis_tools:detect_pg_specific_features",
+    "src.tools.analysis.aurora_mysql_analysis_tools:detect_mysql_specific_features",
 ]
 penalty = 0
 
@@ -32,15 +33,21 @@ supported = true
 catalog = "aurora_pg"
 catalog_id = "aurora-pg-01"
 score = 95
-why = "Recursive CTEs (WITH RECURSIVE) for hierarchical data traversal — org charts, category trees, bill of materials. Aurora PG executes these natively; no NoSQL engine provides equivalent functionality without application-level graph walks."
+why = "Recursive CTEs (WITH RECURSIVE) for hierarchical data traversal: org charts, category trees, bills of materials, with the SEARCH and CYCLE clauses for traversal order and cycle detection and no default recursion limit (PostgreSQL documentation, WITH Queries)."
 concerns = [
     "Deep recursion (>100 levels) may require LIMIT on recursion depth.",
 ]
 
 [engines.aurora_mysql]
-kind = "unscored"
+kind = "fit"
 supported = true
-why = "Aurora MySQL's analysis does not report this pattern; it adds no cross-engine penalty."
+catalog = "aurora_mysql"
+catalog_id = "aurora-mysql-08"
+score = 90
+why = "Recursive CTEs (WITH RECURSIVE) for hierarchical data traversal on MySQL 8.0, which Aurora MySQL version 3 is compatible with; recursion stops at cte_max_recursion_depth (1000 by default) and there is no SEARCH or CYCLE clause, so cycles are guarded in the query (MySQL Reference Manual, WITH (Common Table Expressions))."
+concerns = [
+    "Deep hierarchies need cte_max_recursion_depth raised, and a cycle needs a guard in the query.",
+]
 
 [engines.neptune]
 kind = "future"

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 
 import pytest
 from hypothesis import given
@@ -55,10 +56,11 @@ class TestClassScoresComeFromThePatternCatalog:
         assert class_engine_scores() == {
             # #920: Aurora's own key-value-lookup fit (80, a B-tree point read), not
             # standard-crud's borrowed 60.
+            # #983 review: DocumentDB's parity anchor follows Aurora's own 80 (was 60).
             KEY_LOOKUP: {
                 "aurora_mysql": 80,
                 "aurora_postgresql": 80,
-                "documentdb": 60,
+                "documentdb": 80,
                 "dynamodb": 100,
                 "elasticache": 0,
                 "opensearch": 0,
@@ -95,21 +97,26 @@ class TestClassScoresComeFromThePatternCatalog:
                 "elasticache": 0,
                 "opensearch": 0,
             },
+            # #920 (catalog PR C): window-function counts only for a query with a
+            # window, so with none both Aurora engines are rated by their aggregation fits.
             AGGREGATION: {
                 "aurora_mysql": 85,
-                "aurora_postgresql": 90,
+                "aurora_postgresql": 85,
                 "documentdb": 75,
                 "dynamodb": 0,
                 "elasticache": 0,
                 "opensearch": 0,
             },
+            # #920 (catalog PR C): each text pattern counts only for its own kind of
+            # text search, and a text-search query always shows one; with none, nothing
+            # rates it. The per-kind scores: tests/unit/agents/referee/test_text_search_class.py.
             TEXT_SEARCH: {
-                "aurora_mysql": 80,
-                "aurora_postgresql": 75,
-                "documentdb": 75,
+                "aurora_mysql": 0,
+                "aurora_postgresql": 0,
+                "documentdb": 0,
                 "dynamodb": 0,
                 "elasticache": 0,
-                "opensearch": 95,
+                "opensearch": 0,
             },
         }
 
@@ -142,8 +149,9 @@ class TestClassScoresComeFromThePatternCatalog:
         from src.shared.catalog.patterns import pattern
 
         support = pattern("full-text-search").engines["documentdb"]
-        assert support.kind == "native" and support.class_score == 75
-        assert class_engine_scores()[TEXT_SEARCH]["documentdb"] == 75
+        # #920: 60, $text's own documented limits (was 75, borrowed).
+        assert support.kind == "native" and support.class_score == 60
+        assert class_engine_scores(frozenset({"full_text"}))[TEXT_SEARCH]["documentdb"] == 60
         assert unrated_native_entries() == []
 
     def test_an_unanchored_range_is_a_scan_on_dynamodb_not_a_range_query(self):
@@ -156,28 +164,40 @@ class TestClassScoresComeFromThePatternCatalog:
 
     def test_every_class_score_comes_from_a_pattern_file_entry_with_its_source(self):
         """No number lives in the class file or the scorer: every non-zero cell is a
-        fit ``score`` or a ``class_score`` whose ``why`` names where the number comes from."""
+        fit ``score`` or a ``class_score`` whose ``why`` names where the number comes from:
+        the engine's public documentation, or, for a parity anchor (#936), the borrowed
+        ``(<pattern>, <score>)``."""
+        from src.shared.catalog.access_classes import QUERY_FACTS
         from src.shared.catalog.patterns import pattern
 
-        for access_class in access_classes():
-            for engine, score in class_engine_scores()[access_class.id].items():
-                if not score:
-                    continue
-                sources = [
-                    pattern(p).engines[engine]
-                    for p in access_class.patterns
-                    if engine in pattern(p).engines
-                ]
-                match = [
-                    e
-                    for e in sources
-                    if (e.kind == "fit" and e.score == score) or e.class_score == score
-                ]
-                assert match, (access_class.id, engine)
-                for entry in match:
-                    if entry.kind != "fit":
-                        assert "Class score (#728)" in entry.why, (access_class.id, engine)
+        for access_class, engine, score in (
+            (c, e, n)
+            for facts in (frozenset(), QUERY_FACTS - {"write"})
+            for c in access_classes()
+            for e, n in class_engine_scores(facts)[c.id].items()
+        ):
+            if not score:
+                continue
+            sources = [
+                pattern(p).engines[engine]
+                for p in access_class.patterns
+                if engine in pattern(p).engines
+            ]
+            match = [
+                e
+                for e in sources
+                if (e.kind == "fit" and e.score == score) or e.class_score == score
+            ]
+            assert match, (access_class.id, engine)
+            for entry in match:
+                if entry.kind != "fit":
+                    assert "Class score (#728)" in entry.why, (access_class.id, engine)
+                    if entry.parity_anchor:
                         _assert_the_cited_source_exists(entry, access_class.id, engine)
+                    else:
+                        assert re.search(
+                            r"documentation|Reference Manual|Developer Guide", entry.why
+                        ), (access_class.id, engine, entry.why)
 
     def test_the_class_scorer_names_no_engine(self):
         import ast
@@ -201,18 +221,22 @@ class TestClassScoresComeFromThePatternCatalog:
 
 
 def _assert_the_cited_source_exists(entry, class_id, engine):
-    """A ``class_score`` names its source as ``(<pattern>, <score>)``: that pattern file
-    must exist and hold a ``fit`` entry with exactly that score, equal to the class score."""
-    import re
-
+    """A parity anchor's ``class_score`` names its source as ``(<pattern>, <score>)``: that
+    pattern file must exist and rate some engine at exactly that score from its own
+    evidence (a ``fit``, or a ``class_score`` that is not itself an anchor), equal to the
+    class score."""
     from src.shared.catalog.patterns import pattern
 
     cited = re.findall(r"\(([a-z0-9-]+), (\d+)\)", entry.why)
     assert cited, (class_id, engine, "no (pattern, score) source in why")
     for pattern_id, score in cited:
         source = pattern(pattern_id)  # KeyError names a pattern with no file
-        fits = {s.score for s in source.engines.values() if s.kind == "fit"}
-        assert int(score) in fits, (class_id, engine, pattern_id, score, fits)
+        rated = {
+            s.score if s.kind == "fit" else s.class_score
+            for s in source.engines.values()
+            if not s.parity_anchor
+        }
+        assert int(score) in rated, (class_id, engine, pattern_id, score, rated)
         assert int(score) == entry.class_score, (class_id, engine, pattern_id, score)
 
 

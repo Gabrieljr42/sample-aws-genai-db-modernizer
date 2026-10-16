@@ -54,8 +54,9 @@ count:
 - ``timestamp_column``: a :data:`TIMESTAMP_COLUMN_NAMES` name as a word;
 - ``json_access``: a ``json_*``/``jsonb_*`` call, ``->``/``->>``, ``#>``,
   ``::json``/``::jsonb``, ``@> '``, ``OPENJSON(``, ``FOR JSON``, ``IS JSON``;
-- ``update_target_join``: ``UPDATE``, then ``JOIN`` before the first ``SET`` with no
-  ``FROM`` between them.
+- ``multi_table_write``: outside parentheses, ``UPDATE`` with a ``JOIN`` or a comma
+  before the first ``SET`` or a ``FROM`` after it that names another table than the
+  target, or ``DELETE`` followed by ``USING`` or ``JOIN``.
 """
 
 from __future__ import annotations
@@ -518,14 +519,68 @@ _JOIN_RE = re.compile(r"\bjoin\b", re.IGNORECASE)
 _FROM_RE = re.compile(r"\bfrom\b", re.IGNORECASE)
 
 
-def regex_update_target_join(query_text: str) -> bool:
-    """``UPDATE ... JOIN ... SET``: a ``JOIN`` before the first ``SET``, no ``FROM``."""
-    text = query_text or ""
+_DELETE_RE = re.compile(r"\bdelete\b", re.IGNORECASE)
+_USING_RE = re.compile(r"\busing\b", re.IGNORECASE)
+
+
+def _top_level(text: str) -> str:
+    """``text`` with every parenthesised part blanked, so a subquery's words are not read."""
+    out: list[str] = []
+    depth = 0
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+            out.append(" ")
+            continue
+        out.append(" " if depth else char)
+    return "".join(out)
+
+
+_FROM_SOURCE_RE = re.compile(
+    r"^\s*([\w\[\]\"`.]+)(?:\s+(?:as\s+)?(?!where\b|option\b)(\w+))?\s*(?:where\b|option\b|;|$)",
+    re.IGNORECASE,
+)
+
+
+def _bare(name: str) -> str:
+    """An identifier without its schema, brackets or quotes, lower-cased."""
+    return name.split(".")[-1].strip('[]"`').lower()
+
+
+def _from_names_only_the_target(head: str, after_from: str) -> bool:
+    """A SQL Server ``UPDATE p SET ... FROM [dbo].[Product] p WHERE ...``: the FROM names
+    only the target again (its table or alias), with no join and no other table."""
+    target = _bare(head.strip())
+    match = _FROM_SOURCE_RE.match(after_from)
+    if not target or match is None:
+        return False
+    # The same instance: the FROM's alias is the target, or it has no alias and its name
+    # is (``UPDATE posts SET ... FROM posts p2`` is a self-join, a second instance).
+    return target == ((match.group(2) or "").lower() or _bare(match.group(1)))
+
+
+def regex_multi_table_write(query_text: str) -> bool:
+    """An UPDATE or DELETE whose rows come from a join with another table, outside any
+    parentheses: ``UPDATE a JOIN b ... SET`` or ``UPDATE a, b SET`` (MySQL), ``UPDATE
+    ... SET ... FROM`` (PostgreSQL, SQL Server), ``DELETE ... USING`` (PostgreSQL) or
+    ``DELETE a FROM a JOIN b`` (MySQL, SQL Server)."""
+    text = _top_level(query_text or "")
     update = _UPDATE_RE.search(text)
-    if update is None:
+    if update is not None:
+        set_ = _SET_RE.search(text, update.end())
+        if set_ is None:
+            return False
+        head = text[update.end() : set_.start()]
+        if _JOIN_RE.search(head) or "," in head:
+            return True
+        from_ = _FROM_RE.search(text, set_.end())
+        if from_ is None:
+            return False
+        return not _from_names_only_the_target(head, text[from_.end() :])
+    delete = _DELETE_RE.search(text)
+    if delete is None:
         return False
-    set_ = _SET_RE.search(text, update.end())
-    if set_ is None:
-        return False
-    head = text[update.end() : set_.start()]
-    return bool(_JOIN_RE.search(head)) and not _FROM_RE.search(head)
+    rest = text[delete.end() :]
+    return bool(_USING_RE.search(rest) or _JOIN_RE.search(rest))

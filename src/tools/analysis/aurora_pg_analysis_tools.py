@@ -27,6 +27,7 @@ from src.tools.analysis.aurora_common_analysis_tools import (
     _apply_aurora_common_adjustments,
     _count_inbound_fks,
     analyze_aurora_common_use_cases,
+    apply_aurora_feature_adjustments,
     assess_migration_complexity,
     build_concerns,
     build_rationale,
@@ -80,6 +81,14 @@ def detect_pg_specific_features(query_text: str, source_engine: str = "") -> lis
     if facts.on_conflict_or_returning:
         matched.append("aurora-pg-07")
 
+    # Features both Aurora engines have (#920): stored routines, a string aggregate.
+    # aurora-pg-09 (multi-table-update) needs the statement type: handled in use_cases.
+    if facts.stored_routine_keyword:
+        matched.append("aurora-pg-08")
+
+    if facts.string_aggregate_call:
+        matched.append("aurora-pg-10")
+
     return matched
 
 
@@ -103,7 +112,7 @@ def analyze_aurora_pg_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
     # Accumulators per PG pattern
     pg_accum: dict[str, dict] = {
-        f"aurora-pg-0{i}": {"query_ids": [], "table_ids": []} for i in range(1, 8)
+        pid: {"query_ids": [], "table_ids": []} for pid in PG_PATTERN_BY_ID
     }
 
     for q in queries:
@@ -112,6 +121,11 @@ def analyze_aurora_pg_use_cases(collector_output: dict) -> WorkloadAnalysis:
         tables = q.get("tables_accessed") or []
 
         matched_ids = detect_pg_specific_features(text, source_engine)
+        # aurora-pg-09: an UPDATE ... FROM or DELETE ... USING (or a source's multi-table
+        # UPDATE/DELETE), #920.
+        qt = (q.get("query_type") or "").upper()
+        if qt in ("UPDATE", "DELETE") and query_facts(text, source_engine).multi_table_write:
+            matched_ids.append("aurora-pg-09")
         for pid in matched_ids:
             if pid in pg_accum:
                 pg_accum[pid]["query_ids"].append(qid)
@@ -167,35 +181,15 @@ def _apply_aurora_pg_adjustments(
 
     pattern_types = set(profile.pattern_types)
 
-    # PG-specific pattern bonuses
-    if "cte-recursive" in pattern_types:
-        pattern += 15
-    if "window-function" in pattern_types:
-        pattern += 10
-    if "jsonb-operations" in pattern_types:
-        pattern += 10
-    if "lateral-join" in pattern_types:
-        pattern += 10
-    if "upsert-conflict" in pattern_types:
-        pattern += 5
-
-    # PG advanced features increase complexity fit
-    pg_feature_count = sum(
-        1
-        for pt in pattern_types
-        if pt
-        in {
-            "cte-recursive",
-            "window-function",
-            "jsonb-operations",
-            "array-operations",
-            "lateral-join",
-        }
+    # The Aurora SQL features both engines have, plus PostgreSQL's own (JSONB, arrays,
+    # ON CONFLICT): pattern bonuses, and more features increase the complexity fit.
+    pattern, complexity = apply_aurora_feature_adjustments(
+        pattern,
+        complexity,
+        pattern_types,
+        own_bonuses={"jsonb-operations": 10, "upsert-conflict": 5},
+        own_features=frozenset({"jsonb-operations", "array-operations"}),
     )
-    if pg_feature_count >= 2:
-        complexity += 15
-    elif pg_feature_count >= 1:
-        complexity += 10
 
     return ScoreBreakdown(
         pattern_match_score=max(0, min(pattern, 100)),

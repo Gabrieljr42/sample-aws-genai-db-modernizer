@@ -470,7 +470,6 @@ class TestTextSearch:
         "sql,engine",
         [
             ("SELECT * FROM products WHERE title LIKE '%boot%'", "postgresql"),
-            ("SELECT * FROM products WHERE title ILIKE $1", "postgresql"),
             ("SELECT * FROM products WHERE title NOT LIKE '%x'", "postgresql"),
             ("SELECT * FROM products WHERE title ~* $1", "postgresql"),
             (
@@ -479,7 +478,6 @@ class TestTextSearch:
             ),
             ("SELECT * FROM products WHERE similarity(title, $1) > 0.3", "postgresql"),
             ("SELECT * FROM `products` WHERE MATCH(`title`) AGAINST ('boots')", "mysql"),
-            ("SELECT * FROM `products` WHERE `title` LIKE ?", "mysql"),
             ("SELECT * FROM products WHERE CONTAINS(body, @p)", "sqlserver"),
             ("SELECT * FROM products WHERE title LIKE '%' + @term + '%'", "sqlserver"),
             # Text search wins over aggregation when no key anchors the rows.
@@ -488,6 +486,18 @@ class TestTextSearch:
     )
     def test_wildcard_and_full_text_matches(self, sql, engine):
         _assert_class(TEXT_SEARCH, sql, engine)
+
+    @pytest.mark.parametrize(
+        "sql,engine",
+        [
+            ("SELECT * FROM products WHERE title ILIKE $1", "postgresql"),
+            ("SELECT * FROM `products` WHERE `title` LIKE ?", "mysql"),
+        ],
+    )
+    def test_a_parameterised_like_shows_no_text_search(self, sql, engine):
+        """#920 (was text search): the bound pattern is unknown (#912), so the query is
+        classed by its other predicates: here a filter on a non-key column."""
+        _assert_class(AD_HOC_FILTER, sql, engine)
 
 
 class TestPrecedence:
