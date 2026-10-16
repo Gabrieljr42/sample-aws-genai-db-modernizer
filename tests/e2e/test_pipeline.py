@@ -326,4 +326,8 @@ def test_a_removed_engines_saving_is_its_analysed_cost_everywhere(run: PipelineR
         assert round(total, 2) == round(retired.get(engine, 0), 2), (engine, total, retired)
     if run.db == "wordpress":
         assert retired == {}
-        assert [c["saved_cost_estimate"] for c in records] == [0.0, 0.0]
+        # #728: three records since the per-query switch -- DocumentDB to Aurora MySQL,
+        # DocumentDB to DynamoDB, and OpenSearch to Aurora MySQL (the one time-bucket
+        # WooCommerce report, an aggregation whose class OpenSearch rates 90, is
+        # first-assigned there). None of the three engines runs today, so none saves.
+        assert [c["saved_cost_estimate"] for c in records] == [0.0, 0.0, 0.0]

@@ -115,17 +115,26 @@ def test_aurora_choice_is_a_close_call_tipped_by_workload_features(
     The ``EXEC`` procedure calls are now ``stored-routine`` on both engines (their
     tables do not resolve, so no table score moves). A recursive CTE no longer tips
     the call (ADR-031 Decision 6), and the remaining workload features (JSON, MERGE,
-    multiple schemas, sequences) decide it, still for Aurora PostgreSQL."""
+    multiple schemas, sequences) decide it, still for Aurora PostgreSQL.
+
+    #728 (the per-query access-pattern switch): 6989 to 7019. Each query's pattern
+    dimension is its own class score, so the Aurora analyses' table pattern scores (and
+    their FK, join and shared-feature bonuses) leave both totals alike. The 30-point lead
+    is the two leading-wildcard searches (``[Name] LIKE '%' + @Term + '%'`` on Product
+    and KnowledgeArticle): the text-search class rates Aurora PostgreSQL 80 (pg_trgm)
+    and Aurora MySQL 45 (no index serves a leading wildcard), 14 points each; and the
+    ``TicketMessage`` thread CTE, whose recursive-CTE credit (#985: Aurora PostgreSQL 95,
+    Aurora MySQL 90) the per-query score keeps, 2 points."""
     choice = _assignment(trailgear_run, 1)["aurora_engine_choice"]
     assert choice["source_engine"] == "sqlserver"
     mysql, pg = choice["totals"]["aurora_mysql"], choice["totals"]["aurora_postgresql"]
-    assert (mysql, pg) == (7413.0, 7413.0)
+    assert (mysql, pg) == (6989.0, 7019.0)
     assert abs(pg - mysql) <= 0.05 * max(mysql, pg), "close enough for features to decide"
     assert choice["margin"] == round(pg - mysql, 2)
     assert choice["engine"] == "aurora_postgresql"
     assert choice["deciding_features"] == WORKLOAD_FEATURES
     assert "babelfish_compatible" not in choice["deciding_features"]
-    assert choice["reason"].startswith("exact tie on total adjusted score")
+    assert choice["reason"].startswith("close on total adjusted score")
     assert "tipped by: JSON usage, MERGE statements, multiple schemas" in choice["reason"]
 
 
@@ -182,7 +191,11 @@ def test_category_group_scores_documentdb_below_aurora(trailgear_run: PipelineRe
     instance-based clusters) costs its ``bounded_limit`` 10 points instead of 0,
     so the group goes to Aurora PostgreSQL, 82 to 72, with no tie. The sample no
     longer reaches the co-dependency tie path; restoring it is a generator retune,
-    recorded on the #920 PR."""
+    recorded on the #920 PR.
+
+    #728: both queries are aggregations by their own class (Aurora PostgreSQL 85,
+    DocumentDB 75), not their table's patterns, so the group scores 81 to 61 (DocumentDB
+    71 less the same 10)."""
     snapshot = measure(trailgear_run.job_dir())["queries"]
     members = [
         _qid(trailgear_run, "COUNT(c.[CategoryID]) AS [Children]"),
@@ -193,7 +206,7 @@ def test_category_group_scores_documentdb_below_aurora(trailgear_run: PipelineRe
     assert {f["e"] for f in first} == {"aurora_postgresql"}
     group = first[0]["grp"]
     assert first[1]["grp"] == group, "both queries are one group"
-    assert (group["scores"]["aurora_postgresql"], group["scores"]["documentdb"]) == (82.0, 72.0)
+    assert (group["scores"]["aurora_postgresql"], group["scores"]["documentdb"]) == (81.0, 61.0)
     v1 = _by_id(_assignment(trailgear_run, 1))
     for q in members:
         assert v1[q]["tied_engines"] == []
@@ -206,27 +219,33 @@ def test_the_shipment_queries_no_longer_tie(trailgear_run: PipelineResult) -> No
     dbo.Shipment 77 (its call-rate fits no longer average its table score down)
     and DocumentDB 74 (its column-shape fits are gone), so all three go to
     DynamoDB with no tie. Catalog PR B raises DynamoDB to 80: dbo.Shipment now also
-    has DynamoDB's keyed range-query and co-accessed-tables patterns (the unshipped
-    orders read, ``Status = N'PAID'`` plus an ``OrderDate`` range with a subquery on
-    Shipment, and a key-anchored order join that reads Shipment), and no deliverable lists a pending choice. The sample
-    no longer reaches the unresolved-tie-in-the-deliverables path; the rendering
-    of a tie stays covered by ``tests/unit/report/test_tied_queries_deliverables.py``,
-    and restoring the e2e path is a generator retune, recorded on the #920 PR."""
-    shipment = [
-        _qid(trailgear_run, "FROM [Shipment] WHERE [TrackingNumber] = @TrackingNumber"),
-        _qid(trailgear_run, "INSERT INTO [Shipment]"),
-        _qid(trailgear_run, "UPDATE [Shipment] SET [DeliveredDate]"),
-    ]
+    has DynamoDB's keyed range-query and co-accessed-tables patterns, and no deliverable
+    lists a pending choice. The sample no longer reaches the unresolved-tie-in-the-
+    deliverables path; the rendering of a tie stays covered by
+    ``tests/unit/report/test_tied_queries_deliverables.py``, and restoring the e2e path
+    is a generator retune, recorded on the #920 PR.
+
+    #728: each query now scores its own class, so the three split by what they do. The
+    INSERT is a key lookup (DynamoDB 100, Aurora PostgreSQL and DocumentDB 80): DynamoDB
+    80, Aurora PostgreSQL 75, DocumentDB 65. The read and the UPDATE by ``TrackingNumber`` (an index's leading column with no
+    cardinality statistics, a non-unique key) are key-scoped reads (DocumentDB 85,
+    DynamoDB 75, Aurora 70 for the pattern dimension), and Aurora PostgreSQL's other
+    dimensions make it 71 against DocumentDB's 67 and DynamoDB's 65. None ties."""
+    expected = {
+        "FROM [Shipment] WHERE [TrackingNumber] = @TrackingNumber": (
+            (65, 71, 67),
+            "aurora_postgresql",
+        ),
+        "INSERT INTO [Shipment]": ((80, 75, 65), "dynamodb"),
+        "UPDATE [Shipment] SET [DeliveredDate]": ((65, 71, 67), "aurora_postgresql"),
+    }
     snapshot = measure(trailgear_run.job_dir())["queries"]
     final = _by_id(_assignment(trailgear_run, _final_version(trailgear_run)))
-    for q in shipment:
+    for text, (want, engine) in expected.items():
+        q = _qid(trailgear_run, text)
         scores = snapshot[q]["s"]
-        assert (scores["dynamodb"], scores["aurora_postgresql"], scores["documentdb"]) == (
-            80,
-            76,
-            74,
-        ), q
-        assert final[q]["assigned_engine"] == "dynamodb", q
+        assert (scores["dynamodb"], scores["aurora_postgresql"], scores["documentdb"]) == want, q
+        assert final[q]["assigned_engine"] == engine, q
         assert final[q]["tied_engines"] == [], q
 
     report = _json(trailgear_run.artifact_root / trailgear_run.report["report"])
@@ -241,22 +260,25 @@ def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineR
     reason says why. Since #920 those are a ProductCategory key read and the
     StockLevel ``MERGE`` (catalog PR B gives the Supplier read by key DynamoDB's
     key-value-lookup, 87 against Aurora PostgreSQL's 76, and ties the MERGE at 74); the
-    category group no longer ties."""
+    category group no longer ties.
+
+    #728: neither ties any more, each on its own class. The MERGE is an aggregation
+    (``SUM`` over a ``GROUP BY``: Aurora PostgreSQL 77, DocumentDB 66) and stays on
+    Aurora PostgreSQL; the ProductCategory read by ``ParentCategoryID`` is a key-scoped
+    read (DynamoDB 76, Aurora PostgreSQL and DocumentDB 75) and goes to DynamoDB. The
+    sample no longer reaches this path; re-resolving a tie whose engine the check
+    removes stays covered by
+    ``tests/unit/test_reality_check.py::TestReResolvingAnUnresolvedTieInPhaseTwo``."""
     v1 = _by_id(_assignment(trailgear_run, 1))
     final = _by_id(_assignment(trailgear_run, _final_version(trailgear_run)))
-    resolved = [
-        q for q, qa in v1.items() if qa.get("tied_engines") == ["aurora_postgresql", "documentdb"]
-    ]
-    assert sorted(resolved) == sorted(
-        [
-            _qid(trailgear_run, "[ParentCategoryID], [Name], [Slug] FROM [ProductCategory]"),
-            _qid(trailgear_run, "MERGE [StockLevel] AS tgt"),
-        ]
+    assert [q for q, qa in v1.items() if qa.get("tied_engines")] == []
+    merge = _qid(trailgear_run, "MERGE [StockLevel] AS tgt")
+    category = _qid(trailgear_run, "[ParentCategoryID], [Name], [Slug] FROM [ProductCategory]")
+    assert (final[merge]["assigned_engine"], final[category]["assigned_engine"]) == (
+        "aurora_postgresql",
+        "dynamodb",
     )
-    for q in resolved:
-        assert final[q]["assigned_engine"] == "aurora_postgresql"
-        assert final[q]["tied_engines"] == []
-        assert "DocumentDB no longer qualifies" in final[q]["assignment_reason"]
+    assert final[merge]["tied_engines"] == final[category]["tied_engines"] == []
 
 
 # ---------------------------------------------------------------------------

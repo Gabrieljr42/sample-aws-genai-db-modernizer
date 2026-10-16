@@ -169,8 +169,8 @@ Local runs write under `artifacts/<db>/<job>/` (`ARTIFACT_DIR`, default
 - `analysis-<engine>/analysis.json` (+ `decision-trace.json`)
 - `assignment/v<N>/assignment.json`: versioned; reality check and customer
   edits write a new version, never overwrite one
-- `assignment/v<N>/access_pattern_shadow.json`: the per-query access-pattern
-  shadow (#728, ADR-031 Decision 14 Amendment 5); routing does not read it
+- `assignment/v<N>/access_patterns.json`: each query's access-pattern
+  class, class scores and parity-anchor notes, as routing scored it (#728, #936)
 - `reality-check/` (`llm_input.json`, `output.json`)
 - `schema-<engine>/v<N>/schema_output.json`, `synthesis/v<N>/report.json`
   plus a per-version copy of the rendered files, keyed on the assignment version
@@ -215,6 +215,9 @@ This section is a pointer, not a restatement.
   and scope. A table's `primary_engine` is a summary label.
 - There is one scorer: `query_scoring.score_query_for_engine`, used with
   `ScoringContext.from_pipeline`. Never add a private fit function.
+- A query's pattern dimension is its own access-pattern class's score
+  (`query_pattern.QueryPatternModel`, ADR-031 Decision 14 Amendments 5 and 7),
+  never its tables' pattern scores.
 - Ties go through `tie_break.break_tie`, using `settled_counts` only.
   [`test_no_engine_bias.py`](tests/unit/agents/referee/test_no_engine_bias.py)
   enforces this. Engine removal keeps the source-compatible engine when it scores every query at least as well, unless the alternative is at least 40% and $100/mo cheaper (`tie_break.source_compatible_engine_survives`, ADR-031 Decision 13).

@@ -293,6 +293,7 @@ class TestFloorsOnAPinnedEngine:
     def test_a_shallow_query_still_leaves_a_pinned_opensearch(self) -> None:
         assert _floor_run(_SHALLOW_TEXT, {"opensearch"})["search"] != "opensearch"
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_a_deep_query_under_the_traffic_floor_leaves_without_a_pin(self) -> None:
         assert _floor_run(_DEEP_TEXT, set())["search"] == "aurora_mysql"
 

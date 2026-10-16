@@ -237,6 +237,7 @@ class TestAMySQLSource:
         }
         return AssignmentResolver().resolve(triage, analysis, collector)
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_aurora_mysql_loses_the_scan_penalty_and_the_reason_is_stated(self) -> None:
         assignment = self._resolve(_collector())
         qa = assignment.query_assignments[0]

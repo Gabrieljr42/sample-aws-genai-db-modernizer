@@ -21,10 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.agents.referee.consolidation_validator import (
-    MAX_QUERIES_PER_CALL,
-    validate_consolidations,
-)
+from src.agents.referee.consolidation_validator import MAX_QUERIES_PER_CALL, validate_consolidations
 from src.agents.referee.reality_check_request import (
     SQL_CHARS,
     moved_queries,
@@ -287,9 +284,16 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
 
     #714: ``SELECT FOUND_ROWS()`` (``aa03c203``, on the pseudo-table
     ``unknown``) no longer takes aurora-anti-06's penalty, so it is on Aurora
-    MySQL from the first assignment and is no longer one of DocumentDB's moves."""
+    MySQL from the first assignment and is no longer one of DocumentDB's moves.
 
-    FLAGGED = "b05af520"
+    #728 (the per-query access-pattern switch): a key-scoped read scores its own class
+    (DocumentDB 85, DynamoDB 75, Aurora 70), so DocumentDB first-assigns 23 wordpress
+    queries and the check moves 20 to Aurora MySQL and 3 to DynamoDB. ``b05af520`` is
+    a key lookup by its own class (an INSERT), first-assigned to DynamoDB, so it is no
+    longer one of DocumentDB's moves; the flag now goes on ``68b75de2`` (``SELECT
+    group_id FROM wp_actionscheduler_groups WHERE slug = ?``), a DynamoDB move."""
+
+    FLAGGED = "68b75de2"
 
     def test_one_flag_goes_to_the_best_kept_engine(self, tmp_path, tmp_path_factory):
         shared = _shared_external_run("wordpress", tmp_path_factory)
@@ -302,7 +306,7 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
         ]
         moved = {q["query_id"]: c["to_engine"] for c in from_documentdb for q in c["moved_queries"]}
         assert sorted(moved.values()).count("dynamodb") == 3
-        assert sorted(moved.values()).count("aurora_mysql") == 5
+        assert sorted(moved.values()).count("aurora_mysql") == 20
         flagged = next(q for q in moved if q.startswith(self.FLAGGED))
         assert moved[flagged] == "dynamodb"
 
@@ -344,9 +348,9 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
         (decision,) = output["flag_decisions"]
         assert decision["outcome"] == "moved"
         assert decision["destination_engine"] == "aurora_mysql"
-        # Aurora MySQL's 47 less 20: no-relational-need and single-access-pattern-table
-        # (both workload_fit, the biggest penalty applies) on wp_actionscheduler_logs.
-        assert decision["score_after"] == 27
+        # Aurora MySQL's 76: the key-scoped class score (70) with
+        # wp_actionscheduler_groups' other dimensions, unpenalised (#728).
+        assert decision["score_after"] == 76
         assert engine_of[flagged] == "aurora_mysql"
         for qid, target in moved.items():
             if qid != flagged:

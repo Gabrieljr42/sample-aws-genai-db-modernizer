@@ -166,6 +166,7 @@ def _analysis(confidence: int) -> dict:
 class TestAnUnnamedEngineCanWinOnScore:
     """An engine that no signal names is analysed, scored and can win the query."""
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_with_no_source_engine_the_resolver_picks_one_aurora_engine(self):
         collector = _collector("mysql", [_signal_free_query("q1")])
         del collector["metadata"]
@@ -183,6 +184,7 @@ class TestAnUnnamedEngineCanWinOnScore:
         (qa,) = assignment.query_assignments
         assert qa.assigned_engine == "aurora_postgresql"
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_dynamodb_wins_a_query_no_signal_names_it_for(self):
         collector = _collector("mysql", [_signal_free_query("q1")])
         result = triage(collector)

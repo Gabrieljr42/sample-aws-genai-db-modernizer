@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from src.agents.referee.access_pattern import KEY_SCOPED
 from src.agents.referee.query_shape import RELATIONAL, single_table_access_shape
 from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.utility_statements import is_utility_statement
@@ -498,7 +499,9 @@ def analyze_aurora_common_use_cases(
     # Two steps, in this order:
     # 1. The per-query check, for every application query on the table:
     #    ``query_shape.single_table_access_shape`` with the table's own primary
-    #    key from the schema. CRUD (a point or simple-key read or write,
+    #    key from the schema and the query's access-pattern class (Amendment 5,
+    #    #728: a key-anchored join, a keyed aggregate, a range or order by key and
+    #    a small reference-table read are neutral). CRUD (a point or simple-key read or write,
     #    ``ORDER BY <primary key> LIMIT 1`` included), an ordered 1:M read
     #    (``ORDER BY <primary key> LIMIT n``, n > 1 or a bind parameter with no
     #    evidence it is 1: neutral, neither CRUD nor relational evidence), or
@@ -507,7 +510,8 @@ def analyze_aurora_common_use_cases(
     #    join participation -- all queries are single-table CRUD") adds the
     #    penalty only when no application query on the table is relational
     #    (ordered 1:M reads are neutral: they neither block nor are needed),
-    #    the table has 0 FKs, and no query joins it to another table. It then
+    #    the table has 0 FKs, and no query joins it to another table except
+    #    by key (a key-anchored join is a key-scoped read, Amendment 5). It then
     #    covers the CRUD and the ordered 1:M queries -- neither has a
     #    relational need -- and never overrides a per-query result.
     # Admin statements are not application access: they neither block the
@@ -519,8 +523,13 @@ def analyze_aurora_common_use_cases(
     # access.
     anti05_query_ids: list[str] = []
     anti05_table_ids: list[str] = []
+    # Each query's access-pattern class (ADR-031 Decision 14 Amendment 5, #728): step 1
+    # reads it, and a key-anchored join (a key-scoped read) is not join participation.
+    access_class = {str(q.get("query_id") or ""): reader.access(q).access_class for q in queries}
     tables_with_joins: set[str] = set()
     for q in queries:
+        if access_class.get(str(q.get("query_id") or "")) == KEY_SCOPED:
+            continue
         if q.get("has_joins") or len(q.get("tables_accessed") or []) > 1:
             for tid in q.get("tables_accessed") or []:
                 tables_with_joins.add(tid)
@@ -538,7 +547,13 @@ def analyze_aurora_common_use_cases(
         # Step 1: per query.
         primary_key = table.get("primary_key") or []
         shapes = [
-            single_table_access_shape(q, primary_key=primary_key, source=source) for q in table_qs
+            single_table_access_shape(
+                q,
+                primary_key=primary_key,
+                source=source,
+                access_class=access_class.get(str(q.get("query_id") or "")),
+            )
+            for q in table_qs
         ]
         # Step 2: the table-level complement, only on top of step 1.
         if RELATIONAL in shapes:
@@ -592,7 +607,13 @@ def analyze_aurora_common_use_cases(
         # Step 1: per query.
         primary_key = table.get("primary_key") or []
         shapes = [
-            single_table_access_shape(q, primary_key=primary_key, source=source) for q in table_qs
+            single_table_access_shape(
+                q,
+                primary_key=primary_key,
+                source=source,
+                access_class=access_class.get(str(q.get("query_id") or "")),
+            )
+            for q in table_qs
         ]
         # Step 2: the table-level complement, only on top of step 1.
         if RELATIONAL in shapes:

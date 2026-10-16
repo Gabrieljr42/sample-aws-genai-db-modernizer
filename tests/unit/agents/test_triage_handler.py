@@ -42,6 +42,23 @@ class TestTriageKeyValue:
 # ---------------------------------------------------------------------------
 
 
+# The range signal is DynamoDB's Query shape (#933, #728): a key column pinned to a value
+# and another column of the same table ranged, read from the access facts and the
+# schema's keys. ``user_id`` is a key of both tables here (an indexed column).
+_KEYED_TABLES = [
+    {
+        "table_id": f"app.{name}",
+        "table_name": name,
+        "schema_name": "app",
+        "primary_key": ["id"],
+        "columns": [{"column_name": c, "data_type": "integer"} for c in ("id", "user_id")]
+        + [{"column_name": "created_at", "data_type": "timestamp"}],
+        "indexes": [{"index_name": f"ix_{name}_user", "columns": ["user_id"], "is_unique": False}],
+    }
+    for name in ("orders", "events")
+]
+
+
 class TestTriageRangeQueries:
     def test_range_query_selects_dynamodb(self):
         co = _co(
@@ -49,7 +66,8 @@ class TestTriageRangeQueries:
                 _q(
                     "SELECT * FROM orders WHERE user_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at"
                 )
-            ]
+            ],
+            tables=_KEYED_TABLES,
         )
         result = triage(co)
         assert _has_reason(result, "dynamodb", "range_queries")
@@ -61,12 +79,27 @@ class TestTriageRangeQueries:
                     "SELECT * FROM events WHERE user_id = ? AND id BETWEEN ? AND ? ORDER BY id",
                     qid="q-range",
                 )
-            ]
+            ],
+            tables=_KEYED_TABLES,
         )
         result = triage(co)
         sig = _find_signal(result, "range_queries")
         assert sig is not None
         assert "q-range" in sig.query_ids
+
+    def test_a_spaced_comparison_counts_and_a_range_with_no_pinned_key_does_not(self):
+        """#933: the old text check needed a word character before ``>=`` (so ``a >= ?``
+        never counted) and took any range with an ORDER BY as the DynamoDB shape."""
+        co = _co(
+            queries=[
+                _q("SELECT * FROM orders WHERE user_id = ? AND created_at >= ?", qid="spaced"),
+                _q("SELECT * FROM orders WHERE created_at >= ? ORDER BY created_at", qid="open"),
+            ],
+            tables=_KEYED_TABLES,
+        )
+        sig = _find_signal(triage(co), "range_queries")
+        assert sig is not None
+        assert sig.query_ids == ["spaced"]
 
 
 # ---------------------------------------------------------------------------

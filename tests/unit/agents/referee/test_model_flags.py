@@ -18,6 +18,7 @@ from src.agents.referee.query_scoring import ScoringContext, score_query_for_eng
 from src.agents.referee.tie_break import TIE_KIND_SOURCE_COMPATIBLE
 from src.contracts.model_flag import ModelFlag
 from src.contracts.reality_check_output import FlagDecision
+from tests.unit.agents.referee.fixed_scores import fixed_model, flat_row
 
 
 def _query_map(*query_ids: str, **overrides: dict) -> dict[str, dict]:
@@ -37,14 +38,15 @@ def _query_map(*query_ids: str, **overrides: dict) -> dict[str, dict]:
 
 
 def _context(scores: dict[str, dict[str, float]]) -> ScoringContext:
-    """``scores[qid][engine]`` becomes that query's score on that engine."""
+    """``scores[qid][engine]`` becomes that query's score on that engine (through the
+    per-query scorer, #728: ``tests/unit/agents/referee/fixed_scores.py``)."""
     analysis: dict[str, dict] = {}
     for qid, per_engine in scores.items():
         for engine, score in per_engine.items():
             analysis.setdefault(engine, {"table_recommendations": []})[
                 "table_recommendations"
-            ].append({"table_id": f"t_{qid}", "confidence_score": score})
-    return ScoringContext(analysis_outputs=analysis)
+            ].append(flat_row(f"t_{qid}", score))
+    return ScoringContext(analysis_outputs=analysis, pattern_model=fixed_model(scores))
 
 
 def _flag(qids: list[str], engine: str, category: str = "client_side_join") -> ModelFlag:

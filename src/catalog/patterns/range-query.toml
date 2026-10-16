@@ -6,7 +6,7 @@ detectors = [
 triage_signal = "range_queries"
 penalty = 0
 
-# Detection (#920): a SELECT with a scope that pins a key column of a table to a value and
+# Detection (#920, #728): a SELECT with a scope that reads one table, pins a key column of it to a value and
 # bounds another column of the same table by a range (the facade's ranges, the one range
 # definition): a partition-key equality plus a sort-key range. Not any range plus ORDER BY.
 # (src/tools/analysis/key_access.py, partition_range)

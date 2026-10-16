@@ -20,9 +20,10 @@ Per query (:class:`KeyAccess`):
   reached by key from a pinned one (Amendment 5's key-anchored join);
 - ``pins_value``: some scope pins a column to a value (no partition key value is
   possible without one, whatever the key design);
-- ``partition_range``: some scope pins a key column of a table to a value and bounds
-  another column of the same table by a range (the facade's ``ranges``): the shape of
-  a partition-key equality plus a sort-key range.
+- ``partition_range``: some scope reads one table, pins a key column of it to a value
+  and bounds another of its columns by a range (the facade's ``ranges``): the shape of
+  a partition-key equality plus a sort-key range. Defined once, by the classifier
+  (``AccessClassification.facts``), which the class scores read too.
 
 Per table (:class:`KeyAccessReader`): ``is_junction`` (two or more foreign keys and a
 composite primary key), ``append_only`` (the workload writes it, only with INSERTs)
@@ -112,12 +113,7 @@ class KeyAccessReader:
         keyed = name in _KEYED_CLASSES
         select = str(query.get("query_type") or "").upper() == "SELECT"
         anchored_join = keyed and any(len(s.tables) >= 2 and s.joined for s in read.scopes)
-        partition_range = any(
-            (pinned := s.pinned.get(table, frozenset()) & s.key_columns.get(table, frozenset()))
-            and s.ranged.get(table, frozenset()) - pinned
-            for s in read.scopes
-            for table in s.tables
-        )
+        partition_range = "partition_range" in read.classification.facts
         return KeyAccess(
             access_class=name,
             key_lookup_read=select and name == KEY_LOOKUP,

@@ -49,6 +49,7 @@ from src.agents.referee.move_ledger import (
     ledger_for,
     state_of,
 )
+from src.agents.referee.query_pattern import write_access_patterns
 from src.agents.referee.query_scoring import GATE_KIND_WRITE
 from src.agents.referee.table_resolution import TableNameResolver
 from src.agents.referee.tie_break import settled_counts
@@ -805,6 +806,7 @@ def apply_assignment_overrides(
     )
     new_path = assignment_artifact_path(database_name, job_id, new_version)
     store.write_json(new_path, new_assignment.model_dump(mode="json"))
+    write_access_patterns(store, database_name, job_id, new_version, collector_output)
 
     return AssignmentOverrideResult(
         assignment=new_assignment,

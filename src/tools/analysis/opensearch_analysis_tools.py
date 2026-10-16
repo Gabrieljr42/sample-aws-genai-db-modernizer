@@ -223,8 +223,8 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
         # ---- Time-series pattern detection ----
 
-        # os-05 time-range-query: a timestamp column and a range operator
-        if facts.timestamp_column and facts.time_range_operator:
+        # os-05 time-range-query: a timestamp column and a range predicate
+        if facts.timestamp_column and facts.range_predicate:
             tr_query_ids.append(qid)
             tr_table_ids.extend(tables)
             tr_cps += cps
@@ -258,7 +258,7 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # os-ap-03 audit-columns-only tracking
         # A timestamp column in the query; classify as range or equality
         if facts.timestamp_column:
-            has_range = facts.time_range_operator
+            has_range = facts.range_predicate
             for tid in tables:
                 if tid not in ts_usage:
                     ts_usage[tid] = {"has_range": False, "query_ids": []}
@@ -882,7 +882,7 @@ def build_opensearch_decision_trace(
         # Add structural signals
         if q.get("has_joins") and (q.get("join_count") or 0) >= 2:
             signals.append("multi_table_join")
-        if facts.timestamp_column and facts.time_range_operator:
+        if facts.timestamp_column and facts.range_predicate:
             signals.append("timestamp_range_filter")
         return signals
 

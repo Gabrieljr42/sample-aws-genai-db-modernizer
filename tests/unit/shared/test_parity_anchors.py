@@ -11,8 +11,9 @@ the switch, labelled, until each is replaced by documentation plus a measurement
   ``why`` says ``parity anchor: no engine-specific evidence yet``;
 - no anchor's source is a write pattern (``write_pattern``), and no class lists one;
 - an anchor borrows evidence, never another anchor;
-- the shadow decision trace says, per query and engine, when the class score it used is
-  a parity anchor;
+- the access-pattern record (``assignment/v<N>/access_patterns.json``, the shadow
+  decision trace until the #728 switch) says, per query and engine, when the class score
+  it used is a parity anchor;
 - an engine that is not a system of record (OpenSearch, ElastiCache) is never credited
   for a write, whatever pattern the class lists (ADR-031 Decision 2 step 3).
 """
@@ -168,36 +169,43 @@ class TestTheTraceSaysSo:
         assert "aurora_postgresql" not in class_parity_anchors("ad_hoc_filter")
         assert "dynamodb" not in class_parity_anchors("key_lookup")
 
-    def test_the_shadow_row_names_the_anchor(self):
-        from src.agents.referee.access_pattern_shadow import build_shadow, weights_from_analysis
-        from tests.unit.agents.referee.test_access_pattern_shadow import (
-            AURORA_WEIGHTS,
-            DDB_WEIGHTS,
-            _collection,
-            _engine_analysis,
-        )
+    def test_the_access_pattern_record_names_the_anchor(self):
+        """Since the #728 switch the trace is ``assignment/v<N>/access_patterns.json``
+        (``query_pattern.access_patterns_record``), not the retired shadow."""
+        from src.agents.referee.query_pattern import access_patterns_record
 
-        collector = _collection()
-        collector["queries"]["query_patterns"].append(
-            {
-                "query_id": "adhoc",
-                "query_text": "SELECT * FROM orders WHERE status = $1",
+        def query(qid, text):
+            return {
+                "query_id": qid,
+                "query_text": text,
                 "query_type": "SELECT",
                 "tables_accessed": ["shop.orders"],
-                "calls_per_second": 5.0,
             }
-        )
-        triage = {
-            "selected_agents": [{"agent_type": "aurora_postgresql"}, {"agent_type": "dynamodb"}],
-            "query_capabilities": {},
-            "signals": [],
+
+        collector = {
+            "metadata": {"source_database": {"engine": "postgresql"}},
+            "database_schema": {
+                "tables": [
+                    {
+                        "table_id": "shop.orders",
+                        "table_name": "orders",
+                        "schema_name": "shop",
+                        "primary_key": ["id"],
+                        "columns": [
+                            {"column_name": c, "data_type": "int"} for c in ("id", "status")
+                        ],
+                    }
+                ]
+            },
+            "queries": {
+                "query_patterns": [
+                    query("adhoc", "SELECT * FROM orders WHERE status = $1"),
+                    query("q1", "SELECT * FROM orders WHERE id = $1"),
+                    query("q3", "SELECT status, count(*) FROM orders GROUP BY status"),
+                ]
+            },
         }
-        analysis = {
-            "aurora_postgresql": _engine_analysis(80, AURORA_WEIGHTS),
-            "dynamodb": _engine_analysis(80, DDB_WEIGHTS),
-        }
-        shadow = build_shadow(triage, analysis, collector, weights_from_analysis(analysis))
-        rows = {r["query_id"]: r for r in shadow["queries"]}
+        rows = {r["query_id"]: r for r in access_patterns_record(collector)["queries"]}
         assert rows["adhoc"]["class"] == "ad_hoc_filter"
         notes = rows["adhoc"]["parity_anchors"]
         assert sorted(notes) == ["documentdb", "opensearch"]

@@ -2,7 +2,7 @@
   "about": "Routing regression guard (tests/e2e/test_routing_baseline.py). Update deliberately with: uv run python -m tests.e2e.routing_baseline --write --reason \"...\"",
   "tolerance_pp": 5.0,
   "query_tolerance": "max(5, 0.25 x baseline count) queries",
-  "reason": "catalog PR C (#920, #936): Aurora MySQL and Aurora PostgreSQL credited for the SQL features both have (multi-table UPDATE/DELETE, stored routines, recursive CTEs, window functions, LATERAL, string aggregates), per-engine text-search class scores, parity anchors labelled",
+  "reason": "#728: each query is scored on its own access-pattern class plus #920's and #985's class-table items",
   "history": [
     "Initial baseline from #296 (cache overlay): ElastiCache owns no query, Reality Check protects only mandatory queries, OpenSearch absorbs only search/aggregation queries.",
     "Rebased on main d97a401 (#296 review 2): adds per-engine owned query counts and the cached-read count, guarded by max(5, 25% of baseline) queries; routing unchanged.",
@@ -25,7 +25,10 @@
     "Add the synthetic SQL Server sample, trailgear (#618); wordpress and discourse unchanged",
     "#920 catalog accuracy A: DocumentDB's variant-attribute fits need a key-anchored read of an entity with variable attributes, DynamoDB's call-rate fits are gone, one penalty_basis rule sizes every penalty; the per-query drift is in the PR.",
     "#920 catalog accuracy B (stacked on A): DynamoDB's key patterns read their key from the SQL facts (key-value-lookup, range-query, metadata-config-store, parent-child/co-access/junction, time-series, session-store), the ordered-scan anti-pattern prices a top-N Scan, and Aurora scores a key lookup from its own B-tree point read (80) instead of standard-crud's 60.",
-    "catalog PR C (#920, #936): Aurora MySQL and Aurora PostgreSQL credited for the SQL features both have (multi-table UPDATE/DELETE, stored routines, recursive CTEs, window functions, LATERAL, string aggregates), per-engine text-search class scores, parity anchors labelled"
+    "catalog PR C (#920, #936): Aurora MySQL and Aurora PostgreSQL credited for the SQL features both have (multi-table UPDATE/DELETE, stored routines, recursive CTEs, window functions, LATERAL, string aggregates), per-engine text-search class scores, parity anchors labelled",
+    "#728: each query is scored on its own access-pattern class (ADR-031 Decision 14 Amendment 7) plus #920's class-table items",
+    "#728: each query is scored on its own access-pattern class (ADR-031 Decision 14 Amendment 7) plus #920's class-table items",
+    "#728: each query is scored on its own access-pattern class plus #920's and #985's class-table items"
   ],
   "samples": {
     "wordpress": {
@@ -34,14 +37,14 @@
       "assignment_version": 2,
       "queries_in_scope": 107,
       "owner_share_percent": {
-        "aurora_mysql": 60.7,
-        "dynamodb": 39.3
+        "aurora_mysql": 63.6,
+        "dynamodb": 36.4
       },
       "owner_queries": {
-        "aurora_mysql": 65,
-        "dynamodb": 42
+        "aurora_mysql": 68,
+        "dynamodb": 39
       },
-      "source_compatible_share_percent": 60.7,
+      "source_compatible_share_percent": 63.6,
       "owner_engines": 2,
       "cache_overlay": {
         "queries": 20,
@@ -52,7 +55,7 @@
           "engines": [
             "aurora_mysql"
           ],
-          "workload_percent": 60.7,
+          "workload_percent": 63.6,
           "cached_call_share_percent": 0.0,
           "table_count": 50
         },
@@ -68,9 +71,9 @@
           "engines": [
             "dynamodb"
           ],
-          "workload_percent": 39.3,
+          "workload_percent": 36.4,
           "cached_call_share_percent": 0.0,
-          "table_count": 13
+          "table_count": 20
         }
       ],
       "utility_queries_off_aurora": 0
@@ -81,16 +84,16 @@
       "assignment_version": 2,
       "queries_in_scope": 1654,
       "owner_share_percent": {
-        "aurora_postgresql": 53.6,
-        "documentdb": 2.9,
-        "dynamodb": 43.5
+        "aurora_postgresql": 43.2,
+        "documentdb": 10.0,
+        "dynamodb": 46.9
       },
       "owner_queries": {
-        "aurora_postgresql": 886,
-        "documentdb": 48,
-        "dynamodb": 720
+        "aurora_postgresql": 714,
+        "documentdb": 165,
+        "dynamodb": 775
       },
-      "source_compatible_share_percent": 53.6,
+      "source_compatible_share_percent": 43.2,
       "owner_engines": 3,
       "cache_overlay": {
         "queries": 3,
@@ -101,7 +104,7 @@
           "engines": [
             "aurora_postgresql"
           ],
-          "workload_percent": 53.6,
+          "workload_percent": 43.2,
           "cached_call_share_percent": 0.0,
           "table_count": 312
         },
@@ -118,9 +121,9 @@
             "dynamodb",
             "documentdb"
           ],
-          "workload_percent": 46.4,
+          "workload_percent": 56.9,
           "cached_call_share_percent": 0.0,
-          "table_count": 121
+          "table_count": 231
         }
       ],
       "utility_queries_off_aurora": 0
@@ -131,14 +134,14 @@
       "assignment_version": 2,
       "queries_in_scope": 95,
       "owner_share_percent": {
-        "aurora_postgresql": 70.5,
-        "dynamodb": 29.5
+        "aurora_postgresql": 49.5,
+        "dynamodb": 50.5
       },
       "owner_queries": {
-        "aurora_postgresql": 67,
-        "dynamodb": 28
+        "aurora_postgresql": 47,
+        "dynamodb": 48
       },
-      "source_compatible_share_percent": 70.5,
+      "source_compatible_share_percent": 49.5,
       "owner_engines": 2,
       "cache_overlay": {
         "queries": 16,
@@ -149,7 +152,7 @@
           "engines": [
             "aurora_postgresql"
           ],
-          "workload_percent": 70.5,
+          "workload_percent": 49.5,
           "cached_call_share_percent": 0.0,
           "table_count": 31
         },
@@ -165,9 +168,9 @@
           "engines": [
             "dynamodb"
           ],
-          "workload_percent": 29.5,
+          "workload_percent": 50.5,
           "cached_call_share_percent": 0.0,
-          "table_count": 13
+          "table_count": 30
         }
       ],
       "utility_queries_off_aurora": 0

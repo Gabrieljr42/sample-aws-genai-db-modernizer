@@ -31,6 +31,7 @@ from src.agents.referee.move_ledger import (
     ledger_for,
     state_of,
 )
+from src.agents.referee.query_pattern import write_access_patterns
 from src.agents.referee.query_scoring import ScoringContext, score_query_for_engine
 from src.agents.referee.reality_check import (
     AURORA_ENGINES,
@@ -561,6 +562,7 @@ def write_reality_check_result(
     )
     revised_key = f"{database_name}/{job_id}/assignment/v{new_version}/assignment.json"
     store.write_json(revised_key, revised_assignment)
+    write_access_patterns(store, database_name, job_id, new_version, result["collector_output"])
     print(
         f"[reality-check] Revised assignment v{assignment_version} written to v{new_version} "
         f"({len(result['consolidations'])} consolidations)"

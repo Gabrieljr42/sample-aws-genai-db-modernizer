@@ -169,7 +169,7 @@ def route_unsupported_queries(
     already_routed = already_routed or set()
     customer_pinned = customer_pinned or set()
     routing_flags_by_engine = routing_flags_by_engine or {}
-    scoring_context = scoring_context or ScoringContext()
+    scoring_context = scoring_context or ScoringContext.from_pipeline({})
     query_map = query_map or {}
     tied_engines = tied_engines or {}
 

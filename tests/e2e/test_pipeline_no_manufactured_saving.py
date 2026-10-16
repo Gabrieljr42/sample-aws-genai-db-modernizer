@@ -60,8 +60,11 @@ def test_no_saving_for_an_engine_the_source_does_not_run(run: PipelineResult) ->
         hits = _SAVING.findall(text)
         assert not hits, (run.db, where, hits)
     dropped = {e["engine"] for e in report["considered_not_recommended"]}
+    # #728: since the per-query switch wordpress first-assigns one query to OpenSearch
+    # (a WooCommerce report grouped by date, the aggregation class's time bucket) and the
+    # reality check absorbs it, so OpenSearch is considered and dropped there.
     expected = {
-        "wordpress": {"documentdb"},
+        "wordpress": {"documentdb", "opensearch"},
         "discourse": {"opensearch"},
         "trailgear": {"documentdb"},
     }
@@ -90,9 +93,13 @@ def test_retiring_an_engine_the_source_runs_is_still_a_saving(
     assert report["tco_analysis"]["retired_engine_savings"] == [
         {"database": "documentdb", "monthly_cost_usd": 367.39}
     ]
-    assert report["considered_not_recommended"] == []
+    # #728: OpenSearch (one first-assigned time-bucket report) is the one candidate the
+    # source does not run, so it is dropped with no saving; DocumentDB's is the saving.
+    assert report["considered_not_recommended"] == [
+        {"engine": "opensearch", "absorbed_by": "aurora_mysql"}
+    ]
     rc = json.loads((in_use_run.job_dir() / "reality-check" / "output.json").read_text())
-    assert [c["saved_cost_estimate"] for c in rc["consolidations"]] == [367.39, 0.0]
+    assert [c["saved_cost_estimate"] for c in rc["consolidations"]] == [367.39, 0.0, 0.0]
     texts = _texts(in_use_run)
     assert "Retired by this plan: $367.39/mo (DocumentDB)" in texts["decision report"]
     assert "Retired by this plan: $367.39/mo (DocumentDB)" in texts["engineering report"]

@@ -954,3 +954,103 @@ class TestAntiPatternExclusionLogic:
         anti_ids = [ap.anti_pattern_id for ap in anti_patterns]
         assert "aurora-anti-02" in anti_ids
         assert "aurora-anti-01" not in anti_ids
+
+
+# ==========================================================================
+# ADR-031 Decision 14 Amendment 5 (#728): a key-anchored read is not a relational need
+# ==========================================================================
+
+
+def _keyed_schema() -> list[dict]:
+    """``orders`` (``customer_id`` indexed) and ``customers``, no foreign keys."""
+
+    def table(name, columns, indexes=()):
+        return {
+            "table_id": f"app.{name}",
+            "table_name": name,
+            "schema_name": "app",
+            "primary_key": ["id"],
+            "foreign_keys": [],
+            "columns": [{"column_name": c, "data_type": "integer"} for c in columns],
+            "indexes": [
+                {"index_name": f"ix_{name}_{c}", "columns": [c], "is_unique": False}
+                for c in indexes
+            ],
+        }
+
+    return [
+        table("orders", ["id", "customer_id", "total", "note"], indexes=["customer_id"]),
+        table("customers", ["id", "name", "tier"]),
+    ]
+
+
+def _keyed_q(qid: str, sql: str, tables: tuple[str, ...] = ("orders",)) -> dict:
+    return {
+        "query_id": qid,
+        "query_type": sql.split()[0].upper(),
+        "tables_accessed": [f"app.{t}" for t in tables],
+        "has_joins": len(tables) > 1,
+        "join_count": len(tables) - 1,
+        "rows_returned_avg": 1.0,
+        "calls_per_second": 1.0,
+        "query_text": sql,
+    }
+
+
+def _keyed_anti(anti_id: str, *queries: dict):
+    _, anti_patterns = analyze_aurora_common_use_cases(
+        _make_collector(_keyed_schema(), list(queries))
+    )
+    return next((ap for ap in anti_patterns if ap.anti_pattern_id == anti_id), None)
+
+
+POINT = _keyed_q("point", "SELECT * FROM orders WHERE id = $1")
+ANCHORED_JOIN = _keyed_q(
+    "join",
+    "SELECT o.id, c.name FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = $1",
+    ("orders", "customers"),
+)
+
+
+class TestAKeyAnchoredReadIsNotARelationalNeed:
+    def test_a_key_anchored_join_is_not_join_participation(self):
+        ap = _keyed_anti("aurora-anti-05", POINT, ANCHORED_JOIN)
+        assert ap is not None
+        assert set(ap.table_ids) == {"app.orders", "app.customers"}
+        assert set(ap.query_ids) == {"point", "join"}
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT count(*) FROM orders WHERE customer_id = $1",  # keyed aggregate
+            "SELECT * FROM orders WHERE id > $1 ORDER BY id LIMIT $2",  # range over a key
+            "SELECT * FROM orders ORDER BY customer_id LIMIT 20",  # order over a key
+            "SELECT customer_id FROM orders WHERE customer_id = $1 GROUP BY customer_id",
+            "SELECT * FROM orders",  # no predicate: the whole key range
+        ],
+    )
+    def test_a_keyed_or_ranged_read_by_key_does_not_block_the_rule(self, sql):
+        ap = _keyed_anti("aurora-anti-05", POINT, _keyed_q("read", sql))
+        assert ap is not None and "read" in ap.query_ids
+
+    @pytest.mark.parametrize(
+        ("sql", "tables"),
+        [
+            (  # a join no key anchors
+                "SELECT o.id FROM orders o JOIN customers c ON c.tier = o.total",
+                ("orders", "customers"),
+            ),
+            ("SELECT * FROM orders WHERE total > $1", ("orders",)),  # range on a non-key
+            ("SELECT * FROM orders WHERE id IN (SELECT id FROM orders)", ("orders",)),
+            ("SELECT * FROM orders WHERE note LIKE '%x%'", ("orders",)),
+            ("SELECT customer_id, sum(total) FROM orders GROUP BY customer_id", ("orders",)),
+            ("UPDATE orders SET total = 0 WHERE customer_id = $1 AND id < $2", ("orders",)),
+        ],
+    )
+    def test_a_relational_read_or_a_bulk_write_still_blocks_it(self, sql, tables):
+        assert _keyed_anti("aurora-anti-05", POINT, _keyed_q("rel", sql, tables)) is None
+
+    def test_single_access_pattern_reads_the_same_shapes(self):
+        """aurora-anti-06 (at most two queries): a key-anchored join no longer blocks it."""
+        ap = _keyed_anti("aurora-anti-06", POINT, ANCHORED_JOIN)
+        assert ap is not None and set(ap.query_ids) == {"point", "join"}

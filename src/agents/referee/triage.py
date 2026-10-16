@@ -54,6 +54,7 @@ from src.agents.referee.capability_registry import (
     requires_aggregation_capability,
 )
 from src.agents.referee.table_resolution import SourceScope
+from src.tools.analysis.key_access import KeyAccessReader
 from src.tools.sql.query_facts import query_facts, source_engine_of
 
 logger = logging.getLogger(__name__)
@@ -286,6 +287,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
     if not queries:
         return signals
     source_engine = source_engine_of(co)
+    key_reader = KeyAccessReader.from_collector(co, source_engine)
 
     # Accumulators: list of query_ids per signal
     kv_lookups: list[str] = []
@@ -321,8 +323,9 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         if facts.min_max_call and not q.get("has_joins"):
             kv_lookups.append(qid)
 
-        # Group 2: Range queries (PK + sort key range)
-        if qtype == "SELECT" and facts.range_with_order_by:
+        # Group 2: Range queries: a partition-key equality plus a range on another column
+        # of the same table (the key-access fact, #933's shape, the one range definition)
+        if qtype == "SELECT" and key_reader.access(q).partition_range:
             range_queries.append(qid)
 
         # Group 3: Status-based filters

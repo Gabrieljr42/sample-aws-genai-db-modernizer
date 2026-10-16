@@ -388,10 +388,16 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # #920 catalog PR B: DynamoDB's key detectors read the key from the SQL facts and
     # Aurora scores a key lookup from its own B-tree point read -- dynamodb +2,
     # aurora_mysql -4, documentdb +2 (per-query drift in the PR B pull request).
+    # #728 (the per-query access-pattern switch): each query scores its own class, not
+    # its tables' patterns -- key-scoped reads go to DocumentDB (85 against DynamoDB's
+    # 75 and Aurora's 70), key lookups to DynamoDB, and wordpress's one time-bucket
+    # report to OpenSearch: aurora_mysql -13, documentdb +15, dynamodb -3, opensearch +1
+    # (every moved query is in the #728 switch PR).
     assert rc["before_distribution"] == {
-        "dynamodb": 39,
-        "aurora_mysql": 60,
-        "documentdb": 8,
+        "dynamodb": 36,
+        "aurora_mysql": 47,
+        "documentdb": 23,
+        "opensearch": 1,
     }
     assert sum(rc["before_distribution"].values()) == sum(rc["after_distribution"].values())
     assert "opensearch" not in rc["after_distribution"]  # consolidated away

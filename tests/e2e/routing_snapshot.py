@@ -283,6 +283,8 @@ def measure(job_dir: Path) -> dict[str, Any]:
             "f": first,
             "mv": moves_by_query.get(qid, []),
         }
+        if payload.get("access_class"):
+            query_entry["k"] = payload["access_class"]
         if qid in rc_moves_by_query:
             query_entry["rmv"] = rc_moves_by_query[qid]
         if final_engine != first["e"] or final_cat != first["c"]:
@@ -406,6 +408,10 @@ def compare(baseline: dict[str, Any], actual: dict[str, Any]) -> dict[str, Any]:
         a_final = (a.get("r") or a.get("f")) if a else None
         if b_final != a_final:
             diff.setdefault("final_assignment", {})[qid] = {"before": b_final, "after": a_final}
+        b_class = b.get("k") if b else None
+        a_class = a.get("k") if a else None
+        if b_class != a_class:
+            diff.setdefault("access_class", {})[qid] = {"before": b_class, "after": a_class}
         b_cache = b.get("cache") if b else None
         a_cache = a.get("cache") if a else None
         if b_cache != a_cache:
@@ -483,6 +489,7 @@ _STEP_LABELS = (
     ("cache_engine", "cache overlay engine"),
     ("moves", "first-assignment moves (pass:reason_code)"),
     ("rc_moves", "reality-check moves (pass:reason_code)"),
+    ("access_class", "access-pattern class (ADR-031 Decision 14 Amendment 5)"),
 )
 
 
@@ -506,7 +513,7 @@ def format_diff(sample: str, diff: dict[str, Any], query_text: dict[str, str] | 
             d = changed[qid]
             if step == "scores":
                 detail = _engine_diff_text(d["before"], d["after"])
-            elif step in ("cache_engine", "moves", "rc_moves"):
+            elif step in ("cache_engine", "moves", "rc_moves", "access_class"):
                 detail = f"{d['before']!r} -> {d['after']!r}"
             else:
                 detail = f"{_assignment_text(d['before'])} -> {_assignment_text(d['after'])}"

@@ -20,6 +20,7 @@ from src.agents.referee.move_ledger import ledger_for
 from src.agents.referee.post_schema_router import route_unsupported_queries
 from src.agents.referee.query_scoring import ScoringContext
 from src.contracts.model_flag import ModelFlag
+from tests.unit.agents.referee.fixed_scores import fixed_model, flat_row
 
 ENGINES = ["aurora_mysql", "aurora_postgresql", "documentdb", "dynamodb"]
 
@@ -30,8 +31,9 @@ def _context(scores: Mapping[str, Mapping[str, float]]) -> ScoringContext:
         for engine, score in per_engine.items():
             analysis.setdefault(engine, {"table_recommendations": []})[
                 "table_recommendations"
-            ].append({"table_id": f"t_{qid}", "confidence_score": score})
-    return ScoringContext(analysis_outputs=analysis)
+            ].append(flat_row(f"t_{qid}", score))
+    # Through the per-query scorer (#728): tests/unit/agents/referee/fixed_scores.py.
+    return ScoringContext(analysis_outputs=analysis, pattern_model=fixed_model(scores))
 
 
 def _query_map(*query_ids: str) -> dict[str, dict]:

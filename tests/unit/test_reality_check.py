@@ -23,6 +23,8 @@ import itertools
 import random
 import re
 
+import pytest
+
 from src.agents.referee.query_scoring import ScoringContext
 from src.agents.referee.reality_check import (
     _find_best_absorber_for_query,
@@ -1206,6 +1208,7 @@ class TestOpenSearchFloorAppliesWithoutMandatoryStatus:
     re-examined, reopening the gap this PR closes.
     """
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_opensearch_wins_on_score_alone_and_the_floor_still_moves_it(self):
         assignment = {
             "version": 1,
