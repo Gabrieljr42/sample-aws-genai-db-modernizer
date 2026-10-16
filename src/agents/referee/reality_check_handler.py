@@ -17,6 +17,7 @@ from src.agents.prompt_framing import SYSTEM_PROMPT_DATA_DIRECTIVE, frame_untrus
 from src.agents.referee.assignment_overrides import refresh_consolidated_assignment
 from src.agents.referee.aurora_choice import source_database_engine
 from src.agents.referee.cache_overlay import normalize_cache_owners
+from src.agents.referee.capability_registry import triage_query_capabilities
 from src.agents.referee.consolidation_validator import (
     CONSOLIDATION_REVIEW_SKILL,
     sanity_sweep,
@@ -153,8 +154,9 @@ def run_reality_check_deterministic(
         ledger=ledger,
     )
 
-    # Extract query capabilities from triage
-    query_capabilities = triage.get("query_capabilities", {})
+    # Extract query capabilities from triage, legacy capability ids mapped (a
+    # triage.json saved before #493 says inverted_index for text_pattern_match).
+    query_capabilities = triage_query_capabilities(triage)
 
     # Count queries per engine before reality check
     before_distribution: dict[str, int] = defaultdict(int)

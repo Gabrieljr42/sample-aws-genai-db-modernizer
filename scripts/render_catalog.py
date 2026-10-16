@@ -92,6 +92,8 @@ def _cell(support: EngineSupport | None) -> str:
         return f"anti {support.severity:g}" + ("" if support.supported else ", no")
     if support.kind == "redesign":
         return f"redesign -{support.penalty}"
+    if support.kind == "scan":
+        return "scan"
     if support.kind == "future":
         return "future"
     if support.kind == "penalized":
@@ -139,7 +141,9 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
         "Each cell is what a query showing the pattern gets on that engine: `fit N` (the "
         "engine's analysis reports it, catalog score N), `fit (level)` (reported with a "
         "confidence level instead of a score), `anti S` (reported as an anti-pattern, "
-        "severity S), `native` (has the capability, never penalised), `redesign -N` "
+        "severity S), `native` (has the capability, never penalised), `scan` (lacks it and "
+        "runs the pattern as a scan: loses the pattern's penalty only on a query that "
+        "crosses its scan threshold), `redesign -N` "
         "(lacks it, bounded redesign, N-point penalty), **no** (cannot run it: takes the "
         "full penalty when another engine reports it as a fit), `no` (cannot run it, no "
         "score effect; `anti S, no` for a reported anti-pattern), `-` (no effect) or "
@@ -176,6 +180,12 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
         for label, note in (("Exemption note", p.exempt_note), ("Redesign note", p.redesign_note)):
             if note:
                 out.append(f"{label}: {md_text(note)}")
+        if p.scan_threshold:
+            t = p.scan_threshold
+            out.append(
+                f"Scan threshold: {t.min_calls_per_second:g} calls per second and "
+                f"{t.min_table_rows:,} table rows, both reached. {md_text(t.why)}"
+            )
         out.append("")
         quiet: list[str] = []
         future: list[str] = []
@@ -191,10 +201,13 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
                 future.append(e.display_name)
                 continue
             ref = f" ({support.catalog_id})" if support.catalog_id else ""
-            out.append(
+            line = (
                 f"- {md_text(e.display_name)}, {_cell(support).replace('**', '')}{ref}: "
                 f"{md_text(support.why)}"
             )
+            if support.guidance and support.kind in ("native", "scan"):
+                line += f" Word search: {md_text(support.guidance)}"
+            out.append(line)
         if quiet:
             out.append(f"- No effect on: {md_text(', '.join(quiet))}.")
         if future:

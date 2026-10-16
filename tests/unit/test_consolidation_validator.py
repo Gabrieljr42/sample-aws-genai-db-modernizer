@@ -629,7 +629,7 @@ class TestSanitySweepEligibility:
     def test_a_plain_select_never_lands_on_opensearch_without_a_search_signal(self) -> None:
         # A read, so the write gate alone would not stop it -- but opensearch
         # is a specialist (``may_absorb``'s SPECIALIST_ABSORB_SIGNALS):
-        # with no text_search/aggregations signal and no inverted_index
+        # with no text_search/aggregations signal and no text_pattern_match
         # capability, it may only keep queries it already owns, never
         # absorb a plain PK lookup just because it scores well by pattern.
         assignments = [

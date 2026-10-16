@@ -377,6 +377,8 @@ def test_each_text_detector_belongs_to_one_fact():
 
 PROBES: list[tuple[str, str]] = [
     ("SELECT * FROM t WHERE a LIKE '%x'", ""),
+    ("SELECT * FROM t WHERE [Body] LIKE N'%x%'", "sqlserver"),
+    ("SELECT * FROM t WHERE a LIKE CONCAT('%', ?, '%')", "mysql"),
     ("SELECT * FROM t WHERE a LIKE ?", "mysql"),
     ("SELECT * FROM t WHERE a ILIKE $1", "postgresql"),
     ("SELECT * FROM t WHERE a LIKE 'x%'", ""),
@@ -482,6 +484,10 @@ def test_every_fact_is_true_somewhere(corpus):
 # Fact pairs that agree on most queries but are two facts, with why. A pair whose
 # one fact reads the other (``self.<fact>``) is related by construction, not listed.
 RELATED_FACTS: dict[frozenset[str], str] = {
+    frozenset({"leading_wildcard_like", "wildcard_likes"}): (
+        "wildcard_likes lists each leading-wildcard LIKE (column, word search) whose existence "
+        "is leading_wildcard_like; the facade sets wildcard_leading to bool(wildcard_likes)"
+    ),
     frozenset({"aggregate_function_count", "needs_aggregation"}): (
         "the aggregation capability adds windows and FOUND_ROWS, and drops a dedup GROUP BY"
     ),

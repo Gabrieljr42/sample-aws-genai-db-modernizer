@@ -33,54 +33,54 @@ class TestAcidTransactionEnginesAgreeWithCapabilityRegistry:
 class TestTextSearchEnginesVsCapabilityRegistry:
     """``engine_capabilities.TEXT_SEARCH_ENGINES`` should agree with
 
-    ``capability_registry.ENGINE_CAPABILITIES``'s ``inverted_index`` set the
+    ``capability_registry.ENGINE_CAPABILITIES``'s ``text_pattern_match`` set the
     same way ``ACID_TRANSACTION_ENGINES`` agrees with ``multi_doc_acid``
     above -- an equality check, not a subset one, so the two facts cannot
     drift apart again the way they did before #485: DocumentDB was
     hard-excluded from a leading-wildcard query by this gate while Aurora
     MySQL, which runs that query the same way (an unindexed scan), was
-    admitted. ``inverted_index`` also covers OpenSearch, which
+    admitted. ``text_pattern_match`` also covers OpenSearch, which
     ``TEXT_SEARCH_ENGINES`` deliberately excludes (see its own docstring:
     it is the engine these signals come FROM, not a capability question
     for that set) -- so the two are not literally the same set, only
     ``TEXT_SEARCH_ENGINES`` plus OpenSearch.
 
-    ``inverted_index`` is itself now a misleading name (review of #485):
-    every engine here except DynamoDB has it, but only Aurora PostgreSQL
-    (``pg_trgm``) or OpenSearch actually indexes a leading wildcard -- the
-    other two still run it, just unindexed. Renaming it, and scoring that
-    index-vs-scan difference for real, is left to #491.
+    ``text_pattern_match`` (``inverted_index`` before #493) says an engine
+    can run a text-pattern predicate, not that it indexes one: every engine
+    here except DynamoDB has it, but only Aurora PostgreSQL (``pg_trgm``) and
+    OpenSearch index a leading wildcard. That index-vs-scan difference is the
+    substring-match pattern's score difference (#493), never this gate.
     """
 
     def test_agrees_with_text_search_engines_plus_opensearch(self):
-        inverted_index_engines = frozenset(
-            engine for engine, caps in ENGINE_CAPABILITIES.items() if "inverted_index" in caps
+        text_pattern_match_engines = frozenset(
+            engine for engine, caps in ENGINE_CAPABILITIES.items() if "text_pattern_match" in caps
         )
-        assert inverted_index_engines == TEXT_SEARCH_ENGINES | {"opensearch"}
+        assert text_pattern_match_engines == TEXT_SEARCH_ENGINES | {"opensearch"}
 
 
 class TestDetectRequiredCapabilities:
     """Tests for detect_required_capabilities()."""
 
-    def test_detects_inverted_index_from_like_wildcard(self):
+    def test_detects_text_pattern_match_from_like_wildcard(self):
         caps = detect_required_capabilities("SELECT * FROM posts WHERE title LIKE '%search%'", [])
-        assert "inverted_index" in caps
+        assert "text_pattern_match" in caps
 
-    def test_detects_inverted_index_from_match_against(self):
+    def test_detects_text_pattern_match_from_match_against(self):
         caps = detect_required_capabilities(
             "SELECT * FROM posts WHERE MATCH(title, body) AGAINST('search term')", []
         )
-        assert "inverted_index" in caps
+        assert "text_pattern_match" in caps
 
-    def test_detects_inverted_index_from_tsvector(self):
+    def test_detects_text_pattern_match_from_tsvector(self):
         caps = detect_required_capabilities(
             "SELECT * FROM posts WHERE to_tsvector(body) @@ to_tsquery('search')", []
         )
-        assert "inverted_index" in caps
+        assert "text_pattern_match" in caps
 
-    def test_detects_inverted_index_from_text_search_signal(self):
+    def test_detects_text_pattern_match_from_text_search_signal(self):
         caps = detect_required_capabilities("SELECT * FROM posts", ["text_search"])
-        assert "inverted_index" in caps
+        assert "text_pattern_match" in caps
 
     def test_detects_scan_engine_from_window_function(self):
         caps = detect_required_capabilities(
@@ -117,12 +117,12 @@ class TestDetectRequiredCapabilities:
             "SELECT * FROM tree WHERE title LIKE '%test%'",
             ["text_search"],
         )
-        assert "inverted_index" in caps
+        assert "text_pattern_match" in caps
         assert "scan_engine" in caps
 
     def test_case_insensitive_detection(self):
         caps = detect_required_capabilities("SELECT * FROM posts WHERE title like '%hello%'", [])
-        assert "inverted_index" in caps
+        assert "text_pattern_match" in caps
 
 
 class TestCanEngineServeCapability:
@@ -133,20 +133,20 @@ class TestCanEngineServeCapability:
         assert can_engine_serve_capability("opensearch", []) is True
         assert can_engine_serve_capability("documentdb", []) is True
 
-    def test_opensearch_has_inverted_index(self):
-        assert can_engine_serve_capability("opensearch", ["inverted_index"]) is True
+    def test_opensearch_has_text_pattern_match(self):
+        assert can_engine_serve_capability("opensearch", ["text_pattern_match"]) is True
 
-    def test_dynamodb_lacks_inverted_index(self):
-        assert can_engine_serve_capability("dynamodb", ["inverted_index"]) is False
+    def test_dynamodb_lacks_text_pattern_match(self):
+        assert can_engine_serve_capability("dynamodb", ["text_pattern_match"]) is False
 
-    def test_documentdb_has_inverted_index(self):
+    def test_documentdb_has_text_pattern_match(self):
         """#485: an unindexed ``$regex`` scan is the same position Aurora
 
         MySQL's unindexed ``LIKE`` scan is in -- a capability DocumentDB
         has, just not an indexed one, so the hard gate no longer excludes
         it.
         """
-        assert can_engine_serve_capability("documentdb", ["inverted_index"]) is True
+        assert can_engine_serve_capability("documentdb", ["text_pattern_match"]) is True
 
     def test_opensearch_has_scan_engine(self):
         assert can_engine_serve_capability("opensearch", ["scan_engine"]) is True
@@ -163,13 +163,17 @@ class TestCanEngineServeCapability:
 
     def test_multiple_capabilities_all_required(self):
         """Engine must have ALL required capabilities, not just one."""
-        # OpenSearch has both inverted_index and scan_engine
-        assert can_engine_serve_capability("opensearch", ["inverted_index", "scan_engine"]) is True
+        # OpenSearch has both text_pattern_match and scan_engine
+        assert (
+            can_engine_serve_capability("opensearch", ["text_pattern_match", "scan_engine"]) is True
+        )
         # DynamoDB has neither
-        assert can_engine_serve_capability("dynamodb", ["inverted_index", "scan_engine"]) is False
+        assert (
+            can_engine_serve_capability("dynamodb", ["text_pattern_match", "scan_engine"]) is False
+        )
 
     def test_unknown_engine_fails(self):
-        assert can_engine_serve_capability("unknown", ["inverted_index"]) is False
+        assert can_engine_serve_capability("unknown", ["text_pattern_match"]) is False
 
     def test_strong_consistency_matrix(self):
         assert can_engine_serve_capability("dynamodb", ["strong_consistency"]) is True
@@ -180,13 +184,13 @@ class TestCanEngineServeCapability:
 class TestSignalToCapability:
     """Tests for signal-to-capability derivation."""
 
-    def test_text_search_maps_to_inverted_index(self):
-        assert SIGNAL_TO_CAPABILITY["text_search"] == "inverted_index"
+    def test_text_search_maps_to_text_pattern_match(self):
+        assert SIGNAL_TO_CAPABILITY["text_search"] == "text_pattern_match"
 
     def test_detect_from_signal_only(self):
         """Signal derivation works even without SQL text patterns."""
         caps = detect_required_capabilities("SELECT 1", ["text_search"])
-        assert "inverted_index" in caps
+        assert "text_pattern_match" in caps
 
 
 class TestAggregationAndJoinCapabilities:

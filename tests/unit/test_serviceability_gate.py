@@ -66,7 +66,7 @@ class TestServiceabilityGateBlocks:
                     "targets": ["dynamodb"],
                 },
             ],
-            query_capabilities={"q-1": ["inverted_index"]},
+            query_capabilities={"q-1": ["text_pattern_match"]},
         )
 
         collector = _make_collector(
@@ -83,7 +83,7 @@ class TestServiceabilityGateBlocks:
 
         result = run_reality_check(assignment, triage, {}, collector)
 
-        # OpenSearch should NOT be fully consolidated because q-1 requires inverted_index
+        # OpenSearch should NOT be fully consolidated because q-1 requires text_pattern_match
         # Check that q-1 is still on opensearch
         q1_assignment = next(qa for qa in result["revised_assignments"] if qa["query_id"] == "q-1")
         assert q1_assignment["assigned_engine"] == "opensearch"
@@ -135,7 +135,7 @@ class TestPartialConsolidation:
 
     def test_partial_consolidation_moves_serviceable_keeps_unserviceable(self):
         """Some queries move, some stay due to capability requirements."""
-        # 10 queries on opensearch, 1 needs inverted_index, rest don't
+        # 10 queries on opensearch, 1 needs text_pattern_match, rest don't
         assignment = {
             "query_assignments": [
                 _make_query_assignment("q-search", "opensearch"),
@@ -148,7 +148,7 @@ class TestPartialConsolidation:
             signals=[
                 {"signal": "text_search", "query_ids": ["q-search"], "targets": ["opensearch"]},
             ],
-            query_capabilities={"q-search": ["inverted_index"]},
+            query_capabilities={"q-search": ["text_pattern_match"]},
         )
 
         queries = [
@@ -212,7 +212,7 @@ class TestLightweightRecommendations:
             signals=[
                 {"signal": "text_search", "query_ids": ["q-search"], "targets": ["opensearch"]},
             ],
-            query_capabilities={"q-search": ["inverted_index"]},
+            query_capabilities={"q-search": ["text_pattern_match"]},
         )
 
         queries = [
@@ -260,7 +260,7 @@ class TestFindBestAbsorberWithCapabilities:
         committed = {"dynamodb"}
         query_signals: dict = {"q-1": ["text_search"]}
         query_map = {"q-1": {"query_id": "q-1", "tables_accessed": ["posts"]}}
-        query_capabilities = {"q-1": ["inverted_index"]}
+        query_capabilities = {"q-1": ["text_pattern_match"]}
         ctx = ScoringContext(query_capabilities=query_capabilities)
 
         result = _find_best_absorber_for_query(
@@ -276,13 +276,13 @@ class TestFindBestAbsorberWithCapabilities:
             query_capabilities=query_capabilities,
         )
 
-        # dynamodb lacks inverted_index
+        # dynamodb lacks text_pattern_match
         assert result is None
 
     def test_absorber_includes_documentdb_now_that_it_has_the_capability(self):
         """#485: ``ENGINE_CAPABILITIES`` now lists ``documentdb`` as having
 
-        ``inverted_index`` (the same unindexed-scan position as Aurora
+        ``text_pattern_match`` (the same unindexed-scan position as Aurora
         MySQL), so the serviceability gate stops skipping it here too --
         unlike DynamoDB, which still genuinely lacks it.
         """
@@ -290,7 +290,7 @@ class TestFindBestAbsorberWithCapabilities:
         committed = {"dynamodb", "documentdb"}
         query_signals: dict = {"q-1": ["text_search"]}
         query_map = {"q-1": {"query_id": "q-1", "tables_accessed": ["posts"]}}
-        query_capabilities = {"q-1": ["inverted_index"]}
+        query_capabilities = {"q-1": ["text_pattern_match"]}
         ctx = ScoringContext(
             analysis_outputs={
                 "documentdb": {
@@ -321,11 +321,11 @@ class TestFindBestAbsorberWithCapabilities:
         committed = {"dynamodb", "opensearch"}
         query_signals: dict = {"q-1": ["text_search"]}
         query_map = {"q-1": {"query_id": "q-1", "tables_accessed": ["posts"]}}
-        query_capabilities = {"q-1": ["inverted_index"]}
+        query_capabilities = {"q-1": ["text_pattern_match"]}
         # OpenSearch is a ``PATTERN_ONLY_ENGINES`` member: with no
         # ``patterns_detected`` match for q-1 its base confidence is 0, same
         # as DynamoDB's would be -- but DynamoDB is gated out entirely for
-        # lacking ``inverted_index``, so OpenSearch is the only candidate
+        # lacking ``text_pattern_match``, so OpenSearch is the only candidate
         # and wins regardless of the exact (0) score.
         ctx = ScoringContext(query_capabilities=query_capabilities)
 
@@ -342,7 +342,7 @@ class TestFindBestAbsorberWithCapabilities:
             query_capabilities=query_capabilities,
         )
 
-        # OpenSearch has inverted_index
+        # OpenSearch has text_pattern_match
         assert result is not None
         assert result["target_engine"] == "opensearch"
 

@@ -17,10 +17,11 @@ distinguished from is deleted).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.utility_statements import is_utility_statement
+from src.shared.capability_labels import LEGACY_CAPABILITY_IDS
 from src.shared.unsupported_pattern import is_dedup_only_group_by
 from src.tools.sql.query_facts import QueryFacts, query_facts
 
@@ -31,6 +32,9 @@ __all__ = [
     "detect_required_capabilities",
     "can_engine_serve_capability",
     "missing_capabilities",
+    "LEGACY_CAPABILITY_IDS",
+    "current_capability_ids",
+    "triage_query_capabilities",
     "is_dedup_only_group_by",
     "requires_aggregation_capability",
     "requires_computed_join_capability",
@@ -49,19 +53,21 @@ ENGINE_CAPABILITIES: dict[str, set[str]] = {
     # wide for one transaction is scored by its shape (transaction_shape, #493).
     "dynamodb": {"multi_doc_acid", "strong_consistency"},
     # $regex (LIKE/regex-equivalent) and $text are both native query
-    # operators; a leading-wildcard $regex runs unindexed, the same scan
-    # cost Aurora MySQL's LIKE pays below -- so inverted_index is a
-    # capability DocumentDB has, even though it is not an indexed one
-    # (only Aurora PostgreSQL's pg_trgm indexes it). Previously omitted
-    # here, which hard-excluded DocumentDB while admitting Aurora MySQL for
-    # the identical unindexed position -- fixed by #485.
-    "documentdb": {"multi_doc_acid", "strong_consistency", "aggregation", "inverted_index"},
-    "opensearch": {"inverted_index", "scan_engine", "aggregation"},
+    # operators, so DocumentDB can run a text-pattern predicate
+    # (text_pattern_match, named inverted_index before #493: it says the
+    # engine can run the predicate, not that it has an index for it). A
+    # leading-wildcard $regex runs as a scan, the same position Aurora MySQL's
+    # LIKE is in; that is a score difference, the substring-match pattern
+    # (src/catalog/patterns/substring-match.toml), never this gate. Previously
+    # omitted here, which hard-excluded DocumentDB while admitting Aurora MySQL
+    # for the identical position -- fixed by #485.
+    "documentdb": {"multi_doc_acid", "strong_consistency", "aggregation", "text_pattern_match"},
+    "opensearch": {"text_pattern_match", "scan_engine", "aggregation"},
     "aurora_postgresql": {
         "multi_doc_acid",
         "strong_consistency",
         "scan_engine",
-        "inverted_index",
+        "text_pattern_match",
         "aggregation",
         "complex_joins",
         "sql_admin",
@@ -72,7 +78,7 @@ ENGINE_CAPABILITIES: dict[str, set[str]] = {
         "multi_doc_acid",
         "strong_consistency",
         "scan_engine",
-        "inverted_index",
+        "text_pattern_match",
         "aggregation",
         "complex_joins",
         "sql_admin",
@@ -91,7 +97,7 @@ CAPABILITY_FACTS: dict[str, tuple[str, ...]] = {
     # A text search: a leading-wildcard or parameterised LIKE, a full-text,
     # regular-expression or similarity match (``QueryFacts.text_search``, the
     # fact triage's text_search signal reads too, #893).
-    "inverted_index": ("text_search",),
+    "text_pattern_match": ("text_search",),
     # A ranking or offset window function, a recursive CTE.
     "scan_engine": ("ranking_window_function", "offset_window_function", "recursive_cte"),
     # An aggregate call, SQL_CALC_FOUND_ROWS, a window function, or a GROUP
@@ -153,7 +159,7 @@ def requires_computed_join_capability(
 # ---------------------------------------------------------------------------
 
 SIGNAL_TO_CAPABILITY: dict[str, str] = {
-    "text_search": "inverted_index",
+    "text_search": "text_pattern_match",
     # SUM/COUNT/AVG with GROUP BY, or an aggregate combined with a JOIN, is a
     # hard requirement: an engine with no aggregation capability (DynamoDB)
     # cannot run it at all, even on a single query, not just "poorly" (#338).
@@ -200,13 +206,37 @@ def detect_required_capabilities(
     return sorted(required)
 
 
+# ``LEGACY_CAPABILITY_IDS`` (src.shared.capability_labels): a triage.json written
+# before #493 names ``text_pattern_match`` by its old name; read unmapped, every
+# engine would "lack" it and be gated out of its text-search queries on a customer
+# edit or a resumed reality check.
+
+
+def current_capability_ids(capabilities: Iterable[str]) -> list[str]:
+    """``capabilities`` with every legacy id mapped to today's (order kept, no duplicates)."""
+    return list(dict.fromkeys(LEGACY_CAPABILITY_IDS.get(c, c) for c in capabilities))
+
+
+def triage_query_capabilities(triage: Mapping | None) -> dict[str, list[str]]:
+    """A triage artifact's ``query_capabilities``, with legacy capability ids mapped.
+
+    The one reader of that field: :meth:`ScoringContext.from_pipeline
+    <src.agents.referee.query_scoring.ScoringContext.from_pipeline>` and the
+    reality check handler both call it, so an assessment saved before a rename
+    gates exactly as a new one does.
+    """
+    raw = (triage or {}).get("query_capabilities") or {}
+    return {str(qid): current_capability_ids(caps or []) for qid, caps in raw.items()}
+
+
 def missing_capabilities(engine: str, required: Iterable[str]) -> list[str]:
     """The ``required`` capabilities ``engine`` lacks, sorted (empty: it can
     serve them all). The one fact :func:`can_engine_serve_capability` tests,
     so a caller naming WHICH capability is missing (the customer gate's
-    rejection, #801) never re-derives it from ``ENGINE_CAPABILITIES``."""
+    rejection, #801) never re-derives it from ``ENGINE_CAPABILITIES``. A legacy
+    id (:data:`LEGACY_CAPABILITY_IDS`) is read as today's."""
     engine_caps = ENGINE_CAPABILITIES.get(engine, set())
-    return sorted({cap for cap in required if cap not in engine_caps})
+    return sorted({cap for cap in current_capability_ids(required) if cap not in engine_caps})
 
 
 def can_engine_serve_capability(engine: str, required: list[str]) -> bool:

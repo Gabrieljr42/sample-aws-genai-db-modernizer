@@ -20,7 +20,7 @@ Generated from `src/catalog/engines/*.toml` and `src/catalog/patterns/*.toml` (A
 
 ## Pattern x engine matrix
 
-Each cell is what a query showing the pattern gets on that engine: `fit N` (the engine's analysis reports it, catalog score N), `fit (level)` (reported with a confidence level instead of a score), `anti S` (reported as an anti-pattern, severity S), `native` (has the capability, never penalised), `redesign -N` (lacks it, bounded redesign, N-point penalty), **no** (cannot run it: takes the full penalty when another engine reports it as a fit), `no` (cannot run it, no score effect; `anti S, no` for a reported anti-pattern), `-` (no effect) or `future` (a future-enhancement placeholder: not modelled yet, never a routing candidate). Penalty is the points lost on an engine that reports it as an anti-pattern, or on every other engine when one reports it as a fit.
+Each cell is what a query showing the pattern gets on that engine: `fit N` (the engine's analysis reports it, catalog score N), `fit (level)` (reported with a confidence level instead of a score), `anti S` (reported as an anti-pattern, severity S), `native` (has the capability, never penalised), `scan` (lacks it and runs the pattern as a scan: loses the pattern's penalty only on a query that crosses its scan threshold), `redesign -N` (lacks it, bounded redesign, N-point penalty), **no** (cannot run it: takes the full penalty when another engine reports it as a fit), `no` (cannot run it, no score effect; `anti S, no` for a reported anti-pattern), `-` (no effect) or `future` (a future-enhancement placeholder: not modelled yet, never a routing candidate). Penalty is the points lost on an engine that reports it as an anti-pattern, or on every other engine when one reports it as a fit.
 
 | Pattern | DynamoDB | DocumentDB | OpenSearch | ElastiCache | Aurora PostgreSQL | Aurora MySQL | Neptune (future) | Keyspaces (future) | Penalty | Capability | Triage signal | Detectors |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -88,6 +88,7 @@ Each cell is what a query showing the pattern gets on that engine: `fit N` (the 
 | [`single-access-pattern-table`](#single-access-pattern-table) | - | - | - | - | anti 0.5 | anti 0.5 | future | future | 15 | - | - | 1 |
 | [`standard-crud`](#standard-crud) | - | - | - | - | fit 60 | fit 60 | future | future | - | - | - | 1 |
 | [`stored-routine`](#stored-routine) | - | - | - | - | - | fit 70 | future | future | - | - | - | 1 |
+| [`substring-match`](#substring-match) | no | scan | native | no | native | scan | future | future | 20 | substring_index | - | 1 |
 | [`text_search`](#text_search) | - | - | - | - | - | - | future | future | 40 | - | text_search | none |
 | [`time-aggregation`](#time-aggregation) | - | - | fit 90 | - | - | - | future | future | - | - | - | 1 |
 | [`time-range-query`](#time-range-query) | - | - | fit 85 | - | - | - | future | future | - | - | time_range_filters | 1 |
@@ -654,6 +655,18 @@ Detected by `src.tools.analysis.aurora_mysql_analysis_tools:detect_mysql_specifi
 - No effect on: DynamoDB, DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
+### substring-match
+
+Detected by `src.agents.referee.substring_match:substring_matches`.
+Scan threshold: 1 calls per second and 100,000 table rows, both reached. A leading-wildcard LIKE reads every row of the table \(MySQL Reference Manual, Comparison of B-Tree and Hash Indexes: a B-tree serves LIKE only for a constant pattern that does not start with a wildcard\). At 1 call per second on 100,000 rows that is 100,000 rows read every second, the point where the analysis cost bands \(src/tools/analysis/scoring.py\) stop calling a query rare and a table small; below either, the scan is cheap enough to keep.
+
+- DocumentDB, scan: runs a leading-wildcard LIKE as an unanchored $regex, which reads every document; a text index serves word search with $text. Word search: create a text index on the field and query it with $text, which serves word search.
+- OpenSearch, native: serves a leading-wildcard match natively, with wildcard queries or an n-gram analyzer on the field.
+- Aurora PostgreSQL, native: indexes a leading-wildcard LIKE with a pg\_trgm trigram index \(GIN or GiST\), an extension to create \(the PostgreSQL documentation of pg\_trgm describes its index support for LIKE and ILIKE\). Word search: create the pg\_trgm extension and a GIN trigram index on the column \(CREATE EXTENSION pg\_trgm\), which serves this LIKE, word searches included; full-text search \(to\_tsvector\) also ranks word matches.
+- Aurora MySQL, scan: scans a leading-wildcard LIKE: FULLTEXT indexes are word-based and serve MATCH ... AGAINST, never LIKE \(MySQL Reference Manual, Full-Text Search Functions\). Word search: rewrite it as MATCH ... AGAINST over a FULLTEXT index on the column, which serves word search.
+- No effect on: DynamoDB, ElastiCache.
+- Not modelled yet (future enhancement): Neptune, Keyspaces.
+
 ### text_search
 
 No analysis reports this pattern today.
@@ -757,11 +770,11 @@ Detected by `src.tools.analysis.opensearch_analysis_tools:analyze_opensearch_use
 Exemption note: {engine} runs this search pattern natively: not penalized. OpenSearch is worth the move only when traffic, data size or search depth justify a dedicated search engine
 
 - DynamoDB, no: DynamoDB cannot run this pattern: a query another engine reports it for loses 40 points on DynamoDB.
-- DocumentDB, native: $regex expresses LIKE natively; a leading wildcard runs as an unindexed scan. Class score \(#728\): 75, the same built-in text-index operator shape Aurora PostgreSQL's native full text is rated at \(full-text-native, 75\); not a dedicated search engine.
+- DocumentDB, native: $regex expresses LIKE natively; a leading wildcard runs as a scan, scored by the substring-match pattern \(#493\). Class score \(#728\): 75, the same built-in text-index operator shape Aurora PostgreSQL's native full text is rated at \(full-text-native, 75\); not a dedicated search engine.
 - OpenSearch, fit 80 (os-02): LIKE/ILIKE wildcard queries on text columns. OpenSearch wildcard queries are more scalable than SQL LIKE on large datasets — no full-table scan.
 - ElastiCache, no: ElastiCache cannot run this pattern: a query another engine reports it for loses 40 points on ElastiCache.
-- Aurora PostgreSQL, native: LIKE/ILIKE is native SQL; pg\_trgm's GIN/GiST index also indexes a leading wildcard. Class score \(#728\): 75, Aurora PostgreSQL's own native full-text rating \(full-text-native, 75\).
-- Aurora MySQL, native: LIKE is native SQL; a leading wildcard runs as an unindexed scan. Class score \(#728\): 80, Aurora MySQL's own native full-text rating \(fulltext-search, 80\).
+- Aurora PostgreSQL, native: LIKE/ILIKE is native SQL; pg\_trgm's GIN/GiST index also indexes a leading wildcard \(the substring-match pattern, #493\). Class score \(#728\): 75, Aurora PostgreSQL's own native full-text rating \(full-text-native, 75\).
+- Aurora MySQL, native: LIKE is native SQL; a leading wildcard runs as a scan, scored by the substring-match pattern \(#493\). Class score \(#728\): 80, Aurora MySQL's own native full-text rating \(fulltext-search, 80\).
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
 ### window-function

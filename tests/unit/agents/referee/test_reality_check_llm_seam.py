@@ -726,7 +726,7 @@ class TestAFlagNeverBringsBackARemovedEngine:
                     {"signal": "complex_joins", "query_ids": join_ids},
                     {"signal": "text_search", "query_ids": os_ids},
                 ],
-                "query_capabilities": {qid: ["inverted_index"] for qid in os_ids},
+                "query_capabilities": {qid: ["text_pattern_match"] for qid in os_ids},
             },
             "collector_output": {
                 "queries": {

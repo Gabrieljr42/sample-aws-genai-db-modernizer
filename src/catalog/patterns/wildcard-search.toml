@@ -17,7 +17,7 @@ why = "DynamoDB cannot run this pattern: a query another engine reports it for l
 [engines.documentdb]
 kind = "native"
 supported = true
-why = "$regex expresses LIKE natively; a leading wildcard runs as an unindexed scan. Class score (#728): 75, the same built-in text-index operator shape Aurora PostgreSQL's native full text is rated at (full-text-native, 75); not a dedicated search engine."
+why = "$regex expresses LIKE natively; a leading wildcard runs as a scan, scored by the substring-match pattern (#493). Class score (#728): 75, the same built-in text-index operator shape Aurora PostgreSQL's native full text is rated at (full-text-native, 75); not a dedicated search engine."
 class_score = 75
 
 # Detection signals: like %, ilike %
@@ -42,13 +42,13 @@ why = "ElastiCache cannot run this pattern: a query another engine reports it fo
 [engines.aurora_postgresql]
 kind = "native"
 supported = true
-why = "LIKE/ILIKE is native SQL; pg_trgm's GIN/GiST index also indexes a leading wildcard. Class score (#728): 75, Aurora PostgreSQL's own native full-text rating (full-text-native, 75)."
+why = "LIKE/ILIKE is native SQL; pg_trgm's GIN/GiST index also indexes a leading wildcard (the substring-match pattern, #493). Class score (#728): 75, Aurora PostgreSQL's own native full-text rating (full-text-native, 75)."
 class_score = 75
 
 [engines.aurora_mysql]
 kind = "native"
 supported = true
-why = "LIKE is native SQL; a leading wildcard runs as an unindexed scan. Class score (#728): 80, Aurora MySQL's own native full-text rating (fulltext-search, 80)."
+why = "LIKE is native SQL; a leading wildcard runs as a scan, scored by the substring-match pattern (#493). Class score (#728): 80, Aurora MySQL's own native full-text rating (fulltext-search, 80)."
 class_score = 80
 
 [engines.neptune]

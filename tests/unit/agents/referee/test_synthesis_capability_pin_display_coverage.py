@@ -1,5 +1,5 @@
 """Every hard capability ``capability_registry`` can emit has a display string
-(#393 review): ``_CAPABILITY_PIN_DISPLAY`` had no entry for ``inverted_index`` or
+(#393 review): ``_CAPABILITY_PIN_DISPLAY`` had no entry for ``text_pattern_match`` or
 ``scan_engine``, so a query pinned to Aurora for either leaked the raw capability id
 into the resolved-risk text and the Aurora "Why" cell instead of reading as prose.
 """
@@ -31,8 +31,8 @@ class TestCapabilityPinDisplayCoverage:
 
     def test_text_search_capability_reads_as_prose(self) -> None:
         required = detect_required_capabilities("SELECT * FROM posts WHERE title LIKE '%foo%'", [])
-        assert "inverted_index" in required
-        assert _CAPABILITY_PIN_DISPLAY["inverted_index"] != "inverted_index"
+        assert "text_pattern_match" in required
+        assert _CAPABILITY_PIN_DISPLAY["text_pattern_match"] != "text_pattern_match"
 
     def test_window_function_capability_reads_as_prose(self) -> None:
         required = detect_required_capabilities(
@@ -53,11 +53,11 @@ class TestCapabilityPinDisplayCoverage:
         capability id that slipped past ``_CAPABILITY_PIN_DISPLAY`` unmapped."""
         reason = (
             "co-dependency group → aurora_mysql | [capability] dynamodb lacks required "
-            "capability: inverted_index, scan_engine"
+            "capability: text_pattern_match, scan_engine"
         )
         text = _capability_pin_reason([reason])
         assert text is not None
-        assert "inverted_index" not in text
+        assert "text_pattern_match" not in text
         assert "scan_engine" not in text
         assert "full-text or pattern search" in text
         assert "window or recursive queries" in text

@@ -32,12 +32,17 @@ Pattern fields:
 - ``penalty_aliases``: other spellings of the same penalty key.
 - ``exempt_note`` / ``redesign_note``: the decision-trace sentence for a ``native``
   exemption or a ``redesign`` penalty (``{engine}`` is the engine's display name).
+- ``scan_threshold``: for a pattern with ``scan`` entries, when the scan matters
+  (``min_calls_per_second`` and ``min_table_rows``, both reached) and the sourced ``why``
+  for those values. Only then does a ``scan`` engine lose ``penalty`` (#493).
 
 Engine entry fields (``[engines.<engine_id>]``, one per engine):
 
 - ``kind``: ``fit`` (the engine's analysis reports it as a fit), ``anti_pattern`` (as a
   concern), ``native`` (has ``capability``: never penalised), ``redesign`` (lacks it, has a
-  bounded redesign: a reduced ``penalty``), ``penalized`` (cannot run it: takes the full
+  bounded redesign: a reduced ``penalty``), ``scan`` (lacks it but runs the pattern as a
+  scan of every row: it loses the pattern's ``penalty`` only on a query that crosses the
+  pattern's ``scan_threshold``, #493), ``penalized`` (cannot run it: takes the full
   penalty when another engine reports it as a fit), ``unscored`` (no effect) or ``future``
   (the engine is a future-enhancement placeholder, ``status = "future"``: not modelled yet,
   never a routing candidate, ADR-031 Decision 9, #495). A future engine's entries are all
@@ -58,7 +63,8 @@ Engine entry fields (``[engines.<engine_id>]``, one per engine):
   pattern although its analysis does not report it, 0-100, with the source of the number
   in ``why``. Only the per-query access-pattern class scores read it
   (``src/catalog/access_classes.toml``, #728), so it changes no current score.
-- ``severity``: 0.0-1.0 (``anti_pattern``); ``guidance``: what to do about it;
+- ``severity``: 0.0-1.0 (``anti_pattern``); ``guidance``: what to do about it (on a
+  ``native`` or ``scan`` entry: the redesign a word search takes on that engine, #493);
   ``engine_hint``: the sentence of the description that names another engine (kept apart
   so report text can drop it); ``guidance_names_engine``: the guidance is an
   alternative-engine suggestion as a whole.
@@ -82,7 +88,7 @@ from src.shared.catalog.engines import CatalogError, engine_ids
 PATTERNS_DIR = Path(__file__).resolve().parents[2] / "catalog" / "patterns"
 
 PatternKind = Literal[
-    "fit", "anti_pattern", "native", "redesign", "penalized", "unscored", "future"
+    "fit", "anti_pattern", "native", "redesign", "scan", "penalized", "unscored", "future"
 ]
 # The seven per-engine catalogs the analysis tools read (Aurora PostgreSQL and Aurora MySQL
 # share ``aurora_common``; ElastiCache's analysis builds its patterns inline).
@@ -95,7 +101,7 @@ CatalogName = Literal[
     "aurora_mysql",
     "elasticache",
 ]
-Capability = Literal["acid_transactions", "text_search", "fuzzy_search"]
+Capability = Literal["acid_transactions", "text_search", "fuzzy_search", "substring_index"]
 Profile = Literal["search", "timeseries"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 
@@ -123,7 +129,8 @@ _KIND_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
         ),
     ),
     "redesign": (frozenset({"penalty"}), frozenset({"penalty"})),
-    "native": (frozenset(), frozenset({"class_score"})),
+    "scan": (frozenset(), frozenset({"guidance"})),
+    "native": (frozenset(), frozenset({"class_score", "guidance"})),
     "penalized": (frozenset(), frozenset()),
     "unscored": (frozenset(), frozenset({"class_score"})),
     "future": (frozenset(), frozenset()),
@@ -165,7 +172,7 @@ class EngineSupport(BaseModel):
             raise ValueError("a fit entry carries exactly one of score and confidence")
         if self.kind in ("penalized", "future") and self.supported:
             raise ValueError(f"a {self.kind} entry is never supported")
-        if self.kind in ("fit", "native", "redesign") and not self.supported:
+        if self.kind in ("fit", "native", "redesign", "scan") and not self.supported:
             raise ValueError(f"a {self.kind} entry is always supported")
         if (self.profile is not None) != (self.kind == "fit" and self.catalog == "opensearch"):
             raise ValueError("profile is required on an OpenSearch fit and allowed nowhere else")
@@ -190,6 +197,16 @@ _ALL_OPTIONAL = (
 )
 
 
+class ScanThreshold(BaseModel):
+    """When a ``scan`` entry's scan matters: a frequent query on a large table (#493)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    min_calls_per_second: float = Field(gt=0)
+    min_table_rows: int = Field(gt=0)
+    why: str = Field(min_length=1, pattern=_ONE_LINE)
+
+
 class PatternEntry(BaseModel):
     """One access-pattern type and how every engine treats it."""
 
@@ -203,6 +220,7 @@ class PatternEntry(BaseModel):
     penalty_aliases: tuple[str, ...] = ()
     exempt_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     redesign_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
+    scan_threshold: ScanThreshold | None = None
     engines: dict[str, EngineSupport]
 
     @model_validator(mode="after")
@@ -213,7 +231,7 @@ class PatternEntry(BaseModel):
         kinds = {engine: e.kind for engine, e in self.engines.items()}
         has_fit = "fit" in kinds.values()
         for engine, kind in kinds.items():
-            if kind in ("native", "redesign") and self.capability is None:
+            if kind in ("native", "redesign", "scan") and self.capability is None:
                 raise ValueError(f"{engine}: a {kind} entry needs the pattern's capability")
             if kind == "redesign":
                 reduced = self.engines[engine].penalty or 0
@@ -238,6 +256,11 @@ class PatternEntry(BaseModel):
             raise ValueError("an exempt_note needs a native entry")
         if self.redesign_note and "redesign" not in kinds.values():
             raise ValueError("a redesign_note needs a redesign entry")
+        has_scan = "scan" in kinds.values()
+        if has_scan != (self.scan_threshold is not None):
+            raise ValueError("a scan entry needs the pattern's scan_threshold, and only it does")
+        if has_scan and not self.penalty:
+            raise ValueError("a scan entry needs the pattern's penalty")
         return self
 
 
@@ -333,10 +356,13 @@ def catalog_entries(
 
 
 def anti_pattern_penalties() -> dict[str, int]:
-    """``query_scoring.ANTI_PATTERN_PENALTIES``: pattern type (and alias) to penalty."""
+    """``query_scoring.ANTI_PATTERN_PENALTIES``: pattern type (and alias) to penalty.
+
+    A pattern with a ``scan_threshold`` is not one: no analysis reports it, and its
+    penalty lands only through its threshold (``src.agents.referee.substring_match``)."""
     out: dict[str, int] = {}
     for entry in patterns():
-        if entry.penalty:
+        if entry.penalty and entry.scan_threshold is None:
             for key in (entry.id, *entry.penalty_aliases):
                 out[key] = entry.penalty
     return out
@@ -355,7 +381,7 @@ def capability_signal_engines() -> dict[str, frozenset[str]]:
     return {
         entry.id: capability_engines(entry.capability)
         for entry in patterns()
-        if entry.capability and entry.penalty
+        if entry.capability and entry.penalty and entry.scan_threshold is None
     }
 
 
@@ -371,6 +397,11 @@ def capability_redesign_penalties() -> dict[str, dict[str, int]]:
         if reduced:
             out[entry.id] = reduced
     return out
+
+
+def scan_engines(pattern_id: str) -> frozenset[str]:
+    """The engines that run ``pattern_id`` only as a scan (``scan`` entries)."""
+    return frozenset(e for e, s in pattern(pattern_id).engines.items() if s.kind == "scan")
 
 
 def capability_redesign_notes() -> dict[str, str]:

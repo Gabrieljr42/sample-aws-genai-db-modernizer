@@ -62,6 +62,8 @@ from sqlglot import exp
 from src.tools.sql.normalize import normalize_digest_text, quoted_mask
 from src.tools.sql.regex_facts import (
     TIMESTAMP_COLUMN_NAME_RE,
+    WORDS_RE,
+    WildcardLike,
     regex_aggregate_function_count,
     regex_fulltext_search,
     regex_group_by,
@@ -82,6 +84,7 @@ from src.tools.sql.regex_facts import (
     regex_top_n,
     regex_update_target_join,
     regex_wildcard_leading,
+    regex_wildcard_likes,
     regex_window_function,
     regex_windowed_aggregate,
 )
@@ -295,6 +298,10 @@ class SqlFacts:
         update_target_join: MySQL's multi-table ``UPDATE``, whose target itself joins
             (``UPDATE a JOIN b ON ... SET ...``). PostgreSQL's and SQL Server's
             ``UPDATE ... FROM ... JOIN`` is not one.
+        wildcard_likes: Each ``LIKE``/``ILIKE`` that makes ``wildcard_leading``
+            true, in order, with the column it tests and whether it is a word
+            search (:class:`~src.tools.sql.regex_facts.WildcardLike`, #493);
+            ``wildcard_leading`` is ``bool(wildcard_likes)``.
     """
 
     join_count: int
@@ -322,6 +329,7 @@ class SqlFacts:
     timestamp_column: bool = False
     json_access: bool = False
     update_target_join: bool = False
+    wildcard_likes: tuple[WildcardLike, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -618,6 +626,7 @@ def _regex_facts(sql: str, reason: FallbackReason, dialect: str) -> SqlFacts:
         has_aggregation=regex_has_aggregation(sql),
         has_subquery=regex_has_subquery(sql),
         wildcard_leading=regex_wildcard_leading(sql),
+        wildcard_likes=regex_wildcard_likes(sql),
         parsed_by="regex",
         fallback_reason=reason,
         dialect=dialect,
@@ -652,13 +661,19 @@ def _facts_from_statements(
     group_by = any(isinstance(node, exp.Group) for node in nodes)
     aggregate_function_count = sum(1 for node in nodes if _is_aggregate_function(node))
     kinds = {_text_search_kind(node) for node in nodes}
+    likes = tuple(
+        _wildcard_like(node)
+        for node in nodes
+        if isinstance(node, _LIKE_NODES) and _like_kind(node) == "leading_wildcard"
+    )
     windows = [node.this for node in nodes if isinstance(node, exp.Window)]
     return SqlFacts(
         join_count=join_count,
         has_joins=join_count > 0,
         has_aggregation=group_by or aggregate_function_count > 0,
         has_subquery=sum(1 for node in nodes if isinstance(node, exp.Select)) > 1,
-        wildcard_leading="leading_wildcard" in kinds,
+        wildcard_leading=bool(likes),
+        wildcard_likes=likes,
         parsed_by="sqlglot",
         fallback_reason=None,
         dialect=dialect,
@@ -785,6 +800,8 @@ def _starts_with_wildcard(pattern: exp.Expr | None) -> bool:
     while pattern is not None:
         if isinstance(pattern, exp.Literal):
             return bool(pattern.is_string and str(pattern.this).startswith("%"))
+        if isinstance(pattern, exp.National):  # SQL Server N'%...' (#493)
+            return str(pattern.this).startswith("%")
         if isinstance(pattern, exp.Paren | exp.DPipe | exp.Add):
             pattern = pattern.this
         elif isinstance(pattern, exp.Concat | exp.ConcatWs):
@@ -1078,6 +1095,29 @@ def _is_bind(node: exp.Expr) -> bool:
         and not node.table
         and bool(_POSITIONAL_PARAMETER_NAME_RE.fullmatch(node.name))
     )
+
+
+def _string_value(node: exp.Expr) -> str | None:
+    """The text of a string literal (``N'...'`` included), else None."""
+    if isinstance(node, exp.Literal) and node.is_string:
+        return str(node.this or "")
+    if isinstance(node, exp.National):
+        return str(node.this or "")
+    return None
+
+
+def _wildcard_like(node: exp.Expr) -> WildcardLike:
+    """One leading-wildcard ``LIKE``: its column and whether it is a word search
+    (:class:`~src.tools.sql.regex_facts.WildcardLike`)."""
+    column = node.this.name.lower() if isinstance(node.this, exp.Column) else None
+    pieces = _pattern_pieces(node.expression)
+    values = [_string_value(p) for p in pieces]
+    if len(pieces) == 1 and values[0] is not None:
+        value = values[0]
+        word = len(value) > 2 and value.endswith("%") and bool(WORDS_RE.match(value[1:-1]))
+    else:
+        word = len(pieces) == 3 and values[0] == "%" and _is_bind(pieces[1]) and values[2] == "%"
+    return WildcardLike(column=column, word_search=word)
 
 
 LikeKind = Literal["leading_wildcard", "prefix", "parameter", "other"]

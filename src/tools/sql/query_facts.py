@@ -46,9 +46,9 @@ from functools import cached_property, lru_cache
 from src.shared.sql_comments import strip_leading_comments
 from src.shared.unsupported_pattern import is_dedup_only_group_by
 from src.tools.sql.facade import AccessFacts, SqlFacts, query_readings
-from src.tools.sql.regex_facts import scan_sql
+from src.tools.sql.regex_facts import WildcardLike, scan_sql
 
-__all__ = ["QueryFacts", "query_facts", "scan_sql", "source_engine_of"]
+__all__ = ["QueryFacts", "WildcardLike", "query_facts", "scan_sql", "source_engine_of"]
 
 # ---------------------------------------------------------------------------
 # Parsed facts (#893). Each is the sqlglot facade's reading (``SqlFacts``),
@@ -644,6 +644,12 @@ class QueryFacts:
     def leading_wildcard_like(self) -> bool:
         """A ``LIKE``/``ILIKE`` whose pattern starts with ``%`` (``SqlFacts.wildcard_leading``)."""
         return self._has("like") and self._parsed.wildcard_leading
+
+    @cached_property
+    def wildcard_likes(self) -> tuple[WildcardLike, ...]:
+        """Each leading-wildcard ``LIKE``, with the column it tests and whether it is a
+        word search (``SqlFacts.wildcard_likes``, #493)."""
+        return self._parsed.wildcard_likes if self._has("like") else ()
 
     @cached_property
     def like_parameter(self) -> bool:

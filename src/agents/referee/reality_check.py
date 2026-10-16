@@ -40,6 +40,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable
 
 from src.agents.referee.aurora_choice import source_database_engine
+from src.agents.referee.capability_registry import triage_query_capabilities
 from src.agents.referee.move_ledger import MoveLedger, ledger_for
 from src.agents.referee.reality_check_floors import (
     NATIVE_TEXT_SEARCH_SOURCE_ENGINES,
@@ -183,7 +184,7 @@ def run_reality_check(
 
     # Load query capabilities (hard architectural requirements)
     if query_capabilities is None:
-        query_capabilities = triage.get("query_capabilities", {})
+        query_capabilities = triage_query_capabilities(triage)
 
     query_signals = _build_query_signals(signals)
     resolved_source_engine = (

@@ -126,6 +126,7 @@ def routed_fits(
     analysis_outputs: Mapping[str, Mapping],
     source_tables: Iterable[str] | None = None,
     source_engine: str = "",
+    schema_tables: Iterable[Mapping] | None = None,
 ) -> dict[str, RoutedFit]:
     """``{engine: RoutedFit}`` for every engine in ``analysis_outputs``; {} without assignment.
 
@@ -133,6 +134,9 @@ def routed_fits(
     ``tables_accessed`` are real tables; without it only the placeholders are
     dropped. ``source_engine`` (the collector's) is the dialect the scorer's
     exclusion gate reads each query's facts in, as at assignment (#893).
+    ``schema_tables`` (the collector's ``database_schema.tables``) gives the scorer
+    the row counts the substring-match scan penalty reads (#493), so the fit is the
+    resolver's own score there too.
     """
     if not assignment:
         return {}
@@ -155,6 +159,7 @@ def routed_fits(
         {
             "metadata": {"source_database": {"engine": source_engine}},
             "queries": {"query_patterns": list(query_map.values())},
+            "database_schema": {"tables": list(schema_tables or [])},
         },
     )
 

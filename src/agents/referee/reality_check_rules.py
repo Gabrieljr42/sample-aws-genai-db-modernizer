@@ -84,7 +84,7 @@ SPECIALIST_ABSORB_SIGNALS: dict[str, frozenset[str]] = {
     "opensearch": frozenset({"text_search", "aggregations"}),
 }
 SPECIALIST_ABSORB_CAPABILITIES: dict[str, frozenset[str]] = {
-    "opensearch": frozenset({"inverted_index"}),
+    "opensearch": frozenset({"text_pattern_match"}),
 }
 
 

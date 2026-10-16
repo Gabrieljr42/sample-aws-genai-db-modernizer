@@ -544,7 +544,7 @@ class TestAbsorptionBehaviorChanges:
         was ``"text_search_basic"``, a different string, so an exact-string
         comparison hard-excluded Aurora for a fit-0 candidate even though
         Aurora genuinely has basic full-text support (tsvector/FULLTEXT).
-        The new registry names that support ``inverted_index`` on both
+        The new registry names that support ``text_pattern_match`` on both
         Aurora engines (and, since #485, DocumentDB), so ``score_query_for_
         engine`` no longer gates them out.
 
@@ -564,7 +564,7 @@ class TestAbsorptionBehaviorChanges:
                 "tables_accessed": ["a"],
             }
         }
-        ctx = ScoringContext(query_capabilities={qid: ["inverted_index"]})
+        ctx = ScoringContext(query_capabilities={qid: ["text_pattern_match"]})
 
         for target in ("aurora_mysql", "aurora_postgresql"):
             result = _find_best_absorber_for_query(

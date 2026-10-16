@@ -18,6 +18,7 @@ LLM seam functions (for Skill Sync / external LLM integration):
 from datetime import UTC, datetime
 
 from src.agents.referee.aurora_choice import source_database_engine, source_database_version
+from src.agents.referee.capability_registry import triage_query_capabilities
 from src.agents.referee.migration_waves import build_migration_waves
 from src.agents.referee.summary_input_budget import apply_summary_input_budget, table_query_weights
 from src.agents.referee.synthesis_data import load_synthesis_data
@@ -686,7 +687,7 @@ def _query_traces(
         for q in patterns
         if isinstance(q, dict) and q.get("query_id")
     }
-    capabilities = (triage or {}).get("query_capabilities") or {}
+    capabilities = triage_query_capabilities(triage)
     digest = query_trace_digest(assignment, _read, version, texts, capabilities)
     return digest.model_dump(mode="json", by_alias=True)
 

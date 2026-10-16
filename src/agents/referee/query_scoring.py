@@ -38,8 +38,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
-from src.agents.referee.capability_registry import can_engine_serve_capability
+from src.agents.referee.capability_registry import (
+    can_engine_serve_capability,
+    triage_query_capabilities,
+)
 from src.agents.referee.engine_exclusions import check_exclusions
+from src.agents.referee.substring_match import scan_adjustments
 from src.contracts.analysis_output import ScoreBreakdown
 from src.shared.capability_labels import capability_label
 from src.shared.catalog.patterns import (
@@ -325,6 +329,36 @@ def build_anti_pattern_map(
     return penalties, notes
 
 
+def merge_substring_scan(
+    penalties: Mapping[tuple[str, str], int],
+    notes: Mapping[tuple[str, str], str],
+    collector: Mapping,
+    engines: Iterable[str],
+) -> tuple[dict[tuple[str, str], int], dict[tuple[str, str], str]]:
+    """``penalties``/``notes`` with the substring-match scan penalty merged in (#493).
+
+    The scan penalty and its notes come from one place
+    (:func:`src.agents.referee.substring_match.scan_adjustments`): a ``scan`` engine
+    loses the pattern's penalty on a leading-wildcard query whose scan matters, and
+    every engine the pattern describes gets its reason as a note. Merged by the same
+    "biggest penalty wins" rule as :func:`build_anti_pattern_map`: a bigger penalty
+    already on the pair keeps its own note; otherwise the substring-match note replaces
+    any zero-penalty exemption note (it is the more specific reason for this query).
+    """
+    merged_penalties = dict(penalties)
+    merged_notes = dict(notes)
+    scan_penalties, scan_notes = scan_adjustments(collector, engines)
+    for key, note in scan_notes.items():
+        existing = merged_penalties.get(key, 0)
+        scan = scan_penalties.get(key, 0)
+        if scan and scan >= existing:
+            merged_penalties[key] = scan
+            merged_notes[key] = note
+        elif not existing:
+            merged_notes[key] = note
+    return merged_penalties, merged_notes
+
+
 # ---------------------------------------------------------------------------
 # The whole per-query, per-engine score (ADR-031 Decision 2 steps 2-5, #549)
 # ---------------------------------------------------------------------------
@@ -409,7 +443,7 @@ class ScoringContext:
         whatever ``TriageSignal``\\ s ``triage`` itself already has (``[]``
         when it has none either) -- the same collector-signal-aware
         detection a real ``query_capabilities`` entry would carry
-        (``complex_joins``, ``inverted_index``, ...), from the SAME signals
+        (``complex_joins``, ``text_pattern_match``, ...), from the SAME signals
         this ``triage`` already decided apply, never a fresh re-detection
         that could find a different signal set than what is actually in
         this ``triage``. Using a bare-text guess with no signals at all here
@@ -422,8 +456,13 @@ class ScoringContext:
         collector output on hand.
         """
         anti_pattern_map, anti_pattern_notes = build_anti_pattern_map(analysis_outputs)
+        if collector is not None:
+            anti_pattern_map, anti_pattern_notes = merge_substring_scan(
+                anti_pattern_map, anti_pattern_notes, collector, analysis_outputs.keys()
+            )
         if triage is not None and "query_capabilities" in triage:
-            query_capabilities: Mapping[str, list[str]] = dict(triage["query_capabilities"] or {})
+            # Legacy capability ids mapped (a triage.json saved before #493).
+            query_capabilities: Mapping[str, list[str]] = triage_query_capabilities(triage)
         elif collector is not None:
             from src.agents.referee.triage import TriageSignal, detect_query_capabilities
 

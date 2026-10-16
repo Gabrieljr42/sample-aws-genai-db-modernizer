@@ -396,7 +396,7 @@ class TestOneFactBothGates:
         the ``text_search`` fact the capability gate and triage's text_search signal
         read (#893): an excluded query always needs the inverted index."""
         excluded = check_exclusions("q", sql, "dynamodb") is not None
-        needs_text_search = "inverted_index" in detect_required_capabilities(sql, [])
+        needs_text_search = "text_pattern_match" in detect_required_capabilities(sql, [])
         facts = query_facts(sql)
         assert excluded is facts.leading_wildcard_like
         assert needs_text_search is facts.text_search
