@@ -31,6 +31,17 @@ def test_runs_when_labels_change_and_on_every_push_to_the_pr():
     assert {"opened", "reopened", "synchronize", "labeled", "unlabeled"} <= types
 
 
+def test_reports_on_a_merge_group_too():
+    if not GITHUB_SOURCE:
+        assert not WORKFLOW.exists()
+        return
+    # A required check must report in the merge queue, where there is no pull
+    # request payload: the label steps read none of it unguarded and the
+    # concurrency group falls back to the ref.
+    assert "merge_group" in _triggers(_workflow())
+    assert "github.ref" in _workflow()["concurrency"]["group"]
+
+
 def test_only_the_newest_run_per_pr_counts():
     if not GITHUB_SOURCE:
         assert not WORKFLOW.exists()

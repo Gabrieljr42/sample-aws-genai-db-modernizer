@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Prepares for GitHub's merge queue: a required check must report on the
+  # queue's merge group too. None of the jobs below read pull request
+  # context, so they run unchanged. Harmless while the queue is off.
+  merge_group:
 
 permissions:
   contents: read
