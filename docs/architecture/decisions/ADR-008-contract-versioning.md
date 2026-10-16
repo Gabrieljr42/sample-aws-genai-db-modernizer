@@ -130,17 +130,35 @@ output = CollectorOutput(
 
 ## Decision
 
-We will implement **Semantic Versioning for Contracts** with:
+We will implement **Semantic Versioning for Contracts** with seven decisions.
 
-1. **Version field in all contracts** (e.g., `contract_version: "1.0"`)
-2. **Separate agent version field** (e.g., `collector_version: "2.3.1"`)
-3. **Semantic versioning** (MAJOR.MINOR format for contracts)
-   - MAJOR: Breaking changes (incompatible)
-   - MINOR: Backward-compatible additions
-4. **Version adapters** for MAJOR version migrations
-5. **Optional fields by default** (prefer additions over changes)
-6. **Deprecation warnings** (not immediate removal)
-7. **Single deployment version** (no multi-version deployments)
+### 1. Every contract carries a `contract_version`
+
+Every contract an agent or script writes or reads carries `contract_version` in MAJOR.MINOR form (for example `"1.0"`), so a reader can tell which structure it holds.
+
+### 2. The agent version is a separate field
+
+The version of the agent code (for example `collector_version: "2.3.1"`) is its own field and never stands in for the contract version. A writer takes the contract version from the model's default, not from a literal of its own.
+
+### 3. Contract versions are MAJOR.MINOR, and a shape change moves the version
+
+MAJOR means a breaking change (incompatible). MINOR means a backward-compatible addition. A change to a contract's shape, including the values of its published enums and ids, moves the version by the bump the Versioning Rules below require.
+
+### 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR
+
+*Amended (2026-10-16, #970):* the original decision called for version adapters and a version detector. None of that was built, and no contract has shipped a MAJOR bump, so there is nothing to adapt. A reader that loads a stored artifact accepts any MINOR of the MAJOR it was written for and refuses a different MAJOR with a clear error naming the contract, the stored version and the supported MAJOR. An adapter is written only when a contract first ships a MAJOR bump, in the same change that bumps it.
+
+### 5. Optional fields by default
+
+Prefer additions over changes: a new field is optional with a default, so older artifacts still load and the bump is MINOR. Forward compatibility (a newer artifact read by older code) relies on unknown fields being ignored, so a contract read back across versions does not set `extra="forbid"` without a decision recorded here.
+
+### 6. Deprecate before removing
+
+A field is marked deprecated, with a warning in code, for at least one MAJOR version before the next MAJOR removes it.
+
+### 7. A single version is deployed at a time
+
+There are no multi-version deployments. A version mismatch only arises when a job resumes after an upgrade or a rollback.
 
 ### Agent Version Support Requirements
 
@@ -148,7 +166,7 @@ We will implement **Semantic Versioning for Contracts** with:
 
 - ✅ Include `contract_version` field in output
 - ✅ Include agent-specific version field (e.g., `collector_version`)
-- ✅ Support reading previous contract versions (via adapters)
+- ✅ Read any MINOR of the MAJOR it supports and refuse another MAJOR (Decision 4)
 - ✅ Produce current contract version in output
 
 **Example:**
@@ -449,107 +467,9 @@ class CollectorOutput(BaseModel):
 
 ---
 
-## Version Adapters
+## Reading Older Artifacts
 
-### Adapter Pattern for MAJOR Version Migrations
-
-```python
-# src/contracts/adapters/collector_output_adapter.py
-
-from typing import Dict, Any
-
-class CollectorOutputAdapter:
-    """
-    Adapts CollectorOutput between versions.
-    """
-
-    @staticmethod
-    def adapt(data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Adapt collector output to latest version.
-
-        Args:
-            data: Raw collector output data
-
-        Returns:
-            Adapted data (latest version)
-        """
-        version = data.get("contract_version", "1.0")
-
-        # v1.x → v2.0 migration
-        if version.startswith("1."):
-            data = CollectorOutputAdapter._migrate_v1_to_v2(data)
-
-        return data
-
-    @staticmethod
-    def _migrate_v1_to_v2(data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Migrate v1.x to v2.0.
-
-        Changes:
-        - Rename 'schema' → 'database_schema'
-        """
-        if "schema" in data and "database_schema" not in data:
-            data["database_schema"] = data.pop("schema")
-
-        data["contract_version"] = "2.0"
-        return data
-```
-
-### Using Adapters
-
-```python
-# Load checkpoint with version adaptation
-def load_checkpoint(job_id: str, checkpoint_key: str) -> Any:
-    """
-    Load checkpoint with automatic version adaptation.
-    """
-    raw_data = storage.load(job_id, checkpoint_key)
-
-    # Detect contract type
-    if "collector_version" in raw_data:
-        # CollectorOutput
-        adapted_data = CollectorOutputAdapter.adapt(raw_data)
-        return CollectorOutput(**adapted_data)
-
-    elif "analyses" in raw_data:
-        # AnalysisOutput
-        adapted_data = AnalysisOutputAdapter.adapt(raw_data)
-        return AnalysisOutput(**adapted_data)
-
-    # ... other contract types
-```
-
----
-
-## Version Detection
-
-### Automatic Version Detection
-
-```python
-# src/contracts/version_detector.py
-
-def detect_contract_version(data: Dict[str, Any]) -> str:
-    """
-    Detect contract version from data.
-
-    Args:
-        data: Raw contract data
-
-    Returns:
-        Version string (e.g., "1.2")
-    """
-    # Explicit version field (preferred)
-    if "contract_version" in data:
-        return data["contract_version"]
-
-    # Fallback: Infer from fields (for old contracts without version field)
-    if "query_patterns" in data:
-        return "1.1"  # Has query_patterns → v1.1+
-
-    return "1.0"  # Default to v1.0
-```
+The first version of this ADR described `src/contracts/adapters/`, a `src/contracts/version_detector.py` module and a `load_checkpoint` that adapted old data. None of them exist, and Decision 4 replaces them: a reader accepts any MINOR of the same MAJOR and refuses a different MAJOR. When a contract first ships a MAJOR bump, its migration (for example renaming a field) is written as an adapter in the same change, with a test that loads an artifact saved under the old MAJOR.
 
 ---
 
@@ -592,7 +512,7 @@ output = CollectorOutput(**checkpoint_data)
 # Works! query_patterns ignored (graceful degradation)
 ```
 
-**Note:** Pydantic's `extra="ignore"` allows forward compatibility.
+**Note:** Pydantic's `extra="ignore"` allows forward compatibility, but only for a contract that does not set `extra="forbid"` (Decision 5; #976 decides this per contract).
 
 ---
 
@@ -648,11 +568,7 @@ class CollectorOutputAdapter:
 
 ## Contract Version Matrix
 
-| Contract | Current Version | Agent Versions Producing It | Breaking Changes | Next MAJOR |
-|----------|----------------|------------------------------|------------------|------------|
-| CollectorOutput | 1.2 | 2.3.x, 2.4.x | None planned | 2.0 (TBD) |
-| AnalysisOutput | 1.0 | 1.0.x, 1.1.x | None planned | 2.0 (TBD) |
-| ModernizationReport | 1.0 | 1.0.x | None planned | 2.0 (TBD) |
+The current version of every contract is in `tests/contract/schema_snapshot.json` (the `version` key of each entry), which `tests/contract/test_schema_snapshot.py` keeps equal to the code. This ADR does not repeat it, so it cannot go stale.
 
 **Key Points:**
 
@@ -660,6 +576,23 @@ class CollectorOutputAdapter:
 - Agent version changes frequently (bug fixes, optimizations)
 - Contract version changes only when structure changes
 - Deployment uses single agent version (all agents same version)
+
+---
+
+## Enforcement
+
+Each decision names the guard test that fails when the code stops following it. `tests/unit/docs/test_adr_enforcement.py` fails when a decision has no row here, or when a row names a test file, class or function that does not exist. A decision with no guard yet says `none yet` and the issue that will add one; it is never left blank.
+
+| Decision | Enforced by |
+|---|---|
+| 1. Every contract carries a `contract_version` | none yet -- #972 (contracts written to disk with none)<br>none yet -- #973 (the DynamoDB decision trace is untyped) |
+| 2. The agent version is a separate field | none yet -- #974 (writers still use a literal) |
+| 3. Contract versions are MAJOR.MINOR, and a shape change moves the version | `tests/contract/test_schema_snapshot.py::test_schema_snapshot_file_matches_a_fresh_rebuild`<br>`tests/unit/scripts/test_contract_schema_snapshot.py`<br>none yet -- #975 (published enum and id values) |
+| 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR | none yet -- #971 |
+| 5. Optional fields by default | `tests/unit/scripts/test_contract_schema_snapshot.py`<br>none yet -- #976 (`extra="forbid"` per contract) |
+| 6. Deprecate before removing | none yet -- #969 (no guard planned: removing a field already needs a MAJOR bump under Decision 3) |
+| 7. A single version is deployed at a time | none yet -- #969 (a deployment property; no code guard planned) |
+| Amendment 2026-10-16 (Decision 4, #970): adapters only when a MAJOR bump ships | none yet -- #971 |
 
 ---
 
@@ -774,6 +707,7 @@ Release v2.0.0 (user-facing, breaking changes)
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-02-02 | Architecture Team | Initial decision |
+| 1.1 | 2026-10-16 | Architecture Team | Numbered the decisions, added the Enforcement table, replaced the adapter decision with accept-MINOR/refuse-MAJOR readers (#970), replaced the version matrix with a pointer |
 
 ---
 
