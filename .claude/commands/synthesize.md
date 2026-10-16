@@ -53,9 +53,9 @@ Read files with the Read tool (use `offset`/`limit` for large files). Search fil
    uv run python scripts/run_report.py --job-id {job_id} --db {database_name}
    ```
 
-   Prints `status`, `files`, `errors` and `warnings`. On `partial` tell the user
-   what `errors` and `warnings` say, then continue; on `error` (no synthesis
-   report, or rendering failed) stop and report it.
+   Prints `status`, `files`, `deliverables_dir`, `deliverables`, `errors` and
+   `warnings`. On `partial` tell the user what `errors` and `warnings` say, then
+   continue; on `error` (no synthesis report, or rendering failed) stop and report it.
 
 5. **Present report**
    Show:
@@ -76,6 +76,9 @@ Read files with the Read tool (use `offset`/`limit` for large files). Search fil
 
 6. **Update state**
    Set `phase_status.synthesis` = "complete"
-   Tell user where the deliverables are, using the `files` paths the render step printed
-   (under `./artifacts/`): the decision report and analysis report (open in a browser),
-   the engineering report (Markdown), and `summary-executive-report.pdf`.
+   Tell user where the deliverables are: the `deliverables_dir` the render step printed,
+   <!-- deliverables-list -->`./artifacts/{database_name}/{job_id}/deliverables/`, holds
+   `assessment.pdf` (executive summary), `engineering-report.md` (engineering report),
+   `assessment-data.json` (Assessment Data, JSON), `decision-report.html` and
+   `analysis-report.html` (open in a browser), and `index.md`, which lists each file,
+   who it is for and the assignment version<!-- /deliverables-list -->.

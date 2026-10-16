@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from pydantic import BaseModel
@@ -52,6 +53,32 @@ def test_report_has_all_deliverables(run: PipelineResult) -> None:
         ("engineering-report", ".md"),
     ):
         assert any(f"_{kind}_" in n and n.endswith(ext) for n in names), (kind, names)
+
+
+@pytest.mark.deterministic
+def test_deliverables_folder_holds_exactly_the_documented_set(run: PipelineResult) -> None:
+    """One folder with the customer files and nothing else (no model I/O, no
+    traces, no versioned folders); the names are the documented ones."""
+    folder = run.job_dir() / "deliverables"
+    assert run.report["deliverables_dir"] == str(folder.resolve())
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "analysis-report.html",
+        "assessment-data.json",
+        "assessment.pdf",
+        "decision-report.html",
+        "engineering-report.md",
+        "index.md",
+    ]
+    assert all(p.is_file() and p.stat().st_size > 0 for p in folder.iterdir())
+    index = (folder / "index.md").read_text(encoding="utf-8")
+    version = run.report["report"].split("/synthesis/v", 1)[1].split("/", 1)[0]
+    assert f"Assignment version: v{version}" in index
+    # Branding: the only product name in the folder is "Database Modernizer
+    # Assessment Tool" (the English verb "transforms" in report prose is fine).
+    for p in folder.iterdir():
+        if p.suffix in (".md", ".html", ".json"):
+            text = p.read_text(encoding="utf-8")
+            assert not re.search(r"AWS Transform|\bATX\b", text), p.name
 
 
 def test_contract_artifacts_validate(run: PipelineResult) -> None:

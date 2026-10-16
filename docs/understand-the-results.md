@@ -16,12 +16,22 @@ Collect through Reality Check never needs a model. Schema Design and the Synthes
 
 ## The deliverables
 
-- **Decision report (HTML):** the top-level recommendation, ranking, and reasoning, for someone deciding whether to proceed.
-- **Engineering report (Markdown):** the same facts with implementation detail (schemas, migration waves, risks) for the team that will build it.
-- **Executive summary (PDF/PPTX deck):** a short deck version of the decision report for stakeholders.
-- **Interactive analysis report (HTML):** per-engine analysis detail, including the path of each query through the context graph.
+Every run puts its deliverables in one folder, `artifacts/<db>/<job>/deliverables/`, under the same names every time:
 
-All four are rendered from one `report.json` by `src/report`, so a changed fact changes in every deliverable at once.
+<!-- deliverables-list -->
+| File | What it is | Who it is for |
+| --- | --- | --- |
+| `assessment.pdf` | Executive summary (PDF): a short version of the decision report | Executives and stakeholders deciding whether to proceed |
+| `engineering-report.md` | Engineering report (Markdown): the same facts with implementation detail (schemas, migration waves, risks) | The team that will build it |
+| `assessment-data.json` | Assessment Data (JSON): the complete machine-readable assessment the other files are rendered from | Tools and scripts |
+| `decision-report.html` | Decision report (HTML): the top-level recommendation, ranking, and reasoning | Decision makers |
+| `analysis-report.html` | Interactive analysis report (HTML): per-engine analysis detail, including the path of each query through the context graph | Architects and engineers |
+| `index.md` | This list for the run, with the assignment version the files come from | Anyone opening the folder |
+
+`deliverables/` always holds the latest assignment version. The job's other folders hold the pipeline's working files (per-phase outputs, versioned assignments, model inputs and traces), which you don't need to read the assessment.
+<!-- /deliverables-list -->
+
+All of them are rendered from one `report.json` by `src/report`, so a changed fact changes in every deliverable at once. The local UI shows the same report interactively.
 
 ## How to read an assignment
 

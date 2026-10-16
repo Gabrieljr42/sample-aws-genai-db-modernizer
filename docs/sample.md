@@ -13,14 +13,21 @@ Everything else makes the same decisions it would for you: Collect, Triage, Anal
 
 ## The deliverables
 
-<ul id="sample-deliverables">
-  <li><a href="decision-report.html">Decision report (HTML)</a>: the top-level recommendation, ranking, and reasoning, for someone deciding whether to proceed.</li>
-  <li><a href="engineering-report.html">Engineering report (HTML)</a> (also available as <a href="engineering-report.md">Markdown</a>): the same facts with implementation detail, for the team that will build it, including migration waves, per-engine query placement, and risks (a real run also adds the per-engine schemas).</li>
-  <li><a href="analysis-report.html">Interactive analysis report (HTML)</a>: per-engine analysis detail, including the path of each query through the context graph.</li>
-  <li><a href="executive-summary.pdf">Executive summary (PDF)</a>: a short, stakeholder-facing version of the decision report.</li>
-</ul>
+These are the files a run writes to its deliverables folder, under the same names:
 
-All four are rendered from the same underlying report, so a fact in one matches the same fact in every other.
+<!-- deliverables-list -->
+<p>Every run writes them to <code>artifacts/&lt;db&gt;/&lt;job&gt;/deliverables/</code>.</p>
+<ul id="sample-deliverables">
+  <li><a href="assessment.pdf">Executive summary (PDF)</a>, <code>assessment.pdf</code>: a short, stakeholder-facing version of the decision report.</li>
+  <li><a href="engineering-report.html">Engineering report (HTML)</a> (the run writes it as <a href="engineering-report.md">Markdown</a>, <code>engineering-report.md</code>): the same facts with implementation detail, for the team that will build it, including migration waves, per-engine query placement, and risks (a real run also adds the per-engine schemas).</li>
+  <li><a href="assessment-data.json">Assessment Data (JSON)</a>, <code>assessment-data.json</code>: the complete machine-readable assessment the other files are rendered from.</li>
+  <li><a href="decision-report.html">Decision report (HTML)</a>, <code>decision-report.html</code>: the top-level recommendation, ranking, and reasoning, for someone deciding whether to proceed.</li>
+  <li><a href="analysis-report.html">Interactive analysis report (HTML)</a>, <code>analysis-report.html</code>: per-engine analysis detail, including the path of each query through the context graph.</li>
+  <li><a href="index.md">Folder index</a>, <code>index.md</code>: each file, who it is for, and the assignment version.</li>
+</ul>
+<!-- /deliverables-list -->
+
+All of them are rendered from the same underlying report, so a fact in one matches the same fact in every other.
 
 !!! info "Building this page locally"
     The links above resolve only after both of these have run, in order:

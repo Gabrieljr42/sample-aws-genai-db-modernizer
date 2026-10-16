@@ -70,6 +70,101 @@ class Deliverable:
     publish: bool  # hand to the delivery channel
 
 
+@dataclass(frozen=True)
+class FolderEntry:
+    """One customer file in ``artifacts/<db>/<job>/deliverables/``."""
+
+    name: str  # the Deliverable.name it is copied from
+    filename: str  # stable on-disk name, the same in every job
+    title: str
+    audience: str
+
+
+# The customer deliverables folder: one per job, holding the latest assignment
+# version's files under stable names. This list is the single definition the
+# local render step, the folder index and every docs/command list follow
+# (tests/unit/docs/test_deliverables_lists.py). Intermediate artifacts (model
+# I/O, traces, versioned folders) never go here.
+DELIVERABLES_DIR = "deliverables"
+INDEX_FILENAME = "index.md"
+FOLDER_ENTRIES: tuple[FolderEntry, ...] = (
+    FolderEntry(
+        "executive-summary-pdf",
+        "assessment.pdf",
+        "Executive summary (PDF)",
+        "Executives and stakeholders deciding whether to proceed",
+    ),
+    FolderEntry(
+        "engineering-report",
+        "engineering-report.md",
+        "Engineering report (Markdown)",
+        "The team that will build it: schemas, migration waves, risks",
+    ),
+    FolderEntry(
+        "assessment-data",
+        "assessment-data.json",
+        "Assessment Data (JSON)",
+        "Tools and scripts: the complete machine-readable assessment",
+    ),
+    FolderEntry(
+        "decision-report",
+        "decision-report.html",
+        "Decision report (HTML)",
+        "Decision makers: recommendation, ranking and reasoning",
+    ),
+    FolderEntry(
+        "analysis-report",
+        "analysis-report.html",
+        "Interactive analysis report (HTML)",
+        "Architects and engineers: per-engine detail and each query's path",
+    ),
+)
+FOLDER_FILENAMES: tuple[str, ...] = (
+    *(e.filename for e in FOLDER_ENTRIES),
+    INDEX_FILENAME,
+)
+
+
+def render_folder_index(
+    database_name: str,
+    job_id: str,
+    assignment_version: int,
+    written: Sequence[FolderEntry],
+) -> str:
+    """The ``index.md`` of the deliverables folder: each file, what it is, who
+    it is for, and the assignment version they were rendered from."""
+    rows = "\n".join(f"| `{e.filename}` | {e.title} | {e.audience} |" for e in written)
+    lines = [
+        f"# Database Modernizer Assessment Tool: deliverables for {database_name}",
+        "",
+        f"Job: {job_id}",
+        f"Assignment version: v{assignment_version}",
+        "",
+        "| File | What it is | Who it is for |",
+        "|---|---|---|",
+        rows,
+        "",
+        "Every file is rendered from the same assessment data, so a figure in one "
+        "matches the same figure in the others.",
+    ]
+    missing = [e for e in FOLDER_ENTRIES if e not in written]
+    if missing:
+        lines += [
+            "",
+            "Not rendered this time (see the render step's errors): "
+            + ", ".join(f"`{e.filename}`" for e in missing)
+            + ".",
+        ]
+    lines += [
+        "",
+        "The other folders of the job hold the pipeline's working files (per-phase "
+        "outputs, versioned assignments, model inputs and traces). You don't need "
+        "them to read the assessment.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 @dataclass
 class DeliverableSet:
     items: list[Deliverable] = field(default_factory=list)

@@ -96,6 +96,11 @@ logger = logging.getLogger(__name__)
 # named the same in every job, so it is recognisable in the Artifacts panel and
 # across engagements.
 FILENAME = "summary-executive-report.pptx"
+# Where the summary slide sends readers for the detail: real files in the job's
+# deliverables folder (src.report.deliverables.FOLDER_ENTRIES), by their names.
+SEE_ALSO_NOTE = (
+    "Full detail in the deliverables folder: decision-report.html and engineering-report.md."
+)
 
 TEMPLATE = Path(__file__).parent / "assets" / "template.pptx"
 
@@ -1528,7 +1533,7 @@ def slide_summary(prs, f):
             f"({fmt_num(e['cached_call_share'], 1)}% of calls) and owns none of the workload. "
             for e in caches
         )
-        + "Full detail in the Decision and Engineering reports."
+        + SEE_ALSO_NOTE
         + (
             f" {SHARED_TABLES_NOTE}"
             if any(SHARED_TABLES_LABEL in str(e["scope"]) for e in f["engines"])

@@ -298,10 +298,14 @@ def _run_all_in_process(monkeypatch, tmp_path, capsys) -> list[dict]:
 def test_all_status_lines_name_real_artifacts(monkeypatch, tmp_path, capsys):
     status = _run_all_in_process(monkeypatch, tmp_path, capsys)
     by_phase = {s["phase"]: s for s in status}
-    assert list(by_phase) == [*ASSESSMENT_PHASES, "schema_design", "synthesis"]
+    assert list(by_phase) == [*ASSESSMENT_PHASES, "schema_design", "synthesis", "report"]
     for path in _printed_paths(status):
         assert path.startswith("artifacts/wordpress/"), path
         assert (tmp_path / path).is_file(), path
+    # --all ends by rendering the deliverables (cwd-relative, like the rest).
+    folder = by_phase["report"]["deliverables_dir"]
+    assert folder.startswith("artifacts/wordpress/") and folder.endswith("/deliverables"), folder
+    assert (tmp_path / folder / "index.md").is_file()
 
     version = by_phase["synthesis"]["assignment_version"]
     assert by_phase["synthesis"]["status"] == "complete"
