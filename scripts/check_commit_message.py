@@ -79,6 +79,11 @@ DEFAULT_COMMENT_CHAR = "#"
 RULE_EFFECTIVE_DATE = datetime(2026, 10, 13, 0, 0, 0, tzinfo=UTC)
 
 _FIXUP_PREFIXES = ("fixup!", "squash!", "amend!")
+
+# Dependabot writes its own commit messages (long body, no issue trailer); the
+# range check skips them by author email. GitHub's bot address cannot be used
+# by a person, so a name that only looks like a bot is still checked.
+_SKIPPED_BOT_AUTHORS = {"49699333+dependabot[bot]@users.noreply.github.com": "Dependabot"}
 _MERGE_SUBJECT = re.compile(r"^Merge\b")
 _REVERT_SUBJECT = re.compile(r'^Revert ".*"$')
 _REVERT_BODY_LINE = re.compile(r"^This reverts commit [0-9a-f]{4,40}\.$", re.IGNORECASE)
@@ -305,20 +310,25 @@ def check_range(rev_range: str, *, run: GitRunner = _run_git) -> list[str]:
     ``is_merge_message`` -- a merge commit already in history has no
     reliable "Merge ..." subject guarantee, but it always has 2+ parents,
     which ``--no-merges`` checks directly. Commits committed before
-    ``RULE_EFFECTIVE_DATE`` are grandfathered in: skipped, with one line
-    printed per skipped commit, rather than counted as violations.
+    ``RULE_EFFECTIVE_DATE`` are grandfathered in, and commits by a bot in
+    ``_SKIPPED_BOT_AUTHORS`` are skipped: one line is printed per skipped
+    commit, rather than counting it as a violation.
     """
     comment_char = get_comment_char(run=run)
-    log_output = run(["log", "--no-merges", "--format=%H%x1f%cI", rev_range])
+    log_output = run(["log", "--no-merges", "--format=%H%x1f%cI%x1f%ae", rev_range])
 
     violations: list[str] = []
     for line in log_output.splitlines():
         if not line.strip():
             continue
-        sha, _, committer_date_iso = line.partition("\x1f")
+        sha, committer_date_iso, author_email = (line.split("\x1f") + ["", ""])[:3]
         committer_date = datetime.fromisoformat(committer_date_iso)
         if committer_date < RULE_EFFECTIVE_DATE:
             print(f"skipped {sha[:8]} (before the commit-message rule)")
+            continue
+        bot = _SKIPPED_BOT_AUTHORS.get(author_email)
+        if bot:
+            print(f"skipped {sha[:8]} ({bot} commit)")
             continue
         message = run(["log", "-1", "--format=%B", sha])
         for violation in check_single_message(message, comment_char=comment_char):

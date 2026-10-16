@@ -347,9 +347,11 @@ def _fake_git_log(
     *,
     comment_char: str | None = None,
     committer_dates: dict[str, str] | None = None,
+    author_emails: dict[str, str] | None = None,
 ):
     """A fake ``run`` seam: ``comment_char=None`` simulates ``core.commentChar`` unset."""
     committer_dates = committer_dates or {}
+    author_emails = author_emails or {}
 
     def run(args):
         if args[:2] == ["config", "--get"]:
@@ -358,7 +360,9 @@ def _fake_git_log(
             return comment_char + "\n"
         if args[:2] == ["log", "--no-merges"]:
             lines = [
-                f"{sha}\x1f{committer_dates.get(sha, _AFTER_CUTOFF)}" for sha in shas_to_messages
+                f"{sha}\x1f{committer_dates.get(sha, _AFTER_CUTOFF)}"
+                f"\x1f{author_emails.get(sha, 'dev@example.com')}"
+                for sha in shas_to_messages
             ]
             return "\n".join(lines) + "\n"
         assert args[0] == "log" and args[1] == "-1"
@@ -489,3 +493,36 @@ def test_main_with_range_reports_failures(monkeypatch, capsys) -> None:
 def test_main_requires_either_file_or_range() -> None:
     with pytest.raises(SystemExit):
         mod.main([])
+
+
+_DEPENDABOT = "49699333+dependabot[bot]@users.noreply.github.com"
+_DEPENDABOT_MESSAGE = (
+    "chore(deps): bump mcp from 1.28.1 to 1.30.0\n\n"
+    + "\n".join(f"Release notes line {i}." for i in range(12))
+    + "\n"
+)
+
+
+def test_check_range_skips_dependabot_commits(capsys) -> None:
+    run = _fake_git_log(
+        {"bot123456": _DEPENDABOT_MESSAGE}, author_emails={"bot123456": _DEPENDABOT}
+    )
+    assert mod.check_range("origin/main..HEAD", run=run) == []
+    assert "skipped bot12345 (Dependabot commit)" in capsys.readouterr().out
+
+
+def test_check_range_still_checks_a_human_commit_next_to_a_dependabot_one() -> None:
+    run = _fake_git_log(
+        {"bot123456": _DEPENDABOT_MESSAGE, "humansha1": _msg("feat(x): add thing", trailer="")},
+        author_emails={"bot123456": _DEPENDABOT},
+    )
+    violations = mod.check_range("origin/main..HEAD", run=run)
+    assert len(violations) == 1 and violations[0].startswith("humansha")
+
+
+def test_a_human_cannot_skip_the_check_with_a_bot_like_name() -> None:
+    run = _fake_git_log(
+        {"humansha1": _msg("feat(x): add thing", trailer="")},
+        author_emails={"humansha1": "dependabot@example.com"},
+    )
+    assert len(mod.check_range("origin/main..HEAD", run=run)) == 1
