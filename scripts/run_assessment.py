@@ -18,6 +18,9 @@ Usage:
     # Full pipeline with Bedrock LLM (schema design + synthesis via orchestrator):
     uv run python scripts/run_assessment.py --file <collector_file> --all -y --llm-mode bedrock
 
+--all ends by rendering every deliverable (scripts/run_report.py's step) into
+artifacts/<db>/<job>/deliverables/, in --llm-mode none and bedrock alike.
+
 Outputs JSON to stdout after each phase (one line per phase for UI/orchestrator progress).
 Updates .modernizer-state.json after each phase so the UI can track progress.
 
@@ -884,6 +887,44 @@ def _synthesis_status(store, job_id: str, db: str) -> dict:
 
 
 # ============================================================
+# Phase: Report (render the deliverables)
+# ============================================================
+def phase_report(artifact_root: str, job_id: str, db: str, llm_mode: str) -> dict:
+    """Render every deliverable, the same step ``/synthesize`` runs
+    (``scripts/run_report.py``), into ``artifacts/<db>/<job>/deliverables/``.
+
+    In ``external`` mode synthesis is not final yet (Claude Code writes the
+    summary, then ``run_synthesis.py --finalize``), so rendering waits for
+    ``/synthesize``. A failed render is an error; a partial one is reported and
+    the run still completes.
+    """
+    _banner("REPORT")
+    if llm_mode == "external":
+        status = {
+            "status": "skipped",
+            "reason": (
+                "llm_mode=external: synthesis awaits its summary; /synthesize "
+                "finalizes it and runs scripts/run_report.py"
+            ),
+        }
+        _output("report", status)
+        return status
+    from scripts import run_report
+
+    result = run_report.run(job_id, db, artifact_root, None)
+    if result["status"] == "error":
+        _error("report", result["message"])
+    status = {
+        k: result[k] for k in ("status", "deliverables_dir", "errors", "warnings") if k in result
+    }
+    if result.get("deliverables_dir"):
+        status["deliverables_dir"] = display_path(result["deliverables_dir"])
+        _log_artifact("report", status["deliverables_dir"])
+    _output("report", status)
+    return status
+
+
+# ============================================================
 # Main
 # ============================================================
 def main() -> None:
@@ -1140,6 +1181,12 @@ def _run(args) -> None:  # type: ignore[no-untyped-def]
         _start_phase("synthesis")
         phase_synthesis(store, job_id, db_name, args.llm_mode)
         state["phase_status"]["synthesis"] = "complete"
+        _write_state(state)
+
+        # The same render step /modernize runs, so a CLI or Bedrock run ends
+        # with the deliverables, not only report.json.
+        _start_phase("report")
+        phase_report(args.artifact_root, job_id, db_name, args.llm_mode)
         state["current_phase"] = "done"
         _write_state(state)
 

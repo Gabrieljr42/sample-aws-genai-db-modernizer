@@ -173,7 +173,12 @@ Local runs write under `artifacts/<db>/<job>/` (`ARTIFACT_DIR`, default
   shadow (#728, ADR-031 Decision 14 Amendment 5); routing does not read it
 - `reality-check/` (`llm_input.json`, `output.json`)
 - `schema-<engine>/v<N>/schema_output.json`, `synthesis/v<N>/report.json`
-  plus the rendered deliverables, keyed on the assignment version
+  plus a per-version copy of the rendered files, keyed on the assignment version
+- `deliverables/`: the customer folder `scripts/run_report.py` fills for the
+  latest version, with stable names and an `index.md`; the one list of its
+  files is `FOLDER_ENTRIES` in `src/report/deliverables.py`, and
+  `tests/unit/docs/test_deliverables_lists.py` keeps every docs/command list
+  in step with it. Model I/O and traces never go there
 - `decisions/` (recorded approvals), `_logs/` (script logs)
 
 `artifacts/.trash/` (outside any job folder): job folders being deleted by

@@ -20,6 +20,8 @@ Claude Code is the main way to run the tool, but the pipeline itself is a set of
 
     Schema design and the executive summary need a model, so `--llm-mode none` stops after Reality Check (schema design is always skipped in this mode: every schema designer needs a model).
 
+    Add `--all -y` to go on through Synthesis: schema design is skipped, the executive summary is fixed deterministic text, and the run ends by rendering every deliverable (see [Where the deliverables land](#where-the-deliverables-land)).
+
 === "Amazon Bedrock"
 
     For production use, automation, or running without Claude Code:
@@ -35,6 +37,8 @@ Claude Code is the main way to run the tool, but the pipeline itself is a set of
     1. Configure AWS credentials (`aws configure`, environment variables, or `aws sso login`).
     2. Make sure the account can invoke the Anthropic models this pipeline uses: Claude Sonnet (Reality Check validation and Synthesis), Claude Opus (Schema Design) and Claude Haiku (answer validation). Most Bedrock model access is enabled by default; Anthropic models need a use-case form, submitted once per account (select the model in the Bedrock console's model catalog, or call `PutUseCaseForModelAccess`). See [Request access to models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html).
     3. Re-run the command above.
+
+    With `--all` the run ends by rendering every deliverable (see [Where the deliverables land](#where-the-deliverables-land)).
 
     Each model call has a named role in `src/shared/models.py`, which also builds request settings valid for the model's family. Override a role's model with an environment variable (the first one set wins):
 
@@ -64,6 +68,22 @@ Claude Code is the main way to run the tool, but the pipeline itself is a set of
     ```
 
     Then open <http://localhost:3000>. The local API only answers requests addressed to `localhost`, `127.0.0.1`, or `::1`; set `MODERNIZER_ALLOWED_HOSTS` to reach it under another host name.
+
+## Where the deliverables land
+
+`run_assessment.py --all` (in `--llm-mode none` and `bedrock` alike) ends with the same render step `/modernize` runs, `scripts/run_report.py`. It writes the deliverables into one folder, under the same names every time:
+
+<!-- deliverables-list -->
+`artifacts/<db>/<job>/deliverables/` holds `assessment.pdf` (executive summary), `engineering-report.md` (engineering report), `assessment-data.json` (Assessment Data, JSON), `decision-report.html` (decision report), `analysis-report.html` (interactive analysis report), and `index.md`, which lists who each file is for and the assignment version.
+<!-- /deliverables-list -->
+
+To render them again for a finished job, for example after an edit made a new assignment version:
+
+```bash
+uv run python scripts/run_report.py --job-id <job_id> --db <db_name>
+```
+
+The folder always holds the latest assignment version. `--assignment-version N` renders an older version next to its own report and leaves the folder as it is. See [Understand the results](understand-the-results.md) for what each file shows.
 
 ## Analyzing your own database
 

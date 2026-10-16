@@ -126,6 +126,17 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     assert "schema design skipped (llm_mode=none)" in log
     # Synthesis still produced its deterministic report.
     (report_path,) = job_dir.glob("synthesis/v*/report.json")
+    # ... and --all rendered every deliverable into deliverables/, like /modernize.
+    (report_line,) = [line for line in lines if line.get("phase") == "report"]
+    assert report_line["status"] in ("complete", "partial"), report_line
+    assert {p.name for p in (job_dir / "deliverables").iterdir()} == {
+        "assessment.pdf",
+        "engineering-report.md",
+        "assessment-data.json",
+        "decision-report.html",
+        "analysis-report.html",
+        "index.md",
+    }
 
     # The progression records the explicit skip, not a completed design.
     progression = json.loads((artifacts / ".meta" / f"{state['job_id']}.json").read_text())
@@ -368,6 +379,8 @@ def test_state_records_complete_schema_design_when_an_engine_has_output(
     monkeypatch.setattr(LocalOrchestrator, "_run_schema_design", design_one)
     monkeypatch.setattr(LocalOrchestrator, "_run_post_schema_routing", lambda self, *a: None)
     monkeypatch.setattr(LocalOrchestrator, "_run_synthesis", lambda self, *a: None)
+    # Synthesis is stubbed (no report.json), so there is nothing to render.
+    monkeypatch.setattr(run_assessment, "phase_report", lambda *a: {"status": "skipped"})
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         sys,

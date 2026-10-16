@@ -172,3 +172,14 @@ def test_every_page_carries_the_disclaimer_once(run: PipelineResult) -> None:
         assert text.count(DISCLAIMER) == 1, f"page {n}: {text.count(DISCLAIMER)} footers"
         assert re.search(r"© \d{4} " + re.escape(DISCLAIMER), text), f"page {n}"
         assert not BRANDING.search(text), f"page {n}"
+
+
+def test_summary_slide_points_at_files_in_the_deliverables_folder(run: PipelineResult) -> None:
+    """The PDF's "see also" names real files in deliverables/, unclipped."""
+    from src.report.pptx_report import SEE_ALSO_NOTE
+
+    summary = _normalize(_reader(run).pages[1].extract_text())
+    assert _normalize(SEE_ALSO_NOTE) in summary
+    folder = run.job_dir() / "deliverables"
+    for name in ("decision-report.html", "engineering-report.md"):
+        assert (folder / name).is_file(), name

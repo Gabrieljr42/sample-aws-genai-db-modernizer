@@ -6,7 +6,7 @@ too slow and heavy for a unit test. These tests only check what build_sample
 does with the paths it gets back: it must never touch the themed
 `sample/index.html` MkDocs already rendered from docs/sample.md, it must
 fail fast if that file is missing, and it must copy each recognized
-deliverable under its stable name.
+file of the run's deliverables folder under the same name.
 
 This suite must pass with only the `dev` extra installed (that is what
 `ci/test.sh` installs, and it runs with `--fail-on-skip`), so it never
@@ -42,25 +42,23 @@ class _FakePipelineResult:
 
 
 def _make_job_paths(tmp_path: Path) -> list[str]:
-    job_dir = tmp_path / "artifacts" / "wordpress" / "docs-sample"
-    job_dir.mkdir(parents=True)
+    """The run's deliverables folder, as run_report.py reports it."""
+    folder = tmp_path / "artifacts" / "wordpress" / "docs-sample" / "deliverables"
+    folder.mkdir(parents=True)
 
-    decision = job_dir / "2026-01-01-decision-report.html"
-    decision.write_text("<html><body>decision</body></html>", encoding="utf-8")
-
-    engineering = job_dir / "2026-01-01-engineering-report.md"
-    engineering.write_text("# Engineering report\n\nSome **content**.\n", encoding="utf-8")
-
-    analysis = job_dir / "2026-01-01-analysis-report.html"
-    analysis.write_text("<html><body>analysis</body></html>", encoding="utf-8")
-
-    pdf = job_dir / "summary-executive-report.pdf"
-    pdf.write_bytes(b"%PDF-1.4 fake pdf bytes")
-
-    deck = job_dir / "2026-01-01-deck.pptx"
-    deck.write_bytes(b"fake pptx bytes")
-
-    return [str(decision), str(engineering), str(analysis), str(pdf), str(deck)]
+    files = {
+        "decision-report.html": b"<html><body>decision</body></html>",
+        "engineering-report.md": b"# Engineering report\n\nSome **content**.\n",
+        "analysis-report.html": b"<html><body>analysis</body></html>",
+        "assessment.pdf": b"%PDF-1.4 fake pdf bytes",
+        "assessment-data.json": b"{}",
+        "index.md": b"# index",
+        # Not a documented deliverable: never published even if listed.
+        "llm_input.json": b"{}",
+    }
+    for name, content in files.items():
+        (folder / name).write_bytes(content)
+    return [str(folder / name) for name in files]
 
 
 @pytest.fixture
@@ -76,7 +74,7 @@ def _patch_run_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     paths = _make_job_paths(tmp_path)
 
     def _fake_run_pipeline(sample: str, artifact_root: Path, job_id: str) -> _FakePipelineResult:
-        return _FakePipelineResult(job_id=job_id, steps={"report": {"paths": paths}})
+        return _FakePipelineResult(job_id=job_id, steps={"report": {"deliverables": paths}})
 
     monkeypatch.setattr(build_docs_sample, "run_pipeline", _fake_run_pipeline)
 
@@ -118,10 +116,11 @@ def test_build_sample_copies_deliverables_under_stable_names(
     )
     assert (dest / "engineering-report.md").exists()
     assert (dest / "analysis-report.html").exists()
-    assert (dest / "executive-summary.pdf").read_bytes() == b"%PDF-1.4 fake pdf bytes"
-    # The editable deck is deliberately not published.
-    assert not (dest / "2026-01-01-deck.pptx").exists()
-    assert not list(dest.glob("*.pptx"))
+    assert (dest / "assessment.pdf").read_bytes() == b"%PDF-1.4 fake pdf bytes"
+    assert (dest / "assessment-data.json").exists()
+    assert (dest / "index.md").exists()
+    # Only the documented set: model I/O never reaches the site.
+    assert not (dest / "llm_input.json").exists()
     for p in result["files"]:
         assert Path(p).name != "index.html"
 

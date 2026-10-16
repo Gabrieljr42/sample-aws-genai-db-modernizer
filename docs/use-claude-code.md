@@ -28,7 +28,7 @@ Use `/modernize docs/examples/wordpress/wordpress-collection.json --mode chat` f
 | `/assign` | Resolves query-to-engine assignments |
 | `/reality-check` | Consolidates under-committed engines and validates with a model |
 | `/design-schema` | Designs target schemas per engine (needs a model) |
-| `/synthesize` | Produces the final report: decision report, engineering report, executive PDF/deck |
+| `/synthesize` | Produces the final report and renders the deliverables into `artifacts/<db>/<job>/deliverables/` (see [Understand the results](understand-the-results.md#the-deliverables)) |
 
 Each command is defined in `.claude/commands/` and reads the job state from `.modernizer-state.json`, so you can run them out of order to re-do a single phase after changing an earlier decision.
 

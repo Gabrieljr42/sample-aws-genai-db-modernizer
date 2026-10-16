@@ -14,12 +14,14 @@ links, not inline HTML `<a href>` tags). This script never writes or
 touches ``<site-dir>/sample/index.html`` (#364); it only adds files
 alongside the one MkDocs already rendered there.
 
-Deliverables are copied under stable names (``decision-report.html``, not the
-per-job, date-stamped filename ``formatting.provenance`` gives each run), so a
-link to the sample report survives a rebuild. The engineering report, the one
-deliverable rendered as Markdown rather than HTML, is also rendered to
-``engineering-report.html`` for in-browser reading; the ``.md`` source stays
-available too, for anyone who wants to copy it elsewhere.
+The files are the run's ``artifacts/<db>/<job>/deliverables/`` folder, copied
+as is: the same stable names every run gets (``assessment.pdf``,
+``decision-report.html``, ... -- ``src.report.deliverables.FOLDER_ENTRIES``), so a
+link to the sample report survives a rebuild and the site lists exactly what a
+real run hands over. The engineering report, the one deliverable rendered as
+Markdown rather than HTML, is also rendered to ``engineering-report.html`` for
+in-browser reading; the ``.md`` source stays available too, for anyone who wants
+to copy it elsewhere.
 
 No preview image is generated here: the ``docs`` extra only installs mkdocs
 and mkdocs-material, neither of which can rasterize the executive summary
@@ -48,28 +50,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
+from src.report.deliverables import FOLDER_FILENAMES  # noqa: E402
 from tests.e2e.pipeline import run_pipeline  # noqa: E402
-
-# (filename substring to match against each rendered path, stable name to copy it
-# to). "decision-report"/"engineering-report"/"analysis-report" come from the
-# per-job filename stem (formatting.provenance), which changes every run; the
-# executive summary has a fixed name (pdf_report.FILENAME) shared across every
-# job. The editable .pptx deck (pptx_report.FILENAME, stage-only, not published
-# per render_deliverables) is deliberately not in this list -- it is not
-# copied. These stable names are also the ones docs/sample.md links to.
-_DELIVERABLES: list[tuple[str, str]] = [
-    ("decision-report", "decision-report.html"),
-    ("engineering-report", "engineering-report.md"),
-    ("analysis-report", "analysis-report.html"),
-    ("summary-executive-report.pdf", "executive-summary.pdf"),
-]
-
-
-def _stable_target(filename: str) -> str | None:
-    for needle, stable_name in _DELIVERABLES:
-        if needle in filename:
-            return stable_name
-    return None
 
 
 def _render_engineering_html(md_path: Path, dest: Path) -> Path | None:
@@ -128,20 +110,18 @@ def build_sample(site_dir: Path, sample: str = "wordpress", job_id: str = "docs-
     with tempfile.TemporaryDirectory(prefix="modernizer-docs-sample-") as tmp:
         artifact_root = Path(tmp) / "artifacts"
         result = run_pipeline(sample, artifact_root, job_id=job_id)
-        paths = [Path(p) for p in result.report.get("paths", [])]
+        # The run's deliverables folder (run_report.py), already under stable names.
+        paths = [Path(p) for p in result.report.get("deliverables", [])]
 
         copied: list[Path] = []
         engineering_md: Path | None = None
         for p in paths:
-            if not p.exists():
+            if not p.exists() or p.name not in FOLDER_FILENAMES:
                 continue
-            stable_name = _stable_target(p.name)
-            if stable_name is None:
-                continue  # e.g. the editable .pptx deck -- not published
-            target = dest / stable_name
+            target = dest / p.name
             shutil.copyfile(p, target)
             copied.append(target)
-            if stable_name == "engineering-report.md":
+            if p.name == "engineering-report.md":
                 engineering_md = target
 
         if engineering_md is not None:
