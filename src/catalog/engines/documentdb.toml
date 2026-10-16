@@ -11,7 +11,6 @@ system_of_record = true
 ui = "#1d8102"
 ui_badge = "green"
 report_badge = "#0c7838"
-deck = "#00E500"
 
 [pricing]
 base_monthly = 200

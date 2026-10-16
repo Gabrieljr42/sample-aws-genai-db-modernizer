@@ -100,7 +100,7 @@ class TestLoaderIsStrict:
             pytest.param(lambda t: t.replace('"key_value"', '"kv"'), id="bad-role"),
             pytest.param(lambda t: t.replace('"#123456"', '"blue"'), id="bad-hex"),
             pytest.param(lambda t: t.replace('ui_badge = "blue"', 'ui_badge = "pink"'), id="badge"),
-            pytest.param(lambda t: t + 'deck = "#12345"\n', id="short-hex"),
+            pytest.param(lambda t: t.replace('"#123456"', '"#12345"'), id="short-hex"),
             pytest.param(lambda t: t + "[extra]\nx = 1\n", id="unknown-table"),
             pytest.param(lambda t: t.replace('"key_value"', '"cache"'), id="cache-claims-to-own"),
         ],
@@ -350,19 +350,6 @@ class TestConstantsAreTheCatalogsView:
             "neptune": "#7048e8",
             "keyspaces": "#8250df",
         }
-
-    def test_deck_accents(self) -> None:
-        from src.report import pptx_report as deck
-
-        assert deck.ENGINE_COLOR == {
-            "aurora_postgresql": deck.BLUE,
-            "elasticache": deck.PURPLE,
-            "documentdb": deck.GREEN,
-            "dynamodb": deck.YELLOW,
-            "opensearch": deck.ORANGE,
-            "aurora_mysql": deck.PINK,
-        }
-        assert set(deck.ENGINE_LABEL) == set(deck.ENGINE_COLOR)
 
 
 class TestGeneratedUiModule:

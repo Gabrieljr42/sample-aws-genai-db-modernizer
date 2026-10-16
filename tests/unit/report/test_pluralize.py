@@ -1,7 +1,7 @@
 """Pluralisation helper (issue #206).
 
 The executive summary deck printed "1 session store queries": every count+noun
-string in ``pptx_report.py`` and the report renderers built its noun with a fixed
+string in the old deck renderer and the report renderers built its noun with a fixed
 plural (or a one-off ``"" if n == 1 else "s"`` at a couple of call sites),
 disagreeing on the rule and getting at least one of them wrong. One helper,
 ``formatting.plural_noun``, now carries the English count-agreement rule; every
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.report import pptx_report, renderers
+from src.report import renderers
 
 
 class TestPluralNoun:
@@ -65,56 +65,4 @@ class TestPluralVerb:
         assert (
             f"2 risks {renderers.plural_verb(2, 'sits', 'sit')} on dynamodb alone."
             == "2 risks sit on dynamodb alone."
-        )
-
-
-class TestSessionStoreRegression:
-    """The exact bug reported in #206: 'PDF says "1 session store queries"'."""
-
-    @pytest.mark.parametrize(
-        ("count", "expected"),
-        [
-            (0, "0 session store queries in the whole workload"),
-            (1, "1 session store query in the whole workload"),
-            (2, "2 session store queries in the whole workload"),
-        ],
-    )
-    def test_evidence_text_pluralises_query_correctly(self, count: int, expected: str) -> None:
-        thinnest = {"count": count, "name": "session_store"}
-        assert pptx_report._evidence_text(thinnest) == expected
-
-    def test_evidence_text_falls_back_when_no_signal(self) -> None:
-        assert pptx_report._evidence_text(None) == "limited supporting evidence"
-
-
-class TestWorstEngineSentenceVerbAgreement:
-    """#206 follow-up regression: the verb must agree with the count sitting
-    on the worst engine (the sentence's subject), not with the sentence's
-    other number (the total CRITICAL/HIGH risk count across every engine,
-    #270)."""
-
-    def test_singular_subject_takes_sits_even_when_total_is_plural(self) -> None:
-        sentence = pptx_report._worst_engine_sentence(("dynamodb", 1), 5)
-        assert sentence == "1 of the 5 CRITICAL/HIGH risks sits on DynamoDB alone."
-
-    def test_plural_subject_takes_sit(self) -> None:
-        sentence = pptx_report._worst_engine_sentence(("dynamodb", 2), 5)
-        assert sentence == "2 of the 5 CRITICAL/HIGH risks sit on DynamoDB alone."
-
-    def test_both_counts_singular(self) -> None:
-        sentence = pptx_report._worst_engine_sentence(("dynamodb", 1), 1)
-        assert sentence == "1 of the 1 CRITICAL/HIGH risk sits on DynamoDB alone."
-
-
-class TestRootCauseSentenceDeterminerAndVerb:
-    def test_singular_uses_the_not_all(self) -> None:
-        assert (
-            pptx_report._root_cause_sentence(1, "data model")
-            == "the 1 CRITICAL/HIGH risk is data model"
-        )
-
-    def test_plural_uses_all(self) -> None:
-        assert (
-            pptx_report._root_cause_sentence(3, "data model")
-            == "all 3 CRITICAL/HIGH risks are data model"
         )

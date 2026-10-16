@@ -31,7 +31,7 @@ from typing import Any
 
 import pytest
 
-from src.report import architecture, pptx_report, renderers
+from src.report import architecture, renderers
 
 FIXTURE = Path(__file__).parent / "fixtures" / "discourse_merged_wave_report.json"
 
@@ -77,10 +77,6 @@ def test_no_deliverable_total_exceeds_the_source_table_count(report: dict[str, A
     assert tile_n <= source_total
     assert tile_n == migrated_total
 
-    facts = pptx_report.derive(report, {})
-    assert facts["migrated"] <= source_total
-    assert facts["migrated"] == migrated_total
-
     md = renderers.render_engineering_report_md(report)
     # The engineering report's own per-engine Scope-equivalent (the roadmap
     # wave card) must also never claim more tables than exist.
@@ -88,7 +84,7 @@ def test_no_deliverable_total_exceeds_the_source_table_count(report: dict[str, A
         assert int(m.group(1)) <= source_total
 
 
-def test_decision_report_and_deck_agree_on_the_split(report: dict[str, Any]) -> None:
+def test_decision_report_and_architecture_rows_agree_on_the_split(report: dict[str, Any]) -> None:
     """The two per-engine Scope cells, read off the rendered decision report
     HTML, must match the deck's own per-engine figures -- the
     "deliverables agree" invariant, specifically for the merged wave."""
@@ -109,41 +105,6 @@ def test_decision_report_and_deck_agree_on_the_split(report: dict[str, Any]) -> 
     assert int(dynamo_row.group(1)) == 118
     assert int(doc_row.group(1)) == 82
 
-    facts = pptx_report.derive(report, {})
-    deck_rows = {e["engine"]: e for e in facts["engines"]}
-    assert deck_rows["dynamodb"]["scope"] == "118 source tables"
-    assert deck_rows["documentdb"]["scope"] == "82 source tables"
-
-
-def test_deck_card_shows_the_owned_vs_kept_in_sync_split(report: dict[str, Any]) -> None:
-    """#568 review round 2 (Important 1): the deck/PDF lost the owned vs.
-    kept-in-sync split because the gate text that carries it is clipped to
-    90 characters by ``_wave_card_text``. The split must be a structured
-    line the card never truncates. Rendered end to end (``slide_sequencing``
-    on a real deck, reading actual shape text), not just checked at the
-    ``derive()``/field level, because the round-1 claim that the deck
-    already showed this split was never actually verified by rendering --
-    and it did not.
-    """
-    facts = pptx_report.derive(report, {})
-    merged = next(w for w in facts["waves"] if w["names"] == "DynamoDB + DocumentDB")
-    assert merged["sync_summary"] == (
-        "DynamoDB moves 108 tables; DocumentDB moves 73 tables. "
-        "Kept in sync from Aurora PostgreSQL: 19 tables."
-    )
-
-    prs = pptx_report.open_deck()
-    slide = pptx_report.slide_sequencing(prs, facts)
-    rendered = [
-        "".join(run.text for run in para.runs)
-        for shape in slide.shapes
-        if shape.has_text_frame
-        for para in shape.text_frame.paragraphs
-    ]
-    rendered = [t for t in rendered if t]
-    assert any("DynamoDB moves 108 tables" in t for t in rendered), rendered
-    assert any("DocumentDB moves 73 tables" in t for t in rendered), rendered
-    assert any("Kept in sync from Aurora PostgreSQL: 19 tables" in t for t in rendered), rendered
-    # The gate's own clipped prose never has to carry the split alone, but
-    # it is still present alongside the new structured line.
-    assert any(t.startswith("Gate: DynamoDB:") for t in rendered), rendered
+    rows = {e["engine"]: e for e in architecture._architecture_engines(report)}
+    assert rows["dynamodb"]["scope"] == "118 source tables"
+    assert rows["documentdb"]["scope"] == "82 source tables"

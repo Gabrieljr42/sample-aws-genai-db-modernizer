@@ -11,15 +11,11 @@ and ``AuroraMySQL`` -- no space, wrong internal casing -- which then leaked into
 "Resolved by the assignment" section of the engineering report (#221) once that
 section started naming engines (``src.report.engineering_report``).
 
-``src.report.pptx_report.ENGINE_LABEL`` had the correct names
+The old per-renderer engine label table had the correct names
 (``"Aurora MySQL"``, ``"ElastiCache"``, ...) all along, for the six engines it
-covers, plus three this module covers that it doesn't (``neptune``, ``keyspaces``,
-``aurora``). This module is *not* imported from ``src.report.renderers`` (``pptx_report.py``
-imports from ``renderers``, so importing ``pptx_report`` back from a module
-``renderers.py`` depends on would be a cycle) -- the dependency runs the other way:
-``pptx_report.ENGINE_LABEL`` is now an alias built from ``ENGINE_DISPLAY_NAMES``
-here, restricted to the six engines the deck covers, kept under its old name
-because other modules and tests still import it directly (#239).
+covered, plus three this module covers that it didn't (``neptune``, ``keyspaces``,
+``aurora``). This module is the single source: every renderer reads it, and it is
+*not* imported from ``src.report.renderers``, which would make a cycle (#239).
 """
 
 from __future__ import annotations

@@ -203,26 +203,3 @@ def test_the_resolvers_own_fallback_reaches_both_reports() -> None:
     assert "Keep it on Aurora MySQL, or redesign it. For DocumentDB: this is session" in html
     assert "For DynamoDB: this is session" in html
     assert "| `q1` | Aurora MySQL |" in md
-
-
-class TestDeckAndInteractiveReport:
-    """The deck/PDF state the same queries, as #503 and #629 did."""
-
-    def test_the_deck_adds_a_card_with_the_stored_count(self, report) -> None:
-        from src.report import pptx_report
-
-        f = pptx_report.derive(report, {})
-        card = next(
-            d for d in f["decisions"] if d["question"] == "Keep the queries on a fallback engine?"
-        )
-        assert card["badge"] == "1 query"
-        assert "Queries on a fallback engine (1 query)" in card["against"]
-        assert "assignment review" in card["action"]
-
-    @pytest.mark.parametrize("rows", [None, []])
-    def test_no_deck_card_without_any(self, rows) -> None:
-        from src.report import pptx_report
-
-        f = pptx_report.derive(_report(rows), {})
-        questions = [d["question"] for d in f["decisions"]]
-        assert "Keep the queries on a fallback engine?" not in questions

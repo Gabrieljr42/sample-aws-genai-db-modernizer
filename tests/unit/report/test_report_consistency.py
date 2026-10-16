@@ -2,10 +2,10 @@
 of those risks (issue #210).
 
 The decision report, the engineering report and the executive summary deck
-(PDF/PPTX) must all report the same risk totals for the same ``report.json``.
+(PDF) must all report the same risk totals for the same ``report.json``.
 Before #201, the decision/engineering reports filtered out risks with no body
 text (``report_facts.risk_has_content``) before counting, while
-``pptx_report.derive`` counted every risk in ``risk_assessment.risks``
+the old deck renderer counted every risk in ``risk_assessment.risks``
 unfiltered. On the wordpress evidence run that combination showed "9
 migration risks identified" in the decision report and 12 in the PDF.
 
@@ -36,7 +36,7 @@ import pytest
 
 from src.agents.referee.synthesis_data import EngineArtifacts, SynthesisData
 from src.agents.referee.synthesis_report import build_risk_assessment
-from src.report import pptx_report, renderers
+from src.report import renderers
 from src.shared import report_facts
 
 FIXTURE = Path(__file__).parent / "fixtures" / "wordpress_report.json"
@@ -123,14 +123,15 @@ class TestSharedRiskFilter:
         md = renderers.render_engineering_report_md(report)
         assert f"## Risk register ({n})" in md
 
-    def test_pptx_derive_risk_count_matches_filtered_risks(self, report: dict) -> None:
-        """The executive summary deck (and, by construction, its PDF rendering)
-        must count the same filtered risk list as the two text reports."""
-        n = len(renderers.filtered_risks(report))
-        facts = pptx_report.derive(report, {})
-        assert len(facts["risks"]) == n
+    def test_pdf_risk_count_matches_filtered_risks(self, report: dict) -> None:
+        """The PDF report prints the engineering report's risk register, so it must
+        count the same filtered risk list as the two text reports."""
+        from tests.unit.report.pdf_text import pdf_text
 
-    def test_all_three_deliverables_agree(self, report: dict) -> None:
+        n = len(renderers.filtered_risks(report))
+        assert f"Risk register ({n})" in pdf_text(report)
+
+    def test_decision_and_engineering_reports_agree(self, report: dict) -> None:
         """The regression this guards: before #201/#210 this was 9 / 9 / 12."""
         html_n = int(
             re.search(
@@ -142,5 +143,4 @@ class TestSharedRiskFilter:
                 r"## Risk register \((\d+)\)", renderers.render_engineering_report_md(report)
             ).group(1)
         )
-        pptx_n = len(pptx_report.derive(report, {})["risks"])
-        assert html_n == md_n == pptx_n == len(renderers.filtered_risks(report)) == 12
+        assert html_n == md_n == len(renderers.filtered_risks(report)) == 12

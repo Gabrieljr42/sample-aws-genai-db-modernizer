@@ -19,11 +19,9 @@ from __future__ import annotations
 
 import copy
 import re
-from pathlib import Path
 from typing import Any
 
 from src.contracts.synthesis_output import ReportFacts, SynthesisOutputContract
-from src.report import pptx_report
 from src.report.decision_report import render_decision_report_html
 from src.report.engine_choices import reroute_summary
 from src.report.engineering_report import render_engineering_report_md
@@ -152,7 +150,6 @@ def test_renderers_read_the_stored_facts_not_their_own_copy() -> None:
     report["facts"]["tables_migrate"] = 42
     html = render_decision_report_html(report)
     assert _decision_tile(html, "Tables migrate") == "42"
-    assert pptx_report.derive(report, {})["migrated"] == 42
 
 
 # --------------------------------------------------------------------------
@@ -183,14 +180,6 @@ def test_581_every_deliverable_shows_the_tile_figure_in_the_wave_headline() -> N
     md = render_engineering_report_md(report)
     assert "- 1 table kept in sync from their owner: `db.t4` -> Aurora MySQL (CDC)" in md
     assert "moves with its owner): `db.t2` -> DynamoDB (CDC)" in md
-
-    f = pptx_report.derive(report, {})
-    assert f["migrated"] == tile
-    wave2 = next(w for w in f["waves"] if w["engines"] == ["dynamodb", "documentdb"])
-    assert wave2["sync_summary"] == (
-        "DynamoDB moves 2 tables; DocumentDB moves 1 table. "
-        "Kept in sync from Aurora MySQL: 1 table."
-    )
 
 
 # --------------------------------------------------------------------------
@@ -261,17 +250,6 @@ def test_533_partial_design_basis_is_never_below_tables_migrate() -> None:
     assert basis["basis_table_count"] >= facts["tables_migrate"]
 
 
-def test_533_the_deck_bullet_says_only_some_engines_have_a_design() -> None:
-    f = pptx_report.derive(_with_facts(_partial_design_report()), {})
-    assert f["schema_mapped"] is False
-    assert f["n_tables"] >= f["migrated"] == 25
-    line = f["basis_table_line"]
-    assert line.startswith(
-        "Schema mapping has run for DynamoDB only, so only 5 tables have a per-table fit score"
-    ), line
-    assert "each with its own fit score" not in line
-
-
 # --------------------------------------------------------------------------
 # #578: wave 1's tables and views next to "Analyzed N source tables"
 # --------------------------------------------------------------------------
@@ -311,20 +289,6 @@ def test_578_an_older_report_without_view_ids_still_splits_wave1() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_migration_map_split_and_the_deck_engine_count_read_the_facts() -> None:
-    report = _with_facts(_merged_report())
-    report["facts"]["table_basis"]["mapped_tables_by_role"] = {
-        "Migration target": 21,
-        "Cache layer": 1,
-    }
-    report["facts"]["engine_count"] = 9
-    from src.report.architecture import _mapping_split
-
-    assert _mapping_split(report) == ": 21 migrate, 1 to the cache layer"
-    f = pptx_report.derive(report, {})
-    assert f["engine_count"] == 9
-
-
 def test_the_mapped_tables_by_role_fact() -> None:
     report = _merged_report()
     report["table_mappings"] = [
@@ -360,10 +324,6 @@ def test_the_moved_after_approval_count_is_a_fact() -> None:
     report["facts"]["post_schema_reroute_count"] = 7
     assert "Moved after your approval (7 queries)" in render_decision_report_html(report)
     assert "## Moved after approval (7 queries)" in render_engineering_report_md(report)
-    decision = next(
-        d for d in pptx_report.derive(report, {})["decisions"] if d["badge"].endswith("queries")
-    )
-    assert decision["badge"] == "7 queries"
     # The shared summary sentence (decision and engineering reports) reads it too;
     # the interactive report's JS is pinned by ExportReport.postSchemaRerouteCount.test.js.
     summary = reroute_summary(report)
@@ -409,22 +369,12 @@ def _confirm_card(f: dict[str, Any]) -> str:
     return next(str(d["against"]) for d in f["decisions"] if d["question"].startswith("Confirm"))
 
 
-def test_584_the_deck_cites_the_override_from_facts_with_readable_reason_text() -> None:
-    """The new readable reason ("top-N listings → ElastiCache") no longer has a
-    raw id for a regex to match; the deck reads the structured fact instead."""
-    report = _override_report("signal override: top-N listings → ElastiCache")
-    report["facts"] = compute_report_facts(
-        report, signal_overrides={"elasticache": ["leaderboard_pattern"]}
-    )
-    against = _confirm_card(pptx_report.derive(report, _SIGNALS))
-    assert "15 leaderboard / top-n queries in the whole workload" in against
-
-
 def test_584_the_stored_fact_decides_not_the_reason_text() -> None:
     report = _override_report("signal override: top-N listings → ElastiCache")
     report["facts"] = compute_report_facts(report, signal_overrides={})
-    # No override recorded: the largest targeting signal stands in.
-    assert _confirm_card(pptx_report.derive(report, _SIGNALS)).split(" · ")[1].startswith("37 ")
+    # No override recorded: the reason text names a signal, but the stored fact stands.
+    engines = {e["engine"]: e for e in report_facts(report)["engines"]}
+    assert engines["elasticache"]["signal_overrides"] == []
 
 
 def test_584_an_older_report_reads_either_reason_form() -> None:
@@ -522,7 +472,6 @@ def test_546_no_deliverable_claims_the_removal_or_its_saving() -> None:
     assert "DocumentDB stays in the architecture" in md
     html = render_decision_report_html(report)
     assert "Engines not used" not in html
-    assert pptx_report.derive(report, {})["n_tradeoffs"] == report["facts"]["trade_off_count"]
 
 
 def test_546_a_removed_engine_still_lists_with_its_reasons() -> None:
@@ -619,9 +568,6 @@ def test_861_every_deliverable_shows_the_partial_consolidation() -> None:
     assert "DocumentDB stays for 2 queries" in html
     assert 'data-decision="0"' in html and 'data-decision="1"' in html
     assert "the customer chose DocumentDB" in html
-    derived = pptx_report.derive(report, {})
-    assert derived["n_tradeoffs"] == 4
-    assert [d["index"] for d in derived["rc_decisions"]] == [0, 1, 2, 3]
 
 
 def test_861_a_customer_edit_after_the_check_still_reverses_it() -> None:
@@ -661,7 +607,6 @@ def test_861_an_edit_that_undoes_a_partial_consolidation_reverses_it() -> None:
     assert "### Reversed by a later assignment edit" in md
     html = render_decision_report_html(report)
     assert "moved to DynamoDB" not in html
-    assert pptx_report.derive(report, {})["n_tradeoffs"] == 2
 
 
 def test_861_an_edit_that_undoes_part_of_it_states_what_stayed_moved() -> None:
@@ -687,11 +632,6 @@ def test_861_an_edit_that_undoes_part_of_it_states_what_stayed_moved() -> None:
     html = render_decision_report_html(report)
     assert "Consolidated 1 query from DocumentDB → DynamoDB" in html
     assert "3 queries moved to DynamoDB" not in html
-    deck = pptx_report.derive(report, {})
-    assert any(
-        d["title"] == "Consolidated 1 query from DocumentDB → DynamoDB"
-        for d in deck["rc_decisions"]
-    )
 
 
 # --------------------------------------------------------------------------
@@ -737,7 +677,7 @@ def test_595_the_facts_carry_each_reality_check_decision() -> None:
     assert decisions[0]["query_ids"] == ["q1", "q2"]
 
 
-def test_595_the_decision_report_deck_and_engineering_report_show_them() -> None:
+def test_595_the_decision_report_and_engineering_report_show_them() -> None:
     report = _with_facts(_kept_report())
     html = render_decision_report_html(report)
     section = re.search(r"<section data-figure=reality-check-decisions>.*?</section>", html, re.S)
@@ -750,77 +690,9 @@ def test_595_the_decision_report_deck_and_engineering_report_show_them() -> None
     md = render_engineering_report_md(report)
     assert "DocumentDB kept: 2 queries need nested-document updates" in md
 
-    f = pptx_report.derive(report, {})
-    prs = pptx_report.open_deck(keep=1)
-    for build in pptx_report.SLIDES:
-        build(prs, f)
-    texts = [
-        " ".join(sh.text_frame.text for sh in slide.shapes if sh.has_text_frame)
-        for slide in prs.slides
-    ]
-    rc_slide = next(t for t in texts if "Reality Check Decisions" in t)
-    assert "DocumentDB kept" in rc_slide
-    assert "Recommended pattern: Event-Driven Sync" in rc_slide
 
-
-def test_595_no_reality_check_decision_no_slide_and_no_section() -> None:
+def test_595_no_reality_check_decision_no_section() -> None:
     report = _kept_report()
     report["trade_offs"] = report["trade_offs"][2:]
     report = _with_facts(report)
     assert "reality-check-decisions" not in render_decision_report_html(report)
-    f = pptx_report.derive(report, {})
-    assert pptx_report.slide_reality_check(pptx_report.open_deck(keep=1), f) is None
-
-
-def test_595_the_deck_slide_prints_no_glyph_its_pdf_fonts_lack() -> None:
-    """The PDF draws with Amazon Ember, which has no arrow glyph: the
-    consolidation title "DocumentDB → Aurora MySQL" says "to" instead."""
-    from reportlab.pdfbase.ttfonts import TTFontFile
-
-    fonts = Path(pptx_report.__file__).parent / "assets" / "fonts"
-    regular = TTFontFile(str(fonts / "AmazonEmber_Rg.ttf"))
-    bold = TTFontFile(str(fonts / "AmazonEmber_Bd.ttf"))
-    report = _readded_report()
-    report["ranking"] = report["ranking"][:2]  # DocumentDB removed: its lines apply
-    report = _with_facts(report)
-    prs = pptx_report.open_deck(keep=1)
-    slide = pptx_report.slide_reality_check(prs, pptx_report.derive(report, {}))
-    assert slide is not None
-    printed = [
-        (run.text, run.font.bold)
-        for shape in slide.shapes
-        if shape.has_text_frame
-        for para in shape.text_frame.paragraphs
-        for run in para.runs
-    ]
-    assert any("DocumentDB to Aurora MySQL" in text for text, _ in printed)
-    missing = {
-        ch
-        for text, is_bold in printed
-        for ch in text
-        if not ch.isspace() and ord(ch) not in (bold if is_bold else regular).charToGlyph
-    }
-    assert missing == set()
-
-
-def test_595_each_deck_card_fits_its_text_box() -> None:
-    """The longest real reality-check line (trailgear: 11 queries consolidated)
-    still fits one card: a title line plus the detail clipped to the slide's own
-    limit. The box size, point sizes and clip come from ``slide_reality_check``'s
-    constants, so changing the card without this test noticing is not possible."""
-    detail = (
-        "DocumentDB provides no unique capabilities — 11 queries can be served by Aurora "
-        "PostgreSQL. Removes $271.80/mo of infrastructure cost (DocumentDB's own analysed "
-        "estimate before removal), plus a qualitative reduction in operational overhead."
-    )
-    title_h = pptx_report._estimated_text_height_in(
-        "Consolidated 11 queries from DocumentDB to Aurora PostgreSQL",
-        pptx_report.RC_TITLE_PT,
-        pptx_report.RC_CARD_TEXT_W,
-    )
-    detail_h = pptx_report._estimated_text_height_in(
-        pptx_report.clip(detail, pptx_report.RC_DETAIL_CLIP),
-        pptx_report.RC_DETAIL_PT,
-        pptx_report.RC_CARD_TEXT_W,
-    )
-    assert title_h + detail_h < pptx_report.RC_CARD_TEXT_H

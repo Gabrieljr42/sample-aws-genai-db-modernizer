@@ -15,7 +15,6 @@ from src.tools.validation.customer_text_guard import (
     KNOWN_REASON_CODES,
     scan_json,
     scan_markdown,
-    scan_pptx_text,
     scan_text,
 )
 
@@ -199,7 +198,7 @@ class TestKnownLogOnlyPhrase:
         # (src.agents.referee.engine_exclusions) -- never meant for a customer; its
         # customer_message counterpart is the plain-language version that belongs here.
         findings = scan_text(
-            "ElastiCache cannot perform multi-table JOINs; it's a key-value/data " "structure store"
+            "ElastiCache cannot perform multi-table JOINs; it's a key-value/data structure store"
         )
         assert [f.kind for f in findings] == ["log_only_phrase"]
 
@@ -496,56 +495,9 @@ class TestScanMarkdown:
         assert scan_markdown(text) == []
 
     def test_a_leak_in_the_body_is_still_caught(self) -> None:
-        text = "---\n" 'title: "engineering-report"\n' "---\n" "### aurora_mysql\n"
+        text = '---\ntitle: "engineering-report"\n---\n### aurora_mysql\n'
         findings = scan_markdown(text)
         assert [f.kind for f in findings] == ["engine_id"]
 
     def test_no_frontmatter_is_fine(self) -> None:
         assert scan_markdown("# Report\n\nNo frontmatter here.\n") == []
-
-
-class TestScanPptxText:
-    """#572 review item 4: ``scan_pptx_text`` used to read ``has_text_frame``
-    shapes only, which skips a table (``add_table``, no ``text_frame`` of its
-    own) and a group shape's members (not direct children of the slide's own
-    ``shapes``) entirely."""
-
-    def _deck(self, tmp_path, build) -> str:
-        from pptx import Presentation
-        from pptx.util import Inches
-
-        prs = Presentation()
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
-        build(slide, Inches)
-        path = str(tmp_path / "deck.pptx")
-        prs.save(path)
-        return path
-
-    def test_table_cell_text_is_scanned(self, tmp_path) -> None:
-        def build(slide, Inches):
-            table = slide.shapes.add_table(2, 1, Inches(1), Inches(1), Inches(3), Inches(1)).table
-            table.cell(0, 0).text = "dynamodb handles 63 queries"
-            table.cell(1, 0).text = "Aurora MySQL handles the rest"
-
-        findings = scan_pptx_text(self._deck(tmp_path, build))
-        assert [f.text for f in findings] == ["dynamodb"]
-
-    def test_group_shape_members_are_scanned(self, tmp_path) -> None:
-        def build(slide, Inches):
-            box1 = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(2), Inches(1))
-            box1.text_frame.text = "clean text"
-            box2 = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(2), Inches(1))
-            box2.text_frame.text = "excluded from elasticache"
-            group = slide.shapes.add_group_shape([box1, box2])
-            assert group  # the group now owns box1/box2; nothing left ungrouped to re-add
-
-        findings = scan_pptx_text(self._deck(tmp_path, build))
-        assert [f.text for f in findings] == ["elasticache"]
-
-    def test_plain_text_frame_still_works(self, tmp_path) -> None:
-        def build(slide, Inches):
-            box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(2), Inches(1))
-            box.text_frame.text = "ADR-031 decided this"
-
-        findings = scan_pptx_text(self._deck(tmp_path, build))
-        assert [f.kind for f in findings] == ["adr_reference"]

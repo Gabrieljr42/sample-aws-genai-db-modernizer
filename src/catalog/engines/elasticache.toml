@@ -12,7 +12,6 @@ system_of_record = false
 ui = "#d13212"
 ui_badge = "red"
 report_badge = "#c62f25"
-deck = "#AD5CFF"
 
 [pricing]
 base_monthly = 50

@@ -647,7 +647,7 @@ const generateReportScript = (data, ENGINE_LABELS) => {
   // deleted ReportResults.js page treating CRITICAL). Severities are always
   // shown in CRITICAL/HIGH/MEDIUM/LOW order, each with its count, even at zero.
   // A severity outside those four is its own UNRATED section, shown only when
-  // present -- matching the deck's UNRATED handling (pptx_report.py) -- rather
+  // present -- matching the PDF report's UNRATED handling -- rather
   // than silently counting as LOW (#270 round-1 review).
   script += '    function buildRiskAssessment() {\n';
   script += '      const container = document.getElementById(\'risk-assessment-container\');\n';

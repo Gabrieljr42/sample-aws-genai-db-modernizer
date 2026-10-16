@@ -116,7 +116,7 @@ def test_the_reports_agree_on_every_pair(report) -> None:
     html = _section_html(render_decision_report_html(report))
     md = _section_md(render_engineering_report_md(report))
     for pair in report["facts"]["close_calls"]["engine_pairs"]:
-        assert f"data-pair-queries=\"{pair['pair_query_count']}\"" in html
+        assert f'data-pair-queries="{pair["pair_query_count"]}"' in html
         assert f"| {pair['pair_query_count']} |" in md
         for qid in pair["query_ids"]:
             assert f"`{qid}`" in md
@@ -164,24 +164,3 @@ def test_an_unknown_engine_id_is_escaped_in_the_decision_report() -> None:
     html = _section_html(render_decision_report_html(hostile))
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
-
-
-class TestDeckAndInteractiveReport:
-    """The deck/PDF and the interactive analysis report state the same close
-    calls, as #503 (pending ties) and #629 (post-approval reroutes) did."""
-
-    def test_the_deck_adds_a_card_with_the_stored_figures(self, report) -> None:
-        from src.report import pptx_report
-
-        f = pptx_report.derive(report, {})
-        card = next(d for d in f["decisions"] if d["question"] == "Move close-call queries?")
-        assert card["badge"] == "3 queries"
-        assert "Close calls (3 queries), plus 2 exact ties a rule settled" in card["against"]
-        assert "assignment review" in card["action"]
-
-    @pytest.mark.parametrize("rows", [None, []])
-    def test_no_deck_card_without_close_calls(self, rows) -> None:
-        from src.report import pptx_report
-
-        f = pptx_report.derive(_report(rows), {})
-        assert "Move close-call queries?" not in [d["question"] for d in f["decisions"]]

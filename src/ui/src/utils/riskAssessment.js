@@ -22,7 +22,7 @@
  * own).
  *
  * A severity outside the four known ones (`UNRATED`) is its own bucket and
- * status, matching the deck's `UNRATED` handling (`pptx_report.py`) -- it
+ * status, matching the PDF report's `UNRATED` handling -- it
  * used to fold into `LOW`, which told a reader an unrated risk was known to
  * be low severity rather than simply unrated (#270 round-1 review).
  */
@@ -30,7 +30,7 @@
 /** Severities in the order every severity-based view should show them. */
 export const RISK_SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 
-/** A risk whose severity is none of `RISK_SEVERITIES`, mirroring `pptx_report.UNRATED`. */
+/** A risk whose severity is none of `RISK_SEVERITIES`, mirroring the PDF report's UNRATED. */
 export const UNRATED = 'UNRATED';
 
 /** `"[dynamodb] some text"` -> `{ engine: 'dynamodb', body: 'some text' }`. */

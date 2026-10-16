@@ -303,7 +303,6 @@ ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
         ),
         _WORDING,
     ),
-    "src/report/pptx_report.py": (frozenset({"SIGNAL_LABEL", "SIGNAL_MODIFIER"}), _WORDING),
     "src/report/waves.py": (frozenset({"_RELATIONAL_TO_SOURCE_ENGINE"}), _WORDING),
     "src/shared/signal_labels.py": (frozenset({"SIGNAL_NOUNS"}), _WORDING),
     "src/agents/referee/access_pattern.py": (

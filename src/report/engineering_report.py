@@ -351,32 +351,13 @@ def _trade_offs_md(report: dict[str, Any], facts: dict[str, Any]) -> list[str]:
     return out
 
 
-def render_engineering_report_md(report: dict[str, Any], prov: dict[str, str] | None = None) -> str:
-    """Build-team-facing document: migration map, per-engine target schemas,
-    query groups. Markdown with mermaid fences, which render in the tooling
-    engineers open it in (VS Code, GitHub, GitLab).
-    """
-    db = report.get("database_name", "?")
-    out: list[str] = []
-    if prov:
-        # Front-matter values are quoted so a value containing ``:`` or ``#`` cannot
-        # be misread as YAML structure, and the double quotes inside are escaped so
-        # the value cannot close its own quoting. ``db`` here is customer-derived.
-        out += ["---"]
-        out += [f'{k}: "{escaping.md_yaml_value(v)}"' for k, v in prov.items() if v]
-        out += ["---", ""]
-    out += [
-        "# Database Modernization \u2014 Engineering Report",
-        "",
-        f"Source database: `{escaping.md_code(db)}`. This is the build companion to the "  # nosemgrep: string-concat-in-list -- intentional multi-line string
-        "Decision Report: "
-        "the source-to-target mapping, the per-engine target schemas, and the query "
-        "groups.",
-        "",
-    ]
+def _target_engines_md(report: dict[str, Any]) -> list[str]:
+    """Engineering Report "Target engines" section: the table and the fit definition.
 
+    Also the PDF report's engines section, so both print the same rows.
+    """
     target_engines = _architecture_engines(report)
-    facts = report_facts(report)
+    out: list[str] = []
     if target_engines:
         # Why each engine is in the target, from the workload routed to it (#152)
         out += [
@@ -411,6 +392,92 @@ def render_engineering_report_md(report: dict[str, Any], prov: dict[str, str] | 
         # all, even though "Target engines" above already shows the figure.
         out.append(f"*{escaping.md_text(WORKLOAD_FIT_DEFINITION)}*")
         out.append("")
+    return out
+
+
+def _risk_register_md(report: dict[str, Any]) -> list[str]:
+    """Engineering Report "Risk register" and "Resolved by the assignment" sections.
+
+    Also the PDF report's risks section, so both print the same entries.
+    """
+    facts = report_facts(report)
+    out: list[str] = []
+    risks = filtered_risks(report)
+    if risks:
+        by_eng: dict[str, list] = {}
+        for r in risks:
+            eng, _ = _risk_engine_and_body(r.get("description"))
+            by_eng.setdefault(eng, []).append(r)
+        out += [f"## Risk register ({facts.get('open_risk_count', 0)})", ""]
+        for eng, items in by_eng.items():
+            # #572: eng is the raw [engine] tag _risk_engine_and_body parsed off the
+            # description (or "(general)") -- display_engine leaves "(general)" as is
+            # (not a known engine id, falls back to its own title-cased fallback,
+            # which already reads fine unchanged).
+            heading = eng if eng == "(general)" else display_engine(eng)
+            out += [f"### {escaping.md_text(heading)}", ""]
+            for r in items:
+                _, body = _risk_engine_and_body(r.get("description"))
+                sev = r.get("severity", "-")
+                rtype = str(r.get("risk_type", "")).replace("_", " ").lower()
+                rid = r.get("risk_id", "-")
+                out.append(
+                    f"- **{escaping.md_text(rid)}** \u00b7 {escaping.md_text(sev)} \u00b7 "
+                    f"{escaping.md_text(rtype)} \u2014 {escaping.md_text(body)}"
+                )
+                if r.get("mitigation") and not _repeats(r.get("mitigation"), body):
+                    out.append(f"  - Mitigation: {escaping.md_text(r.get('mitigation'))}")
+                aff = list(r.get("affected_tables") or [])
+                if aff:
+                    shown = ", ".join(f"`{escaping.md_code(a)}`" for a in aff[:8])
+                    more = f" (+{len(aff) - 8} more)" if len(aff) > 8 else ""
+                    out.append(f"  - Affects: {shown}{more}")
+            out.append("")
+
+    resolved = resolved_risks(report)
+    if resolved:
+        # Analysis risks the effective assignment resolved (#221): listed so none
+        # disappears without a record.
+        out += [f"## Resolved by the assignment ({facts.get('resolved_risk_count', 0)})", ""]
+        for r in resolved:
+            _, body = _risk_engine_and_body(r.get("description"))
+            where = resolved_risk_label(r)
+            out.append(
+                f"- {escaping.md_text(r.get('severity', '-'))} \u00b7 "
+                f"{escaping.md_text(where)} \u2014 {escaping.md_text(body)}"
+            )
+            if r.get("reason"):
+                out.append(f"  - Resolved because {escaping.md_text(r['reason'])}.")
+        out.append("")
+    return out
+
+
+def render_engineering_report_md(report: dict[str, Any], prov: dict[str, str] | None = None) -> str:
+    """Build-team-facing document: migration map, per-engine target schemas,
+    query groups. Markdown with mermaid fences, which render in the tooling
+    engineers open it in (VS Code, GitHub, GitLab).
+    """
+    db = report.get("database_name", "?")
+    out: list[str] = []
+    if prov:
+        # Front-matter values are quoted so a value containing ``:`` or ``#`` cannot
+        # be misread as YAML structure, and the double quotes inside are escaped so
+        # the value cannot close its own quoting. ``db`` here is customer-derived.
+        out += ["---"]
+        out += [f'{k}: "{escaping.md_yaml_value(v)}"' for k, v in prov.items() if v]
+        out += ["---", ""]
+    out += [
+        "# Database Modernization \u2014 Engineering Report",
+        "",
+        f"Source database: `{escaping.md_code(db)}`. This is the build companion to the "  # nosemgrep: string-concat-in-list -- intentional multi-line string
+        "Decision Report: "
+        "the source-to-target mapping, the per-engine target schemas, and the query "
+        "groups.",
+        "",
+    ]
+
+    facts = report_facts(report)
+    out += _target_engines_md(report)
 
     tco = report.get("tco_analysis") or {}
     if tco:
@@ -636,53 +703,7 @@ def render_engineering_report_md(report: dict[str, Any], prov: dict[str, str] | 
 
     out += _aurora_queries_by_table_md(report)
 
-    risks = filtered_risks(report)
-    if risks:
-        by_eng: dict[str, list] = {}
-        for r in risks:
-            eng, _ = _risk_engine_and_body(r.get("description"))
-            by_eng.setdefault(eng, []).append(r)
-        out += [f"## Risk register ({facts.get('open_risk_count', 0)})", ""]
-        for eng, items in by_eng.items():
-            # #572: eng is the raw [engine] tag _risk_engine_and_body parsed off the
-            # description (or "(general)") -- display_engine leaves "(general)" as is
-            # (not a known engine id, falls back to its own title-cased fallback,
-            # which already reads fine unchanged).
-            heading = eng if eng == "(general)" else display_engine(eng)
-            out += [f"### {escaping.md_text(heading)}", ""]
-            for r in items:
-                _, body = _risk_engine_and_body(r.get("description"))
-                sev = r.get("severity", "-")
-                rtype = str(r.get("risk_type", "")).replace("_", " ").lower()
-                rid = r.get("risk_id", "-")
-                out.append(
-                    f"- **{escaping.md_text(rid)}** \u00b7 {escaping.md_text(sev)} \u00b7 "
-                    f"{escaping.md_text(rtype)} \u2014 {escaping.md_text(body)}"
-                )
-                if r.get("mitigation") and not _repeats(r.get("mitigation"), body):
-                    out.append(f"  - Mitigation: {escaping.md_text(r.get('mitigation'))}")
-                aff = list(r.get("affected_tables") or [])
-                if aff:
-                    shown = ", ".join(f"`{escaping.md_code(a)}`" for a in aff[:8])
-                    more = f" (+{len(aff) - 8} more)" if len(aff) > 8 else ""
-                    out.append(f"  - Affects: {shown}{more}")
-            out.append("")
-
-    resolved = resolved_risks(report)
-    if resolved:
-        # Analysis risks the effective assignment resolved (#221): listed so none
-        # disappears without a record.
-        out += [f"## Resolved by the assignment ({facts.get('resolved_risk_count', 0)})", ""]
-        for r in resolved:
-            _, body = _risk_engine_and_body(r.get("description"))
-            where = resolved_risk_label(r)
-            out.append(
-                f"- {escaping.md_text(r.get('severity', '-'))} \u00b7 "
-                f"{escaping.md_text(where)} \u2014 {escaping.md_text(body)}"
-            )
-            if r.get("reason"):
-                out.append(f"  - Resolved because {escaping.md_text(r['reason'])}.")
-        out.append("")
+    out += _risk_register_md(report)
 
     out += _trade_offs_md(report, facts)
     out += query_traces_md(report)

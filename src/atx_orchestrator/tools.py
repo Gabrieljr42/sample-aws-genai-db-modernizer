@@ -1369,8 +1369,7 @@ def _publish_synthesis_deliverables(job_id: str, database_name: str, payload: di
     Summary Report (PDF). Each rendered deliverable is also written to our own
     S3 bucket, which is the system of record and survives the customer stopping
     the job; report.json is already there (the subagent wrote it). The executive
-    summary's editable ``.pptx`` is written to S3 too but deliberately not
-    registered -- the PDF is the delivery.
+    summary PDF is the delivery.
 
     Every item carries an explicit download filename (the 5th tuple element) so
     the artifact publishes EXTERNAL and saves under a human-readable name rather
@@ -1430,7 +1429,7 @@ def _publish_synthesis_deliverables(job_id: str, database_name: str, payload: di
             logger.warning("ATX synthesis deliverables failed to render: %s", ", ".join(failed))
         for d in rendered.items:
             if d.stage:
-                binary = d.file_type in ("PDF", "PPTX")
+                binary = d.file_type == "PDF"
                 _stage_durable_copy(
                     store,
                     f"{base}/{d.filename}",

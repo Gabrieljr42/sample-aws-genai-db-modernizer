@@ -16,10 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from src.agents.referee.assignment_resolver import (
-    AssignmentResolver,
-    break_owner_tie,
-)
+from src.agents.referee.assignment_resolver import AssignmentResolver, break_owner_tie
 from src.agents.referee.assignment_validator import AssignmentValidator
 from src.agents.referee.cache_overlay import (
     CACHE_MAX_ROWS_AVG,
@@ -47,11 +44,7 @@ from src.agents.referee.cache_overlay import (
 from src.agents.referee.query_shape import locking_clause
 from src.agents.referee.tie_break import break_tie
 from src.agents.referee.triage import triage
-from src.contracts.assignment_models import (
-    Assignment,
-    AssignmentStatus,
-    QueryAssignment,
-)
+from src.contracts.assignment_models import Assignment, AssignmentStatus, QueryAssignment
 from src.contracts.move_ledger import ReasonCode
 from src.tools.validation.customer_text_guard import scan_text
 from tests.unit.tools.sql._timing import assert_linear
@@ -1268,15 +1261,12 @@ class TestDroppedReason:
             assert scan_text(dropped_reason(engine)) == []
 
 
-def test_deck_and_triage_name_the_same_top_n_spellings():
-    """#679 review: the deck's signal label and triage's evidence text agree."""
-    from src.report import pptx_report
-
+def test_triage_names_the_top_n_spellings():
+    """#679 review: triage's evidence text names the TOP, FETCH and LIMIT spellings."""
     text = "SELECT TOP (10) [ReviewID] FROM [ProductReview] ORDER BY [CreatedDate] DESC"
     result = triage(_collector([_q("hot", text, cps=2.0)], engine="sqlserver"))
     signal = next(s for s in result.signals if s.signal == "leaderboard_pattern")
     assert "ORDER BY + LIMIT, TOP or FETCH" in signal.evidence
-    assert "ORDER BY + LIMIT, TOP or FETCH" in pptx_report.SIGNAL_LABEL["leaderboard_pattern"]
 
 
 class TestOwnerDecisionNeverTiesAGatedEngine:

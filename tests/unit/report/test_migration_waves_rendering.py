@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import Any
 
 from ci.llm import judge_facts
-from src.report import pptx_report
 from src.report.renderers import (
     render_decision_report_html,
     render_engineering_report_md,
@@ -407,90 +406,6 @@ class TestReviewFindings324:
 
 
 class TestDeckUsesStoredWaves:
-    def test_migrated_tile_excludes_wave_1_aurora(self):
-        # #324 review (finding 4): same fix as the decision report's "N
-        # tables migrate" row -- the deck tile keeps its pre-#321 meaning
-        # (19, DynamoDB's own count), not 50 (wave 1's whole-schema count,
-        # which isn't a "purpose-built engine" migration) and not 69
-        # (the double count).
-        f = pptx_report.derive(_report_aurora_first_no_schema_design(), {})
-        assert f["migrated"] == 19
-
-    def test_wave_1_tile_shows_cutover_not_the_end_state_share(self):
-        # Finding 2: the wave 1 tile's stat cell showed "4.7% query
-        # patterns", which reads as if only 4.7% of the workload ever
-        # touches Aurora -- say "100% at cutover" instead; the rationale
-        # states the end-state 4.7% remainder.
-        f = pptx_report.derive(_report_aurora_first_no_schema_design(), {})
-        aurora_wave = next(w for w in f["waves"] if w["engines"] == ["aurora_mysql"])
-        assert aurora_wave["cutover_query_count"] == 107
-
-    def test_deck_subtitle_states_cutover_and_fits_without_the_path_suffix(self):
-        # Findings 2 and 9: the subtitle says the cutover figure, not just
-        # the end-state share, and no longer carries the long "one
-        # suggested path" suffix that risked pushing it past one line.
-        prs = pptx_report.open_deck()
-        f = pptx_report.derive(_report_aurora_first_no_schema_design(), {})
-        pptx_report.slide_sequencing(prs, f)
-        subtitle_text = " ".join(
-            shape.text_frame.text
-            for shape in prs.slides[-1].shapes
-            if shape.has_text_frame and "cutover" in shape.text_frame.text
-        )
-        assert "Wave 1 moves all 107 queries to Aurora at cutover" in subtitle_text
-        assert "4.7% remain there at the end" in subtitle_text
-        assert "one suggested path" not in subtitle_text
-
-    def test_dynamodb_and_aurora_are_separate_waves_when_stored(self):
-        f = pptx_report.derive(_report_with_waves(), {})
-        engine_lists = [w["engines"] for w in f["waves"]]
-        assert engine_lists == [["elasticache"], ["dynamodb"], ["aurora_mysql"]]
-
-    def test_deck_matches_resolve_migration_waves_without_a_stored_roadmap(self):
-        # #225/#321: the deck's old on-the-fly algorithm is gone -- it
-        # now always matches resolve_migration_waves, the same fallback the
-        # decision report and engineering report use (Aurora, cache, DynamoDB
-        # separate waves, not merged the way the deleted algorithm did).
-        from src.report.renderers import resolve_migration_waves
-
-        rep = _legacy_report()
-        f = pptx_report.derive(rep, {})
-        engine_lists = [w["engines"] for w in f["waves"]]
-        assert engine_lists == [w["engines"] for w in resolve_migration_waves(rep)]
-        assert engine_lists[0] == ["aurora_mysql"]
-
-    def test_last_wave_is_retained_when_stored(self):
-        f = pptx_report.derive(_report_with_waves(), {})
-        assert f["waves"][-1]["workload"] == 4.7
-        assert f["waves"][-1]["cached_queries"] == 0
-        assert f["waves"][-1]["no_migration"] is True
-
-    def test_wave_1_no_migration_claim_matches_the_resolved_wave(self):
-        # #225: "no data migration" is only claimed when wave 1
-        # really is the cache or retained wave, not whichever wave happens to
-        # come first (e.g. DynamoDB with no cache overlay).
-        rep = _report_with_waves()
-        rep["migration_waves"] = [
-            {
-                "wave": 1,
-                "title": "Move key-value and point-lookup queries to DynamoDB",
-                "engines": ["dynamodb"],
-                "moves_from": ["mysql"],
-                "serves_from": [],
-                "tables": ["wordpress.wp_posts"],
-                "table_count": 1,
-                "table_groups": None,
-                "query_count": 98,
-                "workload_share_percent": 91.6,
-                "share_basis": "queries",
-                "rationale": "moves to DynamoDB",
-                "gate": "parity confirmed",
-            }
-        ]
-        rep["cache_overlay"] = None
-        f = pptx_report.derive(rep, {})
-        assert f["waves"][0]["no_migration"] is False
-
     # A realistic long rationale/gate, matching the length the review measured
     # on the real wordpress/discourse decks (270-370 and up to several hundred
     # characters respectively, once the #225 gate text is
@@ -540,49 +455,6 @@ class TestDeckUsesStoredWaves:
             }
             for i, eng in enumerate(engines[:n])
         ]
-
-    def test_six_waves_fit_above_the_constraints_card(self):
-        # #225: the sizing must not blow past the slide for up
-        # to 6 waves (cache, KV, other, search, document, retained), with
-        # realistic long rationale/gate text in every card.
-        from pptx import Presentation
-
-        rep = _report_with_waves()
-        rep["migration_waves"] = self._waves_with_long_text(6)
-        f = pptx_report.derive(rep, {})
-        assert len(f["waves"]) == 6
-        prs = pptx_report.open_deck()
-        s = pptx_report.slide_sequencing(prs, f)
-        # Every shape must stay within the 7.5" slide height.
-        max_bottom = max(shape.top + shape.height for shape in s.shapes)
-        assert max_bottom <= Presentation(str(pptx_report.TEMPLATE)).slide_height
-
-    def test_long_rationale_and_gate_text_fit_the_card_at_4_to_6_waves(self):
-        # A shape-bounds check alone can't tell whether the *text inside* a
-        # card overflows it: estimate the text height against the card's text
-        # box (no vertical inset) at 4 (unshrunk) to 6 waves.
-        from src.report.pptx_report import _estimated_text_height_in, _wave_card_text
-
-        for n in (4, 5, 6):
-            rep = _report_with_waves()
-            rep["migration_waves"] = self._waves_with_long_text(n)
-            f = pptx_report.derive(rep, {})
-            step = 1.00 if n <= 4 else max(0.62, (7.50 - 1.90 - 1.06 - 0.18) / n)
-            card_h = min(0.92, step - 0.08)
-            box_w, box_h = 9.6, card_h - 0.44
-            for w in f["waves"]:
-                sync_text, rationale_text, gate_text = _wave_card_text(
-                    w["note"], w["gate"], w.get("sync_summary", ""), box_w, box_h
-                )
-                total_h = (
-                    _estimated_text_height_in(sync_text, 9.5, box_w)
-                    + _estimated_text_height_in(rationale_text, 10.0, box_w)
-                    + _estimated_text_height_in(gate_text, 9.0, box_w)
-                )
-                assert total_h <= box_h + 1e-9, (
-                    f"n={n} wave {w['names']}: estimated text height {total_h:.3f} exceeds "
-                    f"the card's text box {box_h:.3f}"
-                )
 
 
 class TestJudgeFactsPassthrough:

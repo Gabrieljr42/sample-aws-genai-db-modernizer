@@ -2,7 +2,7 @@
 
 Compares the session's discourse run with a second, independent run
 (``--llm-mode none``, separate artifact root) over every rendered deliverable:
-text files byte for byte, PPTX zip entry by zip entry, PDF page text. Only the
+text files byte for byte, PDF page text. Only the
 things that legitimately differ between runs are masked: timestamps, dates and
 the job/artifact paths.
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 import difflib
 import io
 import re
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -54,13 +53,7 @@ def _views(run: PipelineResult) -> dict[str, list[tuple[str, str]]]:
     for p in paths:
         data = p.read_bytes()
         parts: list[tuple[str, str]]
-        if p.suffix == ".pptx":
-            with zipfile.ZipFile(io.BytesIO(data)) as z:
-                parts = [
-                    (n, _mask(z.read(n).decode("utf-8", "replace"), run))
-                    for n in sorted(z.namelist())
-                ]
-        elif p.suffix == ".pdf":
+        if p.suffix == ".pdf":
             pages = PdfReader(io.BytesIO(data)).pages
             parts = [(f"page-{i}", _mask(pg.extract_text(), run)) for i, pg in enumerate(pages)]
         else:

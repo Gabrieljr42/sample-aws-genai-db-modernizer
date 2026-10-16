@@ -143,7 +143,7 @@ Env vars read:
   to `test-results/`. Under it:
   - `e2e-reports-junit.xml`, `e2e-ui-junit.xml` — one junit file per invocation.
   - `deliverables/<db>/` — a copy of each pipeline run's `synthesis/v*/` files
-    (the HTML reports, PDF, pptx), written by a session-scoped autouse
+    (the HTML reports and the PDF), written by a session-scoped autouse
     finalizer in `tests/e2e/conftest.py`, so reviewers can download the
     rendered output straight from a CI artifact without re-running anything.
   - `pw-reports/`, `pw-ui/` — Playwright's own `--output` directories

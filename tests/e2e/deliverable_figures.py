@@ -1,7 +1,7 @@
 """Key figures of every deliverable, read back from what each one renders (#573).
 
 AGENTS.md "Deliverables agree": the decision report, engineering report,
-deck/PDF and the interactive analysis report all render one synthesis
+the PDF and the interactive analysis report all render one synthesis
 ``report.json``, so a figure shown in two of them must be the same figure.
 This module reads the key figures back out of each rendered deliverable and
 computes what ``report.json`` says they should be, so
@@ -9,7 +9,7 @@ computes what ``report.json`` says they should be, so
 
 Extraction reads stable hooks, never free prose: ``data-*`` attributes in the
 two HTML reports (``data-wave``, ``data-figure``, ``data-engine``), and fixed
-labels in the Markdown, deck and PDF ("Projected monthly (target):",
+labels in the Markdown and PDF ("Projected monthly (target):",
 "N source tables migrate", "Kept in sync from X: N tables", ...). The one
 deliberate exception is the summary's "Other targets evaluated:" clause, the
 only place three of the deliverables name an engine the reality check
@@ -889,118 +889,11 @@ def engineering_figures(md_text: str) -> Figures:
 
 
 # --------------------------------------------------------------------------
-# Executive deck (PPTX) and its PDF
+# The executive summary PDF
 # --------------------------------------------------------------------------
-
-
-def deck_slide_texts(pptx_path: str) -> list[str]:
-    """Each slide's text, shapes in deck order, table cells row by row, the
-    same order the PDF draws them in."""
-    from pptx import Presentation
-
-    def walk(shapes: Any, out: list[str]) -> None:
-        for sh in shapes:
-            if getattr(sh, "shape_type", None) == 6:  # group
-                walk(sh.shapes, out)
-            if getattr(sh, "has_text_frame", False) and sh.has_text_frame:
-                out.append(sh.text_frame.text)
-            if getattr(sh, "has_table", False) and sh.has_table:
-                for row in sh.table.rows:
-                    out.append(" ".join(c.text for c in row.cells))
-
-    texts = []
-    for slide in Presentation(pptx_path).slides:
-        parts: list[str] = []
-        walk(slide.shapes, parts)
-        texts.append(norm(" ".join(parts)))
-    return texts
 
 
 def pdf_page_texts(pdf_path: str) -> list[str]:
     from pypdf import PdfReader
 
     return [norm(p.extract_text() or "") for p in PdfReader(pdf_path).pages]
-
-
-_ROLES = "Retained|Migration target|Cache layer|Search read model|Evaluated|Assessed"
-
-
-def deck_figures(slides: list[str], label: str) -> Figures:
-    """Figures the executive deck shows, from its slide texts (the deck's own
-    shapes, or the PDF drawn from them: one extractor reads both)."""
-    f = Figures(label)
-    text = " ".join(slides)
-    f.add("removal_savings", removal_savings(text), "Reality Check Decisions slide")
-
-    m = re.search(r"([\d,]+) source tables? migrate\b", text)
-    f.add("tables_migrate", _int(m.group(1)) if m else UNREADABLE, "Assessment Summary tile")
-    m = re.search(r"overall risk, ([\d,]+) items?", text)
-    if m:
-        f.add("risks:total", _int(m.group(1)), "Assessment Summary risk tile")
-    for m in re.finditer(
-        rf"({_NAMES_RE}) (?:{_ROLES}) [\d.]+%(?: calls)? (\S.*?)(?= (?:{_NAMES_RE}) (?:{_ROLES}) |$)",
-        text,
-    ):
-        eng = engine_id(m.group(1))
-        f.name(eng, "engine tables")
-        t = re.match(r"([\d,]+) source tables?\b", m.group(2))
-        if t:
-            f.add(f"tables:{eng}", _int(t.group(1)), "Assessment Summary engine table")
-    for m in re.finditer(rf"({_NAMES_RE}) [\d.]+% · ([\d,]+) quer(?:y|ies) · \d+% fit", text):
-        f.add(f"queries:{engine_id(m.group(1))}", _int(m.group(2)), "Workload Coverage")
-        f.name(engine_id(m.group(1)), "Workload Coverage")
-    for m in re.finditer(rf"({_NAMES_RE}) cache layer · ([\d,]+) cached reads?", text):
-        f.add(f"cached_reads:{engine_id(m.group(1))}", _int(m.group(2)), "Workload Coverage")
-        f.name(engine_id(m.group(1)), "Workload Coverage")
-
-    _close_calls(f, text, "Open Decisions close-call card")
-    _fallback_queries(f, text, "Open Decisions fallback card")
-    m = re.search(r"Pick the engine for tied queries\? ([\d,]+) quer(?:y|ies)", text)
-    f.add("tied", _int(m.group(1)) if m else 0, "Open Decisions tied-queries card")
-    m = re.search(r"Scores tie between (.+?); no routing rule", text)
-    if m:
-        f.name(engines_in(m.group(1)), "Open Decisions tied-queries card")
-
-    m = re.search(
-        r"([\d,]+) risks?: ((?:[\d,]+ (?:CRITICAL|HIGH|MEDIUM|LOW|UNRATED)(?:, )?)+)", text
-    )
-    if m:
-        f.add("risks:total", _int(m.group(1)), "Risk Profile subtitle")
-        sev = {p.split()[1]: _int(p.split()[0]) for p in m.group(2).strip(", ").split(", ")}
-        for s in SEVERITIES:
-            f.add(f"risks:{s}", sev.get(s, 0), "Risk Profile subtitle")
-
-    seq = next(
-        (
-            s
-            for s in slides
-            if s.startswith("Migration Sequencing") or " Migration Sequencing " in s
-        ),
-        "",
-    )
-    cards = re.split(r"\bWAVE (\d+) ", seq)
-    for n, body in zip(cards[1::2], cards[2::2], strict=True):
-        where = f"Migration Sequencing wave {n}"
-        e = re.match(rf"((?:{_NAMES_RE})(?: \+ (?:{_NAMES_RE}))*) ", body)
-        card_engines = [engine_id(x) for x in e.group(1).split(" + ")] if e else []
-        f.name(set(card_engines), where)
-        per_engine = re.findall(rf"({_NAMES_RE}) moves ([\d,]+) tables?", body)
-        single = re.search(r"\bMoves ([\d,]+) tables?", body)
-        if per_engine:
-            for name, k in per_engine:
-                f.add(f"wave{n}:moving:{engine_id(name)}", _int(k), where)
-            f.add(f"wave{n}:moving", sum(_int(k) for _, k in per_engine), where)
-        elif single:
-            f.add(f"wave{n}:moving", _int(single.group(1)), where)
-            if len(card_engines) == 1:
-                f.add(f"wave{n}:moving:{card_engines[0]}", _int(single.group(1)), where)
-        sync = re.search(r"Kept in sync from [^:]+: ([\d,]+) tables?", body)
-        if sync:
-            f.add(f"wave{n}:synced", _int(sync.group(1)), where)
-        elif per_engine or single:
-            f.add(f"wave{n}:synced", 0, where)
-
-    summary = re.search(r"EXECUTIVE SUMMARY (.+?)(?= Engine Role Workload Scope|$)", text)
-    if summary:
-        f.add("removed", frozenset(_other_targets(summary.group(1))), "executive summary")
-    return f

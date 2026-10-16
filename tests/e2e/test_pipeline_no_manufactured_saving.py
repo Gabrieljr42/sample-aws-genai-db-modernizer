@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from tests.e2e.deliverable_figures import deck_slide_texts, md_plain, pdf_page_texts
+from tests.e2e.deliverable_figures import md_plain, pdf_page_texts
 from tests.e2e.pipeline import PipelineResult, run_pipeline_from_file, unzip_sample
 
 pytestmark = pytest.mark.deterministic
@@ -42,7 +42,6 @@ def _texts(run: PipelineResult) -> dict[str, str]:
         "decision report": run.html("decision-report").read_text(),
         "engineering report": md_plain(run.deliverable(".md").read_text()),
         "analysis report": run.html("analysis-report").read_text(),
-        "deck": "\n".join(deck_slide_texts(str(run.deliverable(".pptx")))),
         "pdf": "\n".join(pdf_page_texts(str(run.deliverable(".pdf")))),
     }
 

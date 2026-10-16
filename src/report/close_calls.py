@@ -17,7 +17,7 @@ from . import escaping
 from .facts import report_facts
 from .formatting import fmt_num, plural_noun, plural_verb
 
-# How a customer moves a close call: both reports and the deck. The UI
+# How a customer moves a close call: both reports and the PDF. The UI
 # callout says the same, with its last sentence worded for the page it is on
 # (src/ui/src/locales/en.json, analysis-results.close-calls.override), and
 # the interactive report repeats this one (src/ui/src/utils/ExportReport.js).
@@ -26,11 +26,6 @@ CLOSE_CALL_OVERRIDE_TEXT = (
     "co-dependency group moves with its group); that writes a new assignment version "
     "and redesigns only the engines it touches. The results page's Why this engine "
     "trace shows both scores for each query."
-)
-
-# The deck card's action: the override path, short enough for a card.
-CLOSE_CALL_DECK_ACTION = (
-    "Move any of them in the assignment review; it redesigns only the engines it touches."
 )
 
 

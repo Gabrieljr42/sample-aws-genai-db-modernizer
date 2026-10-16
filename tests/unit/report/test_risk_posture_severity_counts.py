@@ -89,7 +89,7 @@ def test_a_severity_at_zero_count_is_not_mentioned() -> None:
 # must still count (the contract never requires upper case), and a severity
 # outside CRITICAL/HIGH/MEDIUM/LOW must be named "unrated" rather than
 # silently folded into LOW -- matching the deck's UNRATED handling
-# (``pptx_report.py``).
+# (the PDF report).
 
 
 def _counted(risks: list[dict]) -> dict[str, int]:

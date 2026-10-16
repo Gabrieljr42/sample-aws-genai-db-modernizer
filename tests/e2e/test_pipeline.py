@@ -46,7 +46,7 @@ def test_report_has_all_deliverables(run: PipelineResult) -> None:
     assert r["errors"] == [] and r["warnings"] == []
     names = sorted(p.rsplit("/", 1)[-1] for p in r["files"])
     assert "summary-executive-report.pdf" in names
-    assert "summary-executive-report.pptx" in names
+    assert not [n for n in names if n.endswith(".pptx")]
     for kind, ext in (
         ("decision-report", ".html"),
         ("analysis-report", ".html"),
