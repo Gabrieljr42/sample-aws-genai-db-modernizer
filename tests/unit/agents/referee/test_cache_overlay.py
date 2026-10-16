@@ -960,9 +960,9 @@ class TestFallbackOwner:
         """#549 round-2 review, Critical 1: with no triage ``query_capabilities``
         at all, ``fallback_owner`` still derives the capability gate from the
         collector's own signals (``ScoringContext.from_pipeline``) rather than
-        a bare text-only guess -- a ``text_search`` signal's "inverted_index"
+        a bare text-only guess -- a ``text_search`` signal's "text_pattern_match"
         requirement, which a parameterized ``LIKE ?`` alone would not surface
-        from text, excludes dynamodb (no inverted_index) and leaves
+        from text, excludes dynamodb (no text_pattern_match) and leaves
         aurora_mysql (which has it) as the only serviceable candidate.
         """
         query = _q("q", text="SELECT * FROM items WHERE name LIKE ?", tables=["items"])

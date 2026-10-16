@@ -817,11 +817,11 @@ class TestAbsorptionAppliedToAssignments:
         assert {engine_of[qid] for qid in doc_ids} == {"aurora_postgresql"}
 
 
-def test_aurora_mysql_serves_inverted_index():
+def test_aurora_mysql_serves_text_pattern_match():
     """InnoDB FULLTEXT indexes give Aurora MySQL an inverted index (#165)."""
     from src.agents.referee.capability_registry import can_engine_serve_capability
 
-    assert can_engine_serve_capability("aurora_mysql", ["inverted_index"])
+    assert can_engine_serve_capability("aurora_mysql", ["text_pattern_match"])
 
 
 def test_tiny_opensearch_absorbed_end_to_end():
@@ -853,7 +853,7 @@ def test_tiny_opensearch_absorbed_end_to_end():
             {"signal": "complex_joins", "targets": ["aurora_mysql"], "query_ids": join_ids},
             {"signal": "text_search", "targets": ["opensearch"], "query_ids": os_ids},
         ],
-        "query_capabilities": {qid: ["inverted_index"] for qid in os_ids},
+        "query_capabilities": {qid: ["text_pattern_match"] for qid in os_ids},
     }
     collector = {
         "queries": {
@@ -949,7 +949,7 @@ class TestOpenSearchJustificationFloor:
             # Isolates the #326 justification floor under test from the hard
             # capability gate: a real ``triage.triage()`` run would also mark
             # "search"'s own ``text_search`` signal as requiring
-            # "inverted_index" (``SIGNAL_TO_CAPABILITY``) regardless of
+            # "text_pattern_match" (``SIGNAL_TO_CAPABILITY``) regardless of
             # whether the query shows real search depth -- some of these
             # tests are about that gate directly ("no eligible destination"
             # keeps OpenSearch because nothing else can serve it); others
@@ -998,7 +998,7 @@ class TestOpenSearchJustificationFloor:
             },
         }
         if aurora_engine:
-            # Aurora has its own text-search capability (``inverted_index`` in
+            # Aurora has its own text-search capability (``text_pattern_match`` in
             # the capability registry -- tsvector/FULLTEXT), unlike DynamoDB,
             # which the resolver's own capability gate excludes outright for
             # these queries (#502 review round 6, finding 2).
@@ -1093,7 +1093,7 @@ class TestOpenSearchJustificationFloor:
         """discourse shape: to_tsvector construction, native to Postgres, at tiny traffic.
 
         Aurora PostgreSQL is committed here (``include_aurora=True``) and has
-        its own text-search capability (``inverted_index`` in the capability
+        its own text-search capability (``text_pattern_match`` in the capability
         registry, via tsvector) -- unlike DynamoDB, which the resolver's own
         capability gate excludes outright for this query (#502 review round
         5, finding N3: confirmed directly against the real resolver trace --

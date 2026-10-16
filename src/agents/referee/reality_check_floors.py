@@ -798,7 +798,7 @@ def _find_best_absorber_for_query(
         #     ``complex_joins`` capability (``capability_registry``), not a
         #     private table.
         #   - ``referential_integrity``, ``transactions`` (dynamodb/
-        #     documentdb), ``text_search`` (aurora, via ``inverted_index``):
+        #     documentdb), ``text_search`` (aurora, via ``text_pattern_match``):
         #     no longer excluded. None is a structural impossibility
         #     (ADR-031 Decision 2 Step 2); ``transactions`` hard-excluding
         #     DynamoDB was itself an ADR-031 Decision 3 violation in the old

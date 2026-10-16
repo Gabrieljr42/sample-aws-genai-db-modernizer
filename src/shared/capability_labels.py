@@ -10,7 +10,7 @@ Same shape as ``src.shared.signal_labels.SIGNAL_NOUNS``/``signal_noun``.
 
 Every capability ``capability_registry.detect_required_capabilities`` can put
 in a "lacks required capability" reason needs an entry here (#393 review:
-``inverted_index`` and ``scan_engine`` had no entry, so a query pinned to
+``text_pattern_match`` and ``scan_engine`` had no entry, so a query pinned to
 Aurora for either leaked the raw capability id into customer text instead of
 reading as prose; ``tests/unit/agents/referee/
 test_synthesis_capability_pin_display_coverage.py`` asserts this dict covers
@@ -37,16 +37,24 @@ CAPABILITY_DISPLAY_NAMES: dict[str, str] = {
     "complex_joins": "multi-table joins",
     "computed_join": "a join on a computed expression",
     "sql_admin": "a utility or DDL statement",
-    "inverted_index": "full-text or pattern search",
+    "text_pattern_match": "full-text or pattern search",
     "scan_engine": "window or recursive queries",
     "multi_doc_acid": "multi-document transactions",
 }
 
 
+# Capability ids an older artifact may still carry, mapped to today's id (#493).
+# ``text_pattern_match`` was ``inverted_index``: a triage.json or report.json saved
+# before the rename still says it. The capability gate maps it
+# (``capability_registry.current_capability_ids``) and so does every label here.
+LEGACY_CAPABILITY_IDS: dict[str, str] = {"inverted_index": "text_pattern_match"}
+
+
 def capability_label(name: str) -> str:
     """``complex_joins`` -> ``multi-table joins``; unknown capabilities read as
     their name with underscores turned to spaces, same fallback shape as
-    ``src.shared.signal_labels.signal_noun``."""
+    ``src.shared.signal_labels.signal_noun``. A legacy id reads as today's."""
+    name = LEGACY_CAPABILITY_IDS.get(name, name)
     return CAPABILITY_DISPLAY_NAMES.get(name, name.replace("_", " "))
 
 
@@ -72,7 +80,7 @@ def capability_gap_phrase(names: Iterable[str]) -> str:
     ``needs aggregation and multi-table joins``; ``["sql_admin"]`` -> ``is a
     utility or DDL statement``. Clauses come in sorted capability order,
     needs last, joined with ", and "."""
-    unique = sorted(set(names))
+    unique = sorted({LEGACY_CAPABILITY_IDS.get(n, n) for n in names})
     clauses = [_CAPABILITY_GAP_CLAUSES[n] for n in unique if n in _CAPABILITY_GAP_CLAUSES]
     needs = [capability_label(n) for n in unique if n not in _CAPABILITY_GAP_CLAUSES]
     if needs:
@@ -139,7 +147,7 @@ CAPABILITY_REDESIGN_HINTS: dict[str, dict[str, str]] = {
             "that owns the data, and SHOW or DDL become index API calls (mappings, settings)."
         ),
     },
-    "inverted_index": {
+    "text_pattern_match": {
         "dynamodb": (
             "serve the search from an index synced from DynamoDB (for example DynamoDB "
             "Streams to an OpenSearch Serverless collection), or replace the leading-wildcard "
@@ -205,7 +213,7 @@ def redesign_hints(capabilities: Iterable[str], gates: Iterable[tuple[str, str]]
     pairs = list(gates)
     gated = sorted({e for e, g in pairs if g == "capability"})
     hints: list[str] = []
-    for cap in sorted(set(capabilities)):
+    for cap in sorted({LEGACY_CAPABILITY_IDS.get(c, c) for c in capabilities}):
         by_text: dict[str, list[str]] = {}
         for engine in gated:
             text = CAPABILITY_REDESIGN_HINTS.get(cap, {}).get(engine)

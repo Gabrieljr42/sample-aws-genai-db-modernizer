@@ -18,7 +18,7 @@ from src.shared.capability_labels import CAPABILITY_DISPLAY_NAMES, capability_ga
         ("complex_joins", "needs multi-table joins"),
         ("computed_join", "joins on a computed expression"),
         ("sql_admin", "is a utility or DDL statement"),
-        ("inverted_index", "needs full-text or pattern search"),
+        ("text_pattern_match", "needs full-text or pattern search"),
         ("scan_engine", "uses a window function or a recursive query"),
         ("multi_doc_acid", "needs multi-document transactions"),
     ],
@@ -31,7 +31,7 @@ def test_every_capability_has_a_phrase() -> None:
     known = set(CAPABILITY_DISPLAY_NAMES).union(*ENGINE_CAPABILITIES.values())
     known.discard("strong_consistency")  # an engine trait, never a query requirement
     covered = {"aggregation", "complex_joins", "computed_join", "sql_admin"}
-    covered |= {"inverted_index", "scan_engine", "multi_doc_acid"}
+    covered |= {"text_pattern_match", "scan_engine", "multi_doc_acid"}
     assert known == covered
 
 
@@ -49,7 +49,7 @@ def test_three_gaps_of_mixed_shape_read_as_one_list() -> None:
 
 
 def test_three_needs_read_as_a_list() -> None:
-    assert capability_gap_phrase(["inverted_index", "aggregation", "complex_joins"]) == (
+    assert capability_gap_phrase(["text_pattern_match", "aggregation", "complex_joins"]) == (
         "needs aggregation, multi-table joins and full-text or pattern search"
     )
 

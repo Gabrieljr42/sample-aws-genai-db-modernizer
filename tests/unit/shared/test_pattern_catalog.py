@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from src.agents.referee import query_scoring, triage
+from src.agents.referee import query_scoring, substring_match, triage
 from src.shared import engine_capabilities
 from src.shared.catalog import CatalogError
 from src.shared.catalog.patterns import (
@@ -544,6 +544,9 @@ DETECTOR_MODULES = {
         dynamodb_analysis_tools,
         opensearch_analysis_tools,
         redis_analysis_tools,
+        # The scorer's own detector for a pattern no analysis reports (#493): it reads
+        # the facts layer's leading-wildcard fact, never a score.
+        substring_match,
     )
 }
 
@@ -562,7 +565,7 @@ UNDETECTED = {
 
 # The hard capability gate's name for each pattern ``capability`` it backs. The gate has
 # no fuzzy-match capability, so ``fuzzy_search`` is not gate-backed.
-GATE_CAPABILITY = {"acid_transactions": "multi_doc_acid", "text_search": "inverted_index"}
+GATE_CAPABILITY = {"acid_transactions": "multi_doc_acid", "text_search": "text_pattern_match"}
 # (pattern, engine) pairs where the catalog and the gate disagree on purpose. None since
 # #493 gave DynamoDB multi_doc_acid (ADR-031 Decision 3: TransactWriteItems is ACID).
 GATE_DISAGREEMENTS: set[tuple[str, str]] = set()

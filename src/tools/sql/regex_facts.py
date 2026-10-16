@@ -15,7 +15,9 @@ comment is a join), which is why the facade reads the syntax tree first.
 - ``has_subquery``: more than one ``select`` substring;
 - ``wildcard_leading``: ``LIKE`` followed by a quote and ``%`` (the
   capability gate's and the DynamoDB exclusion's own detector, which reads
-  ``ILIKE`` and ``NOT LIKE`` too).
+  ``ILIKE`` and ``NOT LIKE`` too), a SQL Server ``N'%...'`` literal, or a
+  ``CONCAT('%', ...)`` whose first part is one (#493); ``wildcard_likes`` is each
+  of them, with its column and whether it is a word search.
 
 The facts #893 added to the facade fall back to the text detector each
 replaced, one per fact; ``group_by`` and ``aggregate_function_count`` are
@@ -59,12 +61,12 @@ count:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 _JOIN_WORD_RE = re.compile(r"\bjoin\b", re.IGNORECASE)
 _AGGREGATION_WORD_RE = re.compile(
     r"\b(count|sum|avg|min|max|group_concat|string_agg|array_agg|group\s+by)\b", re.IGNORECASE
 )
-_LEADING_WILDCARD_RE = re.compile(r"LIKE\s+['\"]%", re.IGNORECASE)
 # ``GROUP BY``, ``ORDER BY``, a pattern-match predicate, a literal-prefix ``LIKE`` and
 # the ``SELECT`` word: the regex readings ``query_shape``'s shape check runs on
 # comment- and literal-stripped text, defined here once (#893 review).
@@ -73,6 +75,28 @@ ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 PATTERN_PREDICATE_RE = re.compile(r"\b(?:I?LIKE|SIMILAR\s+TO|REGEXP|RLIKE)\b", re.IGNORECASE)
 LITERAL_PREFIX_LIKE_RE = re.compile(r"\bI?LIKE\s+'[^%_']", re.IGNORECASE)
 SELECT_WORD_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
+# A LIKE/ILIKE whose pattern starts with ``%``: a quoted literal (``N'%...'``
+# included), or a ``CONCAT(...)`` whose first part is one (#493).
+_LEADING_WILDCARD_RE = re.compile(
+    r"\b(?:NOT\s+)?I?LIKE\s+(?=N?['\"]%|CONCAT\s*\(\s*N?['\"]%)", re.IGNORECASE
+)
+# The whole pattern after LIKE: a CONCAT call, or literals and binds joined by + or ||.
+_SQL_STRING = r"N?(?:'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\")"
+_LIKE_PATTERN_RE = re.compile(
+    r"(?P<pattern>CONCAT\s*\([^()]*\)|"
+    + _SQL_STRING
+    + r"(?:\s*(?:\+|\|\|)\s*(?:[@:$?]?\w+|\?|"
+    + _SQL_STRING
+    + r"))*)",
+    re.IGNORECASE,
+)
+_IDENT = r'(?:[A-Za-z_][\w$]*|"[^"]+"|\[[^\]]+\]|`[^`]+`)'
+_COLUMN_BEFORE_RE = re.compile(rf"({_IDENT}(?:\s*\.\s*{_IDENT})*)\s*$")
+_CONCAT_ARGS_RE = re.compile(r"^CONCAT\s*\((?P<args>[^()]*)\)$", re.IGNORECASE)
+_CONCAT_SPLIT_RE = re.compile(r"\s*(?:\+|\|\|)\s*")
+# A word search's term: letters and digits, single spaces between words.
+WORDS_RE = re.compile(r"^[^\W_]+(?: [^\W_]+)*$")
+_NOT_A_COLUMN = frozenset({"and", "or", "not", "where", "on", "when", "then", "else", "case"})
 _AGGREGATE_WORD_RE = re.compile(
     r"\b(?:count|sum|avg|min|max|group_concat|string_agg|array_agg)\b", re.IGNORECASE
 )
@@ -157,9 +181,65 @@ def regex_has_subquery(query_text: str) -> bool:
     return (query_text or "").lower().count("select") > 1
 
 
+@dataclass(frozen=True)
+class WildcardLike:
+    """One ``LIKE``/``ILIKE`` whose pattern starts with ``%`` (``SqlFacts.wildcard_likes``).
+
+    ``column``: the bare, lower-case name of the column it tests, or None when the
+    left side is an expression. ``word_search``: the pattern is ``%term%`` with one
+    word-like term, a literal of letters and digits (``'%red shoe%'``) or a bind
+    parameter (``'%' + @t + '%'``, ``CONCAT('%', ?, '%')``): an engine's word index
+    can serve it after a rewrite. Any other shape (``'%.com'``, ``'%a_b%'``) is a
+    substring match (#493).
+    """
+
+    column: str | None
+    word_search: bool
+
+
+def _literal_value(part: str) -> str | None:
+    part = part.strip()
+    if part[:1] in ("N", "n") and part[1:2] in ("'", '"'):
+        part = part[1:]
+    if len(part) >= 2 and part[0] == part[-1] and part[0] in ("'", '"'):
+        return part[1:-1].replace(part[0] * 2, part[0])
+    return None
+
+
+def _regex_word_search(pattern: str) -> bool:
+    concat = _CONCAT_ARGS_RE.match(pattern.strip())
+    parts = (
+        [a.strip() for a in concat.group("args").split(",")]
+        if concat
+        else _CONCAT_SPLIT_RE.split(pattern.strip())
+    )
+    values = [_literal_value(p) for p in parts]
+    if len(parts) == 1 and values[0] is not None:
+        value = values[0]
+        return len(value) > 2 and value.endswith("%") and bool(WORDS_RE.match(value[1:-1]))
+    return len(parts) == 3 and values[0] == "%" and values[1] is None and values[2] == "%"
+
+
+def regex_wildcard_likes(query_text: str) -> tuple[WildcardLike, ...]:
+    """Each ``LIKE '%...``, ``LIKE N'%...`` or ``LIKE CONCAT('%', ...`` (``ILIKE``,
+    ``NOT LIKE`` included), with the column before it and whether it is a word search."""
+    text = query_text or ""
+    found = []
+    for match in _LEADING_WILDCARD_RE.finditer(text):
+        pattern = _LIKE_PATTERN_RE.match(text, match.end())
+        word = bool(pattern) and _regex_word_search(pattern.group("pattern"))  # type: ignore[union-attr]
+        column_match = _COLUMN_BEFORE_RE.search(text[: match.start()])
+        column = None
+        if column_match:
+            name = re.split(r"\s*\.\s*", column_match.group(1))[-1].strip('"[]`').lower()
+            column = None if name in _NOT_A_COLUMN else name
+        found.append(WildcardLike(column=column, word_search=word))
+    return tuple(found)
+
+
 def regex_wildcard_leading(query_text: str) -> bool:
-    """``LIKE '%...`` / ``LIKE "%...`` (``ILIKE``, ``NOT LIKE`` included)."""
-    return bool(_LEADING_WILDCARD_RE.search(query_text or ""))
+    """A leading-wildcard ``LIKE`` (:func:`regex_wildcard_likes` finds at least one)."""
+    return bool(regex_wildcard_likes(query_text))
 
 
 def regex_group_by(query_text: str) -> bool:

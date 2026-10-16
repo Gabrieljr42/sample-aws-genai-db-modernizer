@@ -341,7 +341,7 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # itself has no rule for now looks at settled (non-tied) workload share
     # first, and dynamodb already carries more of it on this sample --
     # dynamodb +1, documentdb -1.
-    # #485: the inverted_index hard gate used to score DocumentDB 0 on every
+    # #485: the text_pattern_match hard gate used to score DocumentDB 0 on every
     # leading-wildcard/full-text query regardless of its own table
     # confidence, while Aurora MySQL (which runs the identical pattern the
     # same way, an unindexed scan) was never gated -- so DocumentDB now

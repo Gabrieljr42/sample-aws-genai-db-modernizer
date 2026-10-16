@@ -407,14 +407,14 @@ class TestOpenSearchAbsorber:
         assert self._absorber(["aggregations"]) == "opensearch"
 
     def test_capability_counts(self):
-        assert may_absorb("opensearch", "q", {}, {}, {"q": ["inverted_index"]})
+        assert may_absorb("opensearch", "q", {}, {}, {"q": ["text_pattern_match"]})
         assert not may_absorb("opensearch", "q", {}, {}, {})
         assert may_absorb("dynamodb", "q", {}, {}, {})
 
     def test_write_never_absorbed_by_opensearch_even_with_a_matching_capability(self):
         """The write gate (#303) is checked before any signal/capability match."""
         write = {"query_type": "UPDATE", "query_text": "UPDATE t SET a = 1"}
-        assert not may_absorb("opensearch", "q", write, {}, {"q": ["inverted_index"]})
+        assert not may_absorb("opensearch", "q", write, {}, {"q": ["text_pattern_match"]})
         assert may_absorb("dynamodb", "q", write, {}, {})
 
 

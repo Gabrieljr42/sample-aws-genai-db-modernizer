@@ -6,6 +6,12 @@ workload signals, and confidence scoring.
 
 Version History:
 - 1.0 (2026-04-16): Initial version — extracted from triage_handler raw dict
+
+Note (#493, no schema change, version unchanged): the capability id
+``inverted_index`` in ``query_capabilities`` is now ``text_pattern_match``. A
+triage.json written before that still says ``inverted_index``; every reader maps
+it through ``capability_registry.triage_query_capabilities``
+(``LEGACY_CAPABILITY_IDS``), so an old assessment gates as a new one.
 """
 
 from datetime import datetime

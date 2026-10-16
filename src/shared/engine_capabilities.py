@@ -111,7 +111,7 @@ ACID_TRANSACTION_ENGINES: frozenset[str] = capability_engines("acid_transactions
 # but no text search.
 #
 # #485 (fixed): the HARD capability gate
-# (``capability_registry.ENGINE_CAPABILITIES``'s ``inverted_index``, checked
+# (``capability_registry.ENGINE_CAPABILITIES``'s ``text_pattern_match``, checked
 # in ``AssignmentResolver.resolve`` Step 3b, before this set is ever
 # consulted) used to exclude DocumentDB but not Aurora MySQL, even though
 # both only run these patterns unindexed. Its detector fires both on a
@@ -119,7 +119,7 @@ ACID_TRANSACTION_ENGINES: frozenset[str] = capability_engines("acid_transactions
 # (``MATCH ... AGAINST``, ``tsvector``/``tsquery``), so a leading-wildcard
 # query or a full-text query used to score 0 on DocumentDB, hard-excluded
 # before this set was ever reached. ``ENGINE_CAPABILITIES`` now lists
-# ``inverted_index`` for DocumentDB too, so both gates agree and the soft
+# ``text_pattern_match`` for DocumentDB too, so both gates agree and the soft
 # exemption below is reachable for every pattern this set covers.
 TEXT_SEARCH_ENGINES: frozenset[str] = capability_engines("text_search")
 

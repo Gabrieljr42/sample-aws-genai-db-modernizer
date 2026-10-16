@@ -1113,11 +1113,11 @@ class TestTextSearchCapabilityScopedPenalty:
     def test_documentdb_is_no_longer_hard_excluded_from_a_leading_wildcard_like(self):
         """#485: a literal leading wildcard (``LIKE '%x%'``) used to trip the
 
-        HARD ``inverted_index`` capability gate (``capability_registry``)
+        HARD ``text_pattern_match`` capability gate (``capability_registry``)
         for DocumentDB only, scoring it 0 before the soft, per-engine
         exemption logic below was ever consulted -- even though Aurora
         MySQL runs the identical pattern the same way (an unindexed scan)
-        and was never gated. Now that the registry lists ``inverted_index``
+        and was never gated. Now that the registry lists ``text_pattern_match``
         as a capability DocumentDB has too, it falls through to that same
         scoring path and wins on its own table confidence (90) against
         OpenSearch's 50.
@@ -1138,12 +1138,15 @@ class TestTextSearchCapabilityScopedPenalty:
         assert q1.assigned_engine == "documentdb"
         assert q1.confidence == 90  # unpenalized -- documentdb is exempt from wildcard-search
         assert "documentdb lacks required capability" not in q1.assignment_reason
-        assert "runs this search pattern natively" in q1.assignment_reason
+        # #493: the reason is the substring-match pattern's, the more specific one for a
+        # literal leading wildcard -- here a word search, so not penalised, with the redesign.
+        assert "as an unanchored $regex" in q1.assignment_reason
+        assert "word search, so it is not penalised" in q1.assignment_reason
 
     def test_documentdb_is_exempt_for_a_parameterized_like(self):
         """A query with no literal wildcard in its text (``LIKE ?``) never
 
-        trips the hard ``inverted_index`` gate -- only OpenSearch's own
+        trips the hard ``text_pattern_match`` gate -- only OpenSearch's own
         keyword-based detection (looking for ``"like "``) flags it as
         ``wildcard-search``. DocumentDB is then free to win it, unpenalized.
         """
@@ -1406,7 +1409,7 @@ class TestTextSearchOverrideNeedsJustification:
         # Isolates the signal-override justification floor under test from
         # the hard capability gate: a real ``triage.triage()`` run would also
         # mark this query's own ``text_search`` signal as requiring
-        # "inverted_index" (``SIGNAL_TO_CAPABILITY``), which this test is not
+        # "text_pattern_match" (``SIGNAL_TO_CAPABILITY``), which this test is not
         # about -- an explicit, empty ``query_capabilities`` (triage ran, and
         # for THIS synthetic fixture found nothing structurally required)
         # keeps the capability gate out of the way (#549 round-2 review:
@@ -1457,7 +1460,7 @@ class TestTextSearchOverrideNeedsJustification:
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         # The real thing under test is that the override never fires: both
         # engines score 0 for this query on their own merits (dynamodb lacks
-        # the inverted_index capability a bare to_tsvector needs; opensearch
+        # the text_pattern_match capability a bare to_tsvector needs; opensearch
         # gets no credit either, with no @@ match to show real search depth),
         # an exact tie ADR-031 has no rule for -- #503 review: which
         # placeholder engine an unresolved, zero-score tie like this lands on

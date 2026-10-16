@@ -26,6 +26,7 @@ from src.agents.referee.assignment_resolver import retained_engine_for
 from src.agents.referee.aurora_choice import source_database_engine
 from src.agents.referee.cache_overlay import CACHE_OVERLAY_ENGINES, PATTERN_LABELS, overlay_summary
 from src.agents.referee.routed_confidence import routed_fits
+from src.agents.referee.substring_match import substring_match_risks
 from src.agents.referee.synthesis_grounding import (
     display_name,
     engine_mentions,
@@ -375,6 +376,7 @@ def build_ranking(data: SynthesisData) -> list[dict]:
         {e: a.analysis or {} for e, a in data.engines.items()},
         source_tables=[str(t["table_id"]) for t in data.source_tables if t.get("table_id")],
         source_engine=source_engine_of(data.collector),
+        schema_tables=data.source_tables,
     )
 
     for engine, artifacts in data.engines.items():
@@ -1500,6 +1502,14 @@ def build_risk_assessment(
                     "object_name": str(mn.get("object_name") or ""),
                 }
             )
+
+    # Leading-wildcard LIKE (#493): each final engine's reason, as a risk -- the scan a
+    # scan engine keeps, the extension Aurora PostgreSQL needs, a word search's redesign --
+    # and the lower score another candidate took for it. One source for the sentences:
+    # substring_match, the same one the scorer and the decision trace read.
+    for risk in substring_match_risks(data.collector, query_engine, data.engines):
+        risk_id += 1
+        risks.append({"risk_id": f"RISK-{risk_id:03d}", **risk})
 
     for target in sorted(coverage_gaps):
         gap = coverage_gaps[target]
