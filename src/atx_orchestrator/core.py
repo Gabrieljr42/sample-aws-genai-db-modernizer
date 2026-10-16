@@ -973,8 +973,9 @@ def run_reality_check_core(
 
     ``llm_mode`` comes from ``REALITY_CHECK_LLM_MODE`` (default ``"bedrock"``,
     per ADR-026). Set it to ``"none"`` to run purely deterministically (e.g. in
-    tests without Bedrock access); ``"external"`` is intentionally unsupported in
-    ATX (it needs an out-of-band resume the A2A model cannot do).
+    tests without Bedrock access); ``"external"`` is rejected with a ``ValueError``
+    before any work (it needs an out-of-band resume the A2A model cannot do), and so
+    is any other value than ``"bedrock"`` or ``"none"``.
 
     Prerequisites: collector/output.json, referee-triage/triage.json,
     assignment/v{assignment_version}/assignment.json, and at least one analysis
@@ -987,6 +988,19 @@ def run_reality_check_core(
     goes to ``next_assignment_version()`` so no version is overwritten (issue
     #189). With the default, a run whose input is already consolidated is a no-op.
     """
+    llm_mode = os.environ.get("REALITY_CHECK_LLM_MODE", "bedrock")
+    if llm_mode == "external":
+        # ADR-026 Decision 4: the A2A model has no mid-run input, so nothing could
+        # supply the response and the run would report success while still waiting.
+        raise ValueError(
+            "REALITY_CHECK_LLM_MODE=external is not supported in the assessment core "
+            "(ADR-026 Decision 4); use 'bedrock' or 'none'."
+        )
+    if llm_mode not in ("bedrock", "none"):
+        raise ValueError(
+            f"REALITY_CHECK_LLM_MODE={llm_mode!r} is not a valid mode; " "use 'bedrock' or 'none'."
+        )
+
     store = store or make_store()
 
     requested_version = assignment_version
@@ -1006,7 +1020,6 @@ def run_reality_check_core(
 
     from src.agents.referee.reality_check_handler import run_reality_check_handler
 
-    llm_mode = os.environ.get("REALITY_CHECK_LLM_MODE", "bedrock")
     logger.info(
         "ATX reality-check starting: job_id=%s db=%s assignment_version=%s llm_mode=%s",
         job_id,
