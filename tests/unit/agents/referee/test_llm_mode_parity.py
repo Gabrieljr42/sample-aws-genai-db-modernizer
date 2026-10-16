@@ -146,7 +146,6 @@ def _partial_opensearch_consolidation(
         "architectural_patterns": [],
         "unique_value_assessment": {},
         "revised_assignments": revised,
-        "lightweight_recommendations": [],
         "move_ledger": ledger,
     }
 

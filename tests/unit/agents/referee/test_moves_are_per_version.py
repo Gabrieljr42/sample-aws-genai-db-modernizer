@@ -68,7 +68,6 @@ def test_the_reality_check_version_does_not_inherit_v1_moves(tmp_path) -> None:
         "executive_summary": None,
         "before_distribution": {"opensearch": 1, "aurora_mysql": 1},
         "after_distribution": {"aurora_mysql": 2},
-        "lightweight_recommendations": [],
         "collector_output": {},
         "analysis_outputs": {},
         "assignment": {

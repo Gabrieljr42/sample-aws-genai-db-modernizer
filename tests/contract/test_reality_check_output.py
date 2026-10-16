@@ -1,8 +1,12 @@
 """Tests for reality check output contract."""
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
+from src.contracts import reality_check_output
 from src.contracts.reality_check_output import (
     ArchitecturalPattern,
     Consolidation,
@@ -256,8 +260,26 @@ class TestRealityCheckOutputContract:
 
     def test_contract_version_defaults(self, valid_reality_check_data):
         output = RealityCheckOutputContract.model_validate(valid_reality_check_data)
-        # #589: bumped to 1.10 for sweep_decisions.
-        assert output.contract_version == "1.13"
+        # #790: 2.0 removed lightweight_recommendations.
+        assert output.contract_version == "2.0"
+
+    def test_lightweight_recommendations_is_not_a_field(self, valid_reality_check_data):
+        output = RealityCheckOutputContract.model_validate(valid_reality_check_data)
+        assert "lightweight_recommendations" not in RealityCheckOutputContract.model_fields
+        assert "lightweight_recommendations" not in output.model_dump(mode="json")
+        assert not hasattr(reality_check_output, "LightweightRecommendation")
+
+    @pytest.mark.parametrize(
+        "name", ["reality_check_output_v1_13.json", "reality_check_output_v1_13_empty.json"]
+    )
+    def test_an_artifact_saved_before_2_0_still_loads(self, name):
+        """Old saved files carry lightweight_recommendations; the key is ignored (#790)."""
+        old = json.loads((Path(__file__).parent / "fixtures" / name).read_text())
+        assert "lightweight_recommendations" in old
+        output = RealityCheckOutputContract.model_validate(old)
+        assert output.source_assignment_version == 1
+        assert output.before_distribution == {"dynamodb": 3}
+        assert "lightweight_recommendations" not in output.model_dump(mode="json")
 
     def test_sweep_decisions_defaults_and_roundtrips(self, valid_reality_check_data):
         # Additive in 1.10 (#589): an output written before this field

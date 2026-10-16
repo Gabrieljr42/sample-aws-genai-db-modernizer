@@ -366,3 +366,12 @@ class TestRoutingFlagsFromTrace:
         grouped = {"groups": [{"routing_flags": [flag]}, {"trace": []}]}
         assert routing_flags_from_trace(grouped) == [flag]
         assert routing_flags_from_trace({}) == []
+
+
+def test_the_router_has_no_lightweight_service_parameter() -> None:
+    """Nothing ever passed one, so the parameter and its skips are gone (#790)."""
+    import inspect
+
+    from src.agents.referee.post_schema_router import route_unsupported_queries
+
+    assert "lightweight_query_ids" not in inspect.signature(route_unsupported_queries).parameters

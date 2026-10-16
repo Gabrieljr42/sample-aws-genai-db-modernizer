@@ -115,7 +115,6 @@ def route_unsupported_queries(
     cascade_depth: int = 0,
     max_depth: int = 2,
     already_routed: set[str] | None = None,
-    lightweight_query_ids: set[str] | None = None,
     *,
     assigned_engines: Mapping[str, str],
     customer_pinned: set[str] | None = None,
@@ -144,7 +143,6 @@ def route_unsupported_queries(
         cascade_depth: current depth (0 = first pass)
         max_depth: maximum cascade depth before declaring terminal
         already_routed: query IDs already routed in prior passes
-        lightweight_query_ids: queries served by a lightweight service, never routed
         assigned_engines: {query_id: engine} from the assignment schema design
             worked on. A flag (or unsupported pattern) counts only for a query
             on the reporting engine -- a reviewer judges only its own engine's
@@ -169,7 +167,6 @@ def route_unsupported_queries(
         RouterOutput with routing decisions and terminal queries
     """
     already_routed = already_routed or set()
-    lightweight_query_ids = lightweight_query_ids or set()
     customer_pinned = customer_pinned or set()
     routing_flags_by_engine = routing_flags_by_engine or {}
     scoring_context = scoring_context or ScoringContext()
@@ -197,7 +194,7 @@ def route_unsupported_queries(
             continue
         for flag in _engine_flags(engine, routing_flags_by_engine.get(engine, []), output):
             for qid in flag.query_ids:
-                if qid in already_routed or qid in lightweight_query_ids:
+                if qid in already_routed:
                     continue
                 if qid in customer_pinned:
                     logger.info(
@@ -228,7 +225,6 @@ def route_unsupported_queries(
                 for m in group_of.get(qid, [])
                 if assigned_engines.get(m) == engine
                 and m not in already_routed
-                and m not in lightweight_query_ids
                 and m not in customer_pinned
             }
         )

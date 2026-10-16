@@ -4,7 +4,6 @@ Tests the interaction between capability detection and consolidation logic:
 - Gate blocks absorption when capability missing
 - Gate allows absorption when capability present
 - Partial consolidation: some queries move, some stay
-- Lightweight alternative recommended in the reality check output
 - Full end-to-end: text_search queries block DynamoDB absorption
 """
 
@@ -194,11 +193,11 @@ class TestPartialConsolidation:
                 assert "q-search" in c["queries_retained"]
 
 
-class TestLightweightRecommendations:
-    """Test lightweight alternative suggestions."""
+class TestSearchQueryStaysOnOpensearch:
+    """A text-search query keeps its engine through a full reality check run."""
 
-    def test_lightweight_in_full_run(self):
-        """End-to-end: lightweight recommendations appear in reality check output."""
+    def test_search_query_stays_in_full_run(self):
+        """End-to-end: the output has no lightweight_recommendations key (#790)."""
         # 1 text_search query on opensearch, 19 basic queries on opensearch, 30 on dynamodb
         assignment = {
             "query_assignments": [
@@ -245,7 +244,7 @@ class TestLightweightRecommendations:
 
         result = run_reality_check(assignment, triage, {}, collector)
 
-        # Check lightweight recommendations are present (if partial consolidation occurred)
+        assert "lightweight_recommendations" not in result
 
         # The search query should remain on opensearch regardless
         q_search = next(qa for qa in result["revised_assignments"] if qa["query_id"] == "q-search")
@@ -381,4 +380,4 @@ class TestBackwardCompatibility:
         # Should not raise
         result = run_reality_check(assignment, triage, {}, collector)
         assert "revised_assignments" in result
-        assert "lightweight_recommendations" in result
+        assert "lightweight_recommendations" not in result

@@ -10953,69 +10953,6 @@
           "kind": "array"
         }
       },
-      "lightweight_recommendations": {
-        "required": false,
-        "schema": {
-          "items": {
-            "kind": "object",
-            "properties": {
-              "capability": {
-                "required": true,
-                "schema": {
-                  "kind": "scalar",
-                  "type": "string"
-                }
-              },
-              "cost_profile": {
-                "required": true,
-                "schema": {
-                  "kind": "scalar",
-                  "type": "string"
-                }
-              },
-              "limitations": {
-                "required": true,
-                "schema": {
-                  "kind": "scalar",
-                  "type": "string"
-                }
-              },
-              "pattern": {
-                "required": true,
-                "schema": {
-                  "kind": "scalar",
-                  "type": "string"
-                }
-              },
-              "query_ids": {
-                "required": true,
-                "schema": {
-                  "items": {
-                    "kind": "scalar",
-                    "type": "string"
-                  },
-                  "kind": "array"
-                }
-              },
-              "replaces_engine": {
-                "required": true,
-                "schema": {
-                  "kind": "scalar",
-                  "type": "string"
-                }
-              },
-              "service": {
-                "required": true,
-                "schema": {
-                  "kind": "scalar",
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "kind": "array"
-        }
-      },
       "model_flags_rejected": {
         "required": false,
         "schema": {
@@ -11269,8 +11206,8 @@
         }
       }
     },
-    "schema_hash": "f8afa93ea5ac4f2daab36a2dfeb1b9c640a4d417e797afadd0305ed05e58d641",
-    "version": "1.13"
+    "schema_hash": "8f45ffe65964e63f6005ec3bb08f2f4fe478025022a691f8d6ac09b75ec91f7f",
+    "version": "2.0"
   },
   "referee_input.RefereeInput": {
     "fields": {

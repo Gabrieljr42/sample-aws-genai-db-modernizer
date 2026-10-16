@@ -56,7 +56,6 @@ def _result(*, revised: list[dict], collector_queries: list[dict]) -> dict:
         "executive_summary": None,
         "before_distribution": {"dynamodb": 1, "opensearch": 2},
         "after_distribution": {"dynamodb": 2, "opensearch": 1},
-        "lightweight_recommendations": [],
         "collector_output": {
             "queries": {"query_patterns": collector_queries},
             "database_schema": {"tables": []},

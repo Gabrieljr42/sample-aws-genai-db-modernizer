@@ -655,7 +655,6 @@ class TestRunRealityCheckHandlerBackwardCompatible:
                         "assignment_reason": "reality check: consolidated from documentdb → dynamodb",
                     },
                 ],
-                "lightweight_recommendations": [],
             }
             det = mock_det.return_value
             det["move_ledger"] = recorded_ledger(

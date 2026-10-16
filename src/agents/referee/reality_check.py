@@ -350,7 +350,6 @@ def run_reality_check(
             query_assignments, query_map, kept_by_customer, resolved_source_engine
         ),
     )
-    lightweight_recommendations: list[dict] = []
 
     # Mandatory-engine justification floor (#326, #167); see reality_check_floors.
     _apply_justification_floors(
@@ -421,6 +420,5 @@ def run_reality_check(
         "architectural_patterns": patterns,
         "recommendations": recommendations,
         "unique_value_assessment": unique_value_assessment,
-        "lightweight_recommendations": lightweight_recommendations,
         "move_ledger": ledger,
     }
