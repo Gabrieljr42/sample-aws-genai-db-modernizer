@@ -86,7 +86,7 @@ def engine_role(
     every query. It is *not* ``Retained`` — retained means the engine still serves
     queries, which is true of the source relational core and false of an engine that
     won none. Calling it Retained told the customer to provision an engine holding
-    nothing, and (via ``no_move`` in ``pptx_report``) pulled the Wave 1 confidence down
+    nothing, and (via ``no_move`` in the old deck renderer) pulled the Wave 1 confidence down
     to a floor set by an engine doing no work.
 
     Judged on workload rather than on the engine's name because the synthesis report

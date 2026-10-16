@@ -1,10 +1,17 @@
-"""A tests/e2e test that skips for an external job must be marked deterministic.
+"""A tests/e2e test that is not marked deterministic may not reach a ``pytest.skip``.
 
 The headless e2e-llm run executes ``pytest tests/e2e -m "e2e and not deterministic"
 --fail-on-skip`` against an external job. A test that calls ``pytest.skip`` when
 ``run.external`` is true, and is not marked ``deterministic``, therefore runs there,
 skips, and fails the run after the long model phase. This guard parses
 ``tests/e2e/*.py`` and fails at unit-test time instead.
+
+The rule is strict: an unmarked test (or a fixture or helper it reaches) may not call
+``pytest.skip`` on ANY condition. A data-dependent skip ("this sample lists no query
+trace") also fails an external job, whose data is whatever the model produced. Assert
+both branches instead, or mark the test ``deterministic`` when it genuinely cannot run
+on an external job. ``find_violations(..., strict=False)`` keeps the narrower check (a
+skip reachable only when the job is external) for the tests of the guard itself.
 
 It follows fixtures a test requests by name and calls to functions defined in the same
 module or in ``conftest.py``, transitively. It looks for a ``pytest.skip(...)`` reachable
@@ -101,6 +108,16 @@ def _external_skips(stmts: list[ast.stmt], external_only: bool = False) -> list[
     return lines
 
 
+def _all_skips(stmts: list[ast.stmt], external_only: bool = False) -> list[int]:
+    """Line numbers of every ``pytest.skip`` call, whatever condition guards it."""
+    return [
+        n.lineno
+        for stmt in stmts
+        for n in ast.walk(stmt)
+        if isinstance(n, ast.Call) and _is_skip(n)
+    ]
+
+
 def _functions(tree: ast.Module) -> Defs:
     return {
         n.name: n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -122,8 +139,12 @@ def _args(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
     return [x.arg for x in (*a.posonlyargs, *a.args, *a.kwonlyargs)]
 
 
-def find_violations(sources: dict[str, str], conftest: str | None = None) -> list[str]:
-    """Return one message per unmarked test that can skip for an external run."""
+def find_violations(
+    sources: dict[str, str], conftest: str | None = None, strict: bool = False
+) -> list[str]:
+    """One message per unmarked test that can skip (strict: on any condition; else only
+    for an external run)."""
+    skips = _all_skips if strict else _external_skips
     conf_defs: Defs = _functions(ast.parse(conftest)) if conftest else {}
     problems: list[str] = []
     for name, source in sources.items():
@@ -146,9 +167,9 @@ def find_violations(sources: dict[str, str], conftest: str | None = None) -> lis
             todo = [(fn, name)]
             while todo:
                 cur, where = todo.pop()
-                for line in _external_skips(cur.body):
+                for line in skips(cur.body):
                     problems.append(
-                        f"{where}:{line}: {fn.name} can pytest.skip for an external job "
+                        f"{where}:{line}: {fn.name} can pytest.skip "
                         f"(via {cur.name}) but is not marked deterministic"
                     )
                 for call in (n for n in ast.walk(cur) if isinstance(n, ast.Call)):
@@ -174,18 +195,18 @@ def find_violations(sources: dict[str, str], conftest: str | None = None) -> lis
 def _scan() -> list[str]:
     sources = {f"tests/e2e/{p.name}": p.read_text() for p in sorted(E2E_DIR.glob("test_*.py"))}
     conftest = (E2E_DIR / "conftest.py").read_text()
-    return find_violations(sources, conftest)
+    return find_violations(sources, conftest, strict=True)
 
 
-def test_e2e_tests_that_skip_for_external_jobs_are_marked_deterministic() -> None:
+def test_unmarked_e2e_tests_never_reach_a_skip() -> None:
     problems = _scan()
     assert not problems, (
         "ci/e2e-llm.sh runs `pytest tests/e2e -m 'e2e and not deterministic' --fail-on-skip` "
-        "on an external job, so these tests would skip there and fail the run:\n  "
+        "on an external job, so a skip there fails the run:\n  "
         + "\n  ".join(problems)
-        + "\nFix: add @pytest.mark.deterministic to the test (or `pytestmark = "
-        "pytest.mark.deterministic` to the module), or remove the external skip so the "
-        "test asserts for external jobs too."
+        + "\nFix: assert both branches instead of skipping, or add "
+        "@pytest.mark.deterministic (or `pytestmark = pytest.mark.deterministic`) when the "
+        "test genuinely cannot run on an external job."
     )
 
 
@@ -291,3 +312,21 @@ def test_guard_recognises_external_names_calls_and_none_comparisons() -> None:
     assert case("not external") == []
     assert len(case("not external", body="pass", orelse="pytest.skip('x')")) == 1
     assert case("rows is None") == []
+
+
+def test_strict_guard_flags_a_data_dependent_skip_that_the_external_guard_ignores() -> None:
+    data_skip = "import pytest\ndef test_e(run):\n    if not run.rows:\n        pytest.skip('x')\n"
+    assert find_violations({"m.py": data_skip}) == []
+    assert len(find_violations({"m.py": data_skip}, strict=True)) == 1
+    marked = "pytestmark = pytest.mark.deterministic\n" + data_skip
+    assert find_violations({"m.py": marked}, strict=True) == []
+
+
+def test_strict_guard_follows_fixtures_and_helpers_and_flags_an_unconditional_skip() -> None:
+    helper = (
+        "import pytest\ndef _h(r):\n    if r.rows:\n        pytest.skip('x')\n"
+        "@pytest.fixture\ndef f(run):\n    _h(run)\ndef test_k(f):\n    pass\n"
+    )
+    plain = "import pytest\ndef test_l():\n    pytest.skip('x')\n"
+    assert len(find_violations({"m.py": helper}, strict=True)) == 1
+    assert len(find_violations({"m.py": plain}, strict=True)) == 1

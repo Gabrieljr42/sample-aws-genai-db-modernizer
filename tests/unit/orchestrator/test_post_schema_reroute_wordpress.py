@@ -115,7 +115,6 @@ def rerouted(tmp_path_factory) -> dict:
         "decision": next(synthesis.glob("*decision-report*.html")).read_text(),
         "engineering": next(synthesis.glob("*engineering-report*.md")).read_text(),
         "analysis": next(synthesis.glob("*analysis-report*.html")).read_text(),
-        "deck": synthesis / "summary-executive-report.pptx",
     }
 
 
@@ -177,23 +176,12 @@ class TestEveryDeliverableAgreesWithTheNewVersion:
         assert "Unsupported patterns" not in rerouted["engineering"].split("## Moved after")[0]
 
     def test_the_move_after_approval_and_the_override_path_are_in_every_report(self, rerouted):
-        from pptx import Presentation
-
         from src.report.engine_choices import REROUTE_OVERRIDE_TEXT
 
         assert "Moved after your approval (1 query)" in rerouted["decision"]
         assert "## Moved after approval (1 query)" in rerouted["engineering"]
         assert REROUTE_OVERRIDE_TEXT in rerouted["decision"]
         assert REROUTE_OVERRIDE_TEXT in rerouted["engineering"]
-        deck_text = " ".join(
-            run.text
-            for slide in Presentation(str(rerouted["deck"])).slides
-            for shape in slide.shapes
-            if shape.has_text_frame
-            for paragraph in shape.text_frame.paragraphs
-            for run in paragraph.runs
-        )
-        assert "Keep the queries moved after approval?" in deck_text
         # The interactive analysis report carries the list and renders it.
         assert '"post_schema_reroutes"' in rerouted["analysis"]
         assert rerouted["flagged"] in rerouted["analysis"]

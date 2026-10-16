@@ -12,7 +12,6 @@ from typing import Any
 
 from ci.llm import judge_facts
 from src.agents.referee.cache_overlay import safety_net_note
-from src.report import pptx_report
 from src.report.architecture import _architecture_engines
 from src.report.renderers import (
     architecture_svg,
@@ -325,52 +324,6 @@ class TestCacheOverlayFullDropExplained:
         assert "None remain." in md
 
 
-def _deck_text(rep: dict[str, Any]) -> str:
-    f = pptx_report.derive(rep, {})
-    prs = pptx_report.open_deck(keep=1)
-    for build in pptx_report.SLIDES:
-        build(prs, f)
-    out = []
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                out.append(shape.text_frame.text)
-            if shape.has_table:
-                out.extend(c.text for r in shape.table.rows for c in r.cells)
-    return " ".join(" ".join(out).split())
-
-
-class TestDeck:
-    def test_cache_layer_is_the_no_migration_wave_without_a_workload_share(self):
-        f = pptx_report.derive(_report(), {})
-        wave1 = f["waves"][0]
-        assert wave1["engines"] == ["elasticache"]
-        assert wave1["workload"] == 0
-        assert (wave1["cached_queries"], wave1["cached_share"]) == (20, 83.4)
-        assert wave1["no_migration"] is True
-        start = next(d for d in f["decisions"] if d["question"].startswith("Add"))
-        assert start["badge"] == "83% of calls cached"
-
-    def test_deck_text(self):
-        text = _deck_text(_report())
-        assert (
-            "Wave 1 puts the cache layer for 20 hot reads (83.4% of calls) in front of the "
-            "current source database, with no data migration"
-        ) in text
-        # This fixture has no relational engine in ranking, so the source engine
-        # can't be inferred and the sentence falls back to the generic phrasing
-        # rather than naming a database.
-        assert "cache-aside in front of the current source database" in text
-        assert "Cache hit rate and invalidation verified against the source database" in text
-        assert "ElastiCache caches 20 hot reads (83.4% of calls) and owns none of the workload" in (
-            text
-        )
-        assert "ElastiCache cache layer · 20 cached reads · 83.4% of calls" in text
-        assert "ElastiCache keeps" not in text
-        assert "Wave 1 covers 0.0%" not in text
-        assert "83.4% calls" in text
-
-
 class TestJudgeFacts:
     def test_cache_layer_is_not_a_workload_share(self):
         assignment = {
@@ -587,26 +540,6 @@ class TestSearchReadModel:
         assert "retained as the relational core" not in html
         assert "<b>OpenSearch</b> is a search read model" in html
         assert "source schema retained" not in html
-
-    def test_wave_plan_puts_it_after_its_owners_never_in_the_no_migration_wave(self):
-        f = pptx_report.derive(_discourse_shape(), {})
-        waves = [w["engines"] for w in f["waves"]]
-        # #321: the relational move (aurora_postgresql) comes first now; the
-        # search read model still comes last among the rest, after the
-        # engines that own its tables, never in the no-migration (cache) wave.
-        assert waves[0] == ["aurora_postgresql"]
-        assert waves[1] == ["elasticache"]
-        assert waves[-1] == ["opensearch"]
-        opensearch_wave = next(w for w in f["waves"] if w["engines"] == ["opensearch"])
-        assert opensearch_wave is f["waves"][-1]
-        assert all("opensearch" not in w for w in waves[:-1])
-        # This fixture has no table_mappings, so the indexed tables cannot be
-        # resolved -- #225's fallback: say so, and fall back to the
-        # retained engine as the owner of record rather than showing no owner.
-        assert "could not be resolved" in opensearch_wave["note"]
-        assert "Aurora PostgreSQL" in opensearch_wave["note"]
-        start = next(d for d in f["decisions"] if d["question"].startswith("Add"))
-        assert "OpenSearch" not in start["against"]
 
     def test_retained_is_only_the_source_compatible_relational_engine(self):
         rep = _discourse_shape()

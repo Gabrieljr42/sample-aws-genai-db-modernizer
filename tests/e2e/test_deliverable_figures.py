@@ -1,9 +1,9 @@
 """Every deliverable shows the same figures as report.json (#573).
 
 AGENTS.md "Deliverables agree": the decision report, the engineering report,
-the executive deck and its PDF, and the interactive analysis report (the UI
+the executive summary PDF, and the interactive analysis report (the UI
 export) all render one synthesis ``report.json``. Reviews kept finding figures
-that differed between them, or that were impossible: a deck card cut at 90
+that differed between them, or that were impossible: a card cut at 90
 characters dropped a figure, a merged wave counted its tables twice ("400
 tables migrate" out of 311 analyzed), wave headlines and gate counts did not
 reconcile. Per-renderer unit tests cannot catch drift *between* renderers, so
@@ -44,8 +44,6 @@ from tests.e2e.deliverable_figures import (
     Figures,
     analysis_figures,
     decision_figures,
-    deck_figures,
-    deck_slide_texts,
     engineering_figures,
     expected_figures,
     final_architecture,
@@ -156,16 +154,6 @@ def _engineering_required(report: dict[str, Any], exp: dict[str, Any]) -> set[st
     return req
 
 
-def _deck_required(report: dict[str, Any], exp: dict[str, Any]) -> set[str]:
-    req = _common_required(report, exp) | {"tables_migrate", "tied"}
-    req |= {k for k in exp if k.startswith(("tables:", "queries:"))}
-    for w in _waves(report):
-        if migrating(w) and w.get("table_count"):
-            req |= {f"wave{w['wave']}:moving", f"wave{w['wave']}:synced"}
-            req |= {f"wave{w['wave']}:moving:{e}" for e in w.get("engines") or []}
-    return req
-
-
 def _problems(
     report: dict[str, Any],
     figs: Figures,
@@ -271,16 +259,14 @@ def test_every_deliverable_shows_the_reality_check_decisions(
     assert shown == expected, "decision report"
     texts = {
         "engineering report": md_plain(run.deliverable(".md").read_text()),
-        "deck": " ".join(deck_slide_texts(str(run.deliverable("summary-executive-report.pptx")))),
         "PDF": " ".join(pdf_page_texts(str(run.deliverable("summary-executive-report.pdf")))),
     }
     _open(page, run.html("analysis-report"))
     texts["analysis report"] = norm(page.locator("#tradeoffs-container").text_content() or "")
     for deliverable, text in texts.items():
-        if deliverable in ("deck", "PDF"):
-            # The deck shows the first cards and names how many more the
-            # engineering report lists, with "to" for the arrow its fonts lack.
-            shown_titles = [t.replace(" → ", " to ") for t in titles[:5]]
+        if deliverable == "PDF":
+            # The PDF's fonts lack the arrow, so it reads "to".
+            shown_titles = [t.replace(" → ", " to ") for t in titles]
         else:
             shown_titles = titles
         missing = [t for t in shown_titles if norm(t) not in text]
@@ -307,34 +293,6 @@ def test_engineering_report_figures(run: PipelineResult) -> None:
     report = _report_json(run)
     figs = engineering_figures(run.deliverable(".md").read_text())
     _settle(run.db, "engineering report", _problems(report, figs, _engineering_required))
-
-
-def test_deck_figures(run: PipelineResult) -> None:
-    report = _report_json(run)
-    slides = deck_slide_texts(str(run.deliverable("summary-executive-report.pptx")))
-    _settle(run.db, "deck", _problems(report, deck_figures(slides, "deck"), _deck_required))
-
-
-def test_pdf_figures(run: PipelineResult) -> None:
-    """The PDF is drawn from the deck's shapes; its text must carry the same
-    figures, so read it with the same extractor and compare with report.json."""
-    report = _report_json(run)
-    pages = pdf_page_texts(str(run.deliverable("summary-executive-report.pdf")))
-    _settle(run.db, "PDF", _problems(report, deck_figures(pages, "PDF"), _deck_required))
-
-
-def test_pdf_shows_what_the_deck_shows(run: PipelineResult) -> None:
-    """Figure for figure, the PDF text carries what the deck's shapes carry."""
-    deck = deck_figures(
-        deck_slide_texts(str(run.deliverable("summary-executive-report.pptx"))), "deck"
-    )
-    pdf = deck_figures(pdf_page_texts(str(run.deliverable("summary-executive-report.pdf"))), "PDF")
-
-    def values(f: Figures) -> dict[str, list[Any]]:
-        return {k: [v for v, _ in obs] for k, obs in f.values.items()}
-
-    assert values(pdf) == values(deck)
-    assert set(pdf.engines) == set(deck.engines)
 
 
 def test_the_trace_appendix_agrees_with_the_unresolved_ties(run: PipelineResult) -> None:

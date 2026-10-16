@@ -41,14 +41,3 @@ WORKLOAD_FIT_DEFINITION = (
     "patterns of the queries routed to it. It is not a probability that the "
     "migration will succeed."
 )
-
-
-def fit_phrase(pct_text: str) -> str:
-    """``93%`` -> ``93% fit``; ``60% (signal only)`` -> ``60% fit (signal only)``.
-
-    Mirrors the old ``pptx_report._confidence_phrase`` shape: the percentage (and
-    any trailing evidence note in parentheses) is unchanged, only the trailing
-    word changes.
-    """
-    pct, _, note = pct_text.partition(" (")
-    return f"{pct} {WORKLOAD_FIT_WORD}" + (f" ({note}" if note else "")

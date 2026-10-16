@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.report import pptx_report
 from src.report.renderers import render_decision_report_html, render_engineering_report_md
 
 
@@ -103,25 +102,3 @@ class TestDecisionReportShowsTiedQueries:
     def test_omits_the_section_when_the_field_is_absent(self) -> None:
         html = render_decision_report_html(_report(None))
         assert "Pending engine choices" not in html
-
-
-class TestDeckAndPdfShowTiedQueries:
-    """The deck (and the PDF, which is the deck converted) list the same
-    pending choice too, so every deliverable agrees (#503 review round 3,
-    suggestion 2)."""
-
-    def test_adds_a_decision_card_for_pending_ties(self) -> None:
-        f = pptx_report.derive(_report(_THREE_TIED), {})
-        questions = [d["question"] for d in f["decisions"]]
-        assert "Pick the engine for tied queries?" in questions
-        card = next(
-            d for d in f["decisions"] if d["question"] == "Pick the engine for tied queries?"
-        )
-        assert "3 queries" in card["badge"]
-        assert "DocumentDB" in card["against"]
-        assert "DynamoDB" in card["against"]
-
-    def test_no_card_when_there_are_no_ties(self) -> None:
-        f = pptx_report.derive(_report([]), {})
-        questions = [d["question"] for d in f["decisions"]]
-        assert "Pick the engine for tied queries?" not in questions

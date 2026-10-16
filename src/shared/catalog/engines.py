@@ -9,7 +9,7 @@ derives the engine sets the rest of the code reads.
 
 This first slice changes no behaviour: ``src.shared.engine_names``,
 ``src.shared.cache_engines``, ``src.shared.migration_wave_engines``,
-``src.shared.report_facts``, the decision report and the deck build their existing
+``src.shared.report_facts``, the decision report and the PDF build their existing
 constants, under their existing names, from here. The UI reads the same facts through
 ``src/ui/src/utils/engineCatalog.generated.js``, written by
 ``scripts/render_catalog.py`` (``--check`` runs in lint).
@@ -31,8 +31,6 @@ Fields:
 - ``colors.ui_badge``: the live UI's badge colour name.
 - ``colors.report_badge``: the decision report's badge hex, darkened for WCAG AA
   contrast under white text (optional: no badge colour means the report's grey).
-- ``colors.deck``: the executive deck's accent hex (optional: only the engines the deck
-  colours).
 - ``pricing`` (optional table, #494): the engine's cost inputs. ``base_monthly`` is the
   fixed monthly operating cost the reality check weighs (minimum cluster plus ops
   burden); ``extra_engine_burden_monthly`` is the non-monetary burden of running this
@@ -70,7 +68,6 @@ class EngineColors(BaseModel):
     ui: str = Field(pattern=_HEX)
     ui_badge: BadgeColor
     report_badge: str | None = Field(default=None, pattern=_HEX)
-    deck: str | None = Field(default=None, pattern=_HEX)
 
 
 class EnginePricing(BaseModel):

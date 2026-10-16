@@ -30,7 +30,7 @@ UNSERVABLE_INTRO = (
 )
 
 # The existing re-run path: the assignment review (the customer gate). One
-# sentence for both reports, the deck and the UI callout
+# sentence for both reports, the PDF and the UI callout
 # (src/ui/src/locales/en.json, analysis-results.unservable.rerun); the
 # interactive report repeats it (src/ui/src/utils/ExportReport.js).
 UNSERVABLE_RERUN_TEXT = (
@@ -39,9 +39,6 @@ UNSERVABLE_RERUN_TEXT = (
     "touches. A query rewritten as suggested is picked up when the assessment runs again on "
     "the updated collection."
 )
-
-# The deck card's action: the re-run path, short enough for a card.
-UNSERVABLE_DECK_ACTION = "Keep them there, or redesign them and re-run from the assignment review."
 
 
 def _facts(report: dict[str, Any]) -> dict[str, Any] | None:

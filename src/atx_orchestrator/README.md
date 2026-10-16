@@ -92,7 +92,7 @@ The current shape of this integration is recorded in `docs/architecture/decision
 | `runtime/hitl.py` | Human-in-the-loop transport for the detailed routing-review table |
 | `runtime/artifacts.py` | Artifacts-panel publishing |
 | `src/report/deliverables.py` | Shared entry point: renders every customer deliverable from one synthesis report |
-| `src/report/analysis_report.py`, `pdf_report.py`, `pptx_report.py` | Report renderers (analysis HTML, PDF, executive PPTX) |
+| `src/report/analysis_report.py`, `pdf_report.py` | Report renderers (analysis HTML, executive PDF) |
 | `runtime/store.py` | Transform storage subclasses (adds `write_text`) |
 | `src/report/assets/`, `src/report/templates/` | Report template + static assets |
 | `requirements.txt` | Container Python deps (SDK + project runtime deps) |

@@ -28,7 +28,7 @@ def test_writes_staged_deliverables_next_to_the_report(tmp_path: Path, monkeypat
     base = tmp_path / DB / JOB / "synthesis" / "v2"
     names = sorted(p.name for p in base.iterdir())
     assert "summary-executive-report.pdf" in names
-    assert "summary-executive-report.pptx" in names
+    assert not [n for n in names if n.endswith(".pptx")]
     assert any(n.startswith("discourse_decision-report_") and n.endswith(".html") for n in names)
     assert any(n.startswith("discourse_analysis-report_") and n.endswith(".html") for n in names)
     assert any(n.startswith("discourse_engineering-report_") and n.endswith(".md") for n in names)

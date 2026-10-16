@@ -1,71 +1,104 @@
-"""Executive Summary Report — PDF rendering of the PPTX deck.
+"""Executive Summary Report -- the multi-page PDF deliverable.
 
-The customer-facing deliverable in the Artifacts panel is
-``summary-executive-report.pdf``; the ``.pptx`` stays on S3 as the editable
-source. Both come from one render, because this module does **not** re-lay-out
-the slides: it walks the shape tree of the deck ``pptx_report`` just produced
-and draws each primitive with reportlab. Positions, sizes, colours, fonts and
-wrap widths are read off the actual shapes, so the PDF cannot drift from the
-deck — there is one layout implementation, in ``pptx_report``.
+``summary-executive-report.pdf`` is laid out as a flowing document with reportlab
+platypus: paragraphs, tables that repeat their header row across pages, and a page
+template with a header and a "Page N of M" footer. It is built straight from the
+synthesis ``report.json`` (ADR-032): every figure comes from the facts layer
+(``src.report.facts.report_facts`` and the ``tco_analysis`` block), and the
+sections that have an equivalent in the engineering report print that report's own
+Markdown, so the two never word the same fact differently. This module formats; it
+never counts, totals or filters a figure the facts layer owns. Nothing is clipped:
+long text wraps and long tables continue on the next page.
 
-Why not LibreOffice: converting through ``soffice`` would add ~600 MB to an
-ARM64 agent image for one deliverable, cost a cold start inside the synthesis
-path, and stamp non-reproducible PDF dates. reportlab is ~2 MB and, with
-``invariant``, byte-deterministic.
+Sections, in order: cover, executive summary, cost, recommended engines and roles,
+migration wave plan, risks, close calls and queries without a fitting engine (when
+there are any), and a traceability appendix (the per-query "why this engine" record
+for the queries that moved or were tied).
 
-What is supported is exactly what the deck contains (verified against it, not
-guessed): solid-filled rectangles and rounded rectangles, pictures (honouring
-``srcRect`` crops), tables, and text frames with per-run size/weight/colour/font,
-paragraph alignment, space-after and vertical anchoring. Slide backgrounds resolve ``schemeClr`` with
-``lumMod``/``lumOff``. Anything outside that set is skipped rather than
-approximated, and logged once at debug level.
+Determinism: reportlab runs in ``invariant`` mode (no creation date, no random
+document id) and every string drawn comes from the report or is a constant, so one
+``report.json`` yields byte-identical PDFs.
 
-Fonts: Amazon Ember Regular and Bold ship in ``assets/fonts``. Amazon Ember
-*Display* has no separate file, so headings — always bold in this deck — use
-Ember Bold. If a face is unavailable the module falls back to Helvetica so a
-PDF is still produced.
+Fonts: Amazon Ember Regular and Bold ship in ``assets/fonts``. If a face is
+unavailable the module falls back to Helvetica so a PDF is still produced.
 """
 
 from __future__ import annotations
 
-import colorsys
+import datetime as dt
 import io
 import logging
 import re
 from pathlib import Path
 from typing import Any
 
-from PIL import Image as PILImage
-from pptx import Presentation
-from pptx.util import Emu
-from reportlab.lib.colors import Color
-from reportlab.lib.utils import ImageReader
+from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
+from reportlab.platypus import (
+    BaseDocTemplate,
+    CondPageBreak,
+    Frame,
+    NextPageTemplate,
+    PageBreak,
+    PageTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
-from . import pptx_report
+from src.shared.engine_names import display_engine
+
+from . import escaping, pdf_markdown
+from .architecture import _architecture_engines
+from .close_calls import close_calls_md
+from .engineering_report import _risk_register_md, _target_engines_md, _trade_offs_md
+from .facts import report_facts
+from .formatting import (
+    _cost_baseline_text,
+    _fmt_usd,
+    _retired_engine_savings_text,
+    label_summary_counts,
+)
+from .query_traces import query_traces_md
+from .risks import NO_OPEN_RISKS_CAVEAT, _severity_counts_text, filtered_risks
+from .roadmap import _roadmap_md
+from .unservable import unservable_md
 
 logger = logging.getLogger(__name__)
 
 FILENAME = "summary-executive-report.pdf"
 FONT_DIR = Path(__file__).parent / "assets" / "fonts"
 
-# EMU per point. python-pptx exposes EMU everywhere; PDF user space is points.
-EMU_PT = 12700
-A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
-P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+# The deliverable's only product name.
+PRODUCT_NAME = "Database Modernizer Assessment Tool"
+REPORT_NAME = "Executive Summary Report"
+# The copyright line of the repository's LICENSE file, word for word
+# (tests/unit/report/test_pdf_report.py reads LICENSE and compares).
+COPYRIGHT = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved."
+FOOTER = f"{COPYRIGHT} For informational purposes only."
+# Where the summary sends readers for the detail: real files in the job's
+# deliverables folder (src.report.deliverables.FOLDER_ENTRIES), by their names.
+SEE_ALSO_NOTE = (
+    "Full detail in the deliverables folder: decision-report.html and engineering-report.md."
+)
 
-# PowerPoint's own default text-frame insets, used when a frame does not set
-# them (python-pptx returns None for inherited values).
-DEF_MARGIN_LR = Emu(91440)  # 0.1"
-DEF_MARGIN_TB = Emu(45720)  # 0.05"
-
-# Line advance as a multiple of point size, and the fraction of that advance
-# that sits above the baseline. PowerPoint uses the font's own metrics; Ember's
-# ascent/descent put the baseline at ~0.80 of a 1.20 line.
-LINE_FACTOR = 1.20
-BASELINE_FACTOR = 0.80
+# Section headings, in document order. "Close calls and queries without a fitting
+# engine" appears only when the report has either; the others always do.
+H_SUMMARY = "Executive summary"
+H_COST = "Cost"
+H_ENGINES = "Recommended engines and roles"
+H_WAVES = "Migration wave plan"
+H_RISKS = "Risks"
+H_CLOSE = "Close calls and unservable queries"
+H_APPENDIX = "Traceability appendix"
+SECTION_HEADINGS = (H_SUMMARY, H_COST, H_ENGINES, H_WAVES, H_RISKS, H_CLOSE, H_APPENDIX)
 
 _FALLBACK = "Helvetica"
 _FALLBACK_BOLD = "Helvetica-Bold"
@@ -75,12 +108,15 @@ _FONTS: dict[tuple[str, bool], str] = {}
 _FONT_FILES = {
     ("Amazon Ember", False): "AmazonEmber_Rg.ttf",
     ("Amazon Ember", True): "AmazonEmber_Bd.ttf",
-    # Amazon Ember Display has no separate file. It is an optical-size variant of
-    # the same design, so weight is what has to be preserved: the deck's headings
-    # are Display Bold, and the template's 6pt copyright line is Display Regular.
-    ("Amazon Ember Display", False): "AmazonEmber_Rg.ttf",
-    ("Amazon Ember Display", True): "AmazonEmber_Bd.ttf",
 }
+FAMILY = "Ember"
+
+INK = HexColor("#232F3E")
+ACCENT = HexColor("#FF9900")
+MUTED = HexColor("#5F6B7A")
+RULE = HexColor("#C5CCD3")
+HEAD_BG = HexColor("#E8EDF2")
+ZEBRA = HexColor("#F6F8FA")
 
 
 def register_fonts() -> None:
@@ -89,7 +125,7 @@ def register_fonts() -> None:
         return
     for (face, bold), filename in _FONT_FILES.items():
         path = FONT_DIR / filename
-        name = f"Ember-{'Bd' if filename.endswith('Bd.ttf') else 'Rg'}"
+        name = f"Ember-{'Bd' if bold else 'Rg'}"
         if not path.exists():
             logger.warning("Font %s missing; falling back to %s", path.name, _FALLBACK)
             _FONTS[(face, bold)] = _FALLBACK_BOLD if bold else _FALLBACK
@@ -97,508 +133,422 @@ def register_fonts() -> None:
         if name not in pdfmetrics.getRegisteredFontNames():
             pdfmetrics.registerFont(TTFont(name, str(path)))
         _FONTS[(face, bold)] = name
+    pdfmetrics.registerFontFamily(
+        FAMILY,
+        normal=font_for(None, False),
+        bold=font_for(None, True),
+        italic=font_for(None, False),
+        boldItalic=font_for(None, True),
+    )
 
 
 def font_for(typeface: str | None, bold: bool) -> str:
-    """Map a PowerPoint typeface + weight to a registered reportlab font.
-
-    Any other Ember variant the template happens to use (Mono, Condensed) maps to
-    the base family at the right weight rather than dropping to Helvetica, which
-    would change both the look and the measured width mid-deck.
-    """
-    register_fonts()
-    if typeface:
-        hit = _FONTS.get((typeface, bold))
-        if hit:
-            return hit
-        if typeface.startswith("Amazon Ember"):
-            return _FONTS.get(("Amazon Ember", bold), _FALLBACK_BOLD if bold else _FALLBACK)
-    return _FONTS.get(("Amazon Ember", bold)) or (_FALLBACK_BOLD if bold else _FALLBACK)
+    """The registered reportlab font for a typeface and weight (Ember by default)."""
+    if not _FONTS:
+        register_fonts()
+    return _FONTS.get((typeface or "Amazon Ember", bold)) or (_FALLBACK_BOLD if bold else _FALLBACK)
 
 
 # ---------------------------------------------------------------------------
-# colour
+# styles
 # ---------------------------------------------------------------------------
-def rl(rgb: tuple[int, int, int] | None) -> Color | None:
-    if rgb is None:
+def _styles() -> dict[str, ParagraphStyle]:
+    rg, bd = font_for(None, False), font_for(None, True)
+    body = ParagraphStyle(
+        "body",
+        fontName=rg,
+        bulletFontName=rg,
+        fontSize=9.5,
+        leading=13,
+        textColor=INK,
+        spaceAfter=5,
+        alignment=TA_LEFT,
+    )
+    return {
+        "body": body,
+        "h1": ParagraphStyle(
+            "h1", parent=body, fontName=bd, fontSize=19, leading=23, spaceBefore=6, spaceAfter=8
+        ),
+        "h2": ParagraphStyle(
+            "h2", parent=body, fontName=bd, fontSize=13, leading=17, spaceBefore=10, spaceAfter=5
+        ),
+        "h3": ParagraphStyle(
+            "h3",
+            parent=body,
+            fontName=bd,
+            fontSize=10.5,
+            leading=14,
+            spaceBefore=8,
+            spaceAfter=3,
+            keepWithNext=1,
+        ),
+        "cell": ParagraphStyle(
+            "cell", parent=body, fontSize=8.2, leading=10.4, spaceAfter=0, textColor=INK
+        ),
+        "head_cell": ParagraphStyle(
+            "head_cell", parent=body, fontName=bd, fontSize=8.2, leading=10.4, spaceAfter=0
+        ),
+        "note": ParagraphStyle("note", parent=body, fontSize=8.5, leading=11.5, textColor=MUTED),
+        "cover_title": ParagraphStyle(
+            "cover_title", parent=body, fontName=bd, fontSize=30, leading=36, spaceAfter=6
+        ),
+        "cover_sub": ParagraphStyle(
+            "cover_sub", parent=body, fontSize=15, leading=20, textColor=MUTED, spaceAfter=24
+        ),
+        "label": ParagraphStyle(
+            "label", parent=body, fontName=bd, fontSize=9.5, leading=13, textColor=MUTED
+        ),
+    }
+
+
+def _md_styles(st: dict[str, ParagraphStyle]) -> pdf_markdown.MdStyles:
+    bullets = tuple(
+        ParagraphStyle(
+            f"bullet{lvl}",
+            parent=st["body"],
+            leftIndent=14 + 14 * lvl,
+            bulletIndent=4 + 14 * lvl,
+            spaceAfter=3,
+        )
+        for lvl in range(4)
+    )
+    return pdf_markdown.MdStyles(
+        body=st["body"],
+        h2=st["h2"],
+        h3=st["h3"],
+        cell=st["cell"],
+        head_cell=st["head_cell"],
+        bullets=bullets,
+        code_font=font_for(None, False),
+        table_head_bg=HEAD_BG,
+        table_grid=RULE,
+        table_zebra=ZEBRA,
+    )
+
+
+# ---------------------------------------------------------------------------
+# page furniture
+# ---------------------------------------------------------------------------
+class _NumberedCanvas(Canvas):
+    """Two-pass canvas so the footer can say "Page N of M"."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._saved: list[dict[str, Any]] = []
+
+    def showPage(self) -> None:  # noqa: N802 -- reportlab's name
+        self._saved.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self) -> None:
+        total = len(self._saved)
+        for state in self._saved:
+            self.__dict__.update(state)
+            self._draw_page_number(total)
+            super().showPage()
+        super().save()
+
+    def _draw_page_number(self, total: int) -> None:
+        if self._pageNumber == 1:  # the cover carries no furniture
+            return
+        self.setFont(font_for(None, False), 8)
+        self.setFillColor(MUTED)
+        self.drawRightString(
+            letter[0] - 0.75 * inch, 0.5 * inch, f"Page {self._pageNumber} of {total}"
+        )
+
+
+def _furniture(db: str, footer: str):
+    def draw(canvas: Canvas, doc: Any) -> None:
+        w, h = letter
+        canvas.saveState()
+        canvas.setFont(font_for(None, True), 8)
+        canvas.setFillColor(MUTED)
+        canvas.drawString(0.75 * inch, h - 0.5 * inch, PRODUCT_NAME)
+        canvas.setFont(font_for(None, False), 8)
+        canvas.drawRightString(w - 0.75 * inch, h - 0.5 * inch, pdf_markdown.printable(db, None))
+        canvas.setStrokeColor(RULE)
+        canvas.setLineWidth(0.5)
+        canvas.line(0.75 * inch, h - 0.58 * inch, w - 0.75 * inch, h - 0.58 * inch)
+        canvas.line(0.75 * inch, 0.62 * inch, w - 0.75 * inch, 0.62 * inch)
+        canvas.drawString(0.75 * inch, 0.5 * inch, footer)
+        canvas.restoreState()
+
+    return draw
+
+
+def _cover_page(canvas: Canvas, doc: Any) -> None:
+    w, h = letter
+    canvas.saveState()
+    canvas.setFillColor(INK)
+    canvas.rect(0, h - 0.55 * inch, w, 0.55 * inch, stroke=0, fill=1)
+    canvas.setFillColor(ACCENT)
+    canvas.rect(0, h - 0.6 * inch, w, 0.05 * inch, stroke=0, fill=1)
+    canvas.restoreState()
+
+
+class _Heading(Paragraph):
+    """A section heading that also writes a PDF outline entry."""
+
+    outline = True
+
+
+class _Doc(BaseDocTemplate):
+    _outlines = 0
+
+    def afterFlowable(self, flowable: Any) -> None:  # noqa: N802 -- reportlab's name
+        if isinstance(flowable, _Heading):
+            text = re.sub(r"<[^>]+>", "", flowable.text)
+            self._outlines += 1
+            key = f"section-{self._outlines}"
+            self.canv.bookmarkPage(key)
+            self.canv.addOutlineEntry(text, key, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# content
+# ---------------------------------------------------------------------------
+def _date(report: dict[str, Any]) -> dt.date | None:
+    """The report's own generation date; None when it carries no valid one."""
+    m = re.match(r"\d{4}-\d{2}-\d{2}", str(report.get("timestamp") or ""))
+    try:
+        return dt.date.fromisoformat(m.group(0)) if m else None
+    except ValueError:
         return None
-    return Color(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
 
 
-def lum_transform(rgb: tuple[int, int, int], mod: float, off: float) -> tuple[int, int, int]:
-    """Apply OOXML ``lumMod``/``lumOff`` — a luminance scale then offset in HSL.
-
-    The deck's slide background is ``dk1`` (pure black) with lumMod 85% and
-    lumOff 15%, i.e. the near-black the whole design sits on. Without this the
-    PDF would come out black and the cards would lose their separation.
-    """
-    h, lightness, s = colorsys.rgb_to_hls(*(c / 255.0 for c in rgb))
-    lightness = max(0.0, min(1.0, lightness * mod + off))
-    r, g, b = colorsys.hls_to_rgb(h, lightness, s)
-    return (round(r * 255), round(g * 255), round(b * 255))
+def _trust(report: dict[str, Any]) -> bool:
+    """Whether the generated summary may be shown (as ``deliverables`` decides it)."""
+    return any(r.get("schema_design_available") for r in (report.get("ranking") or []))
 
 
-def _theme_colors(prs) -> dict[str, tuple[int, int, int]]:
-    """The master's colour scheme, keyed by OOXML name (``dk1``, ``accent1``...).
-
-    The mapping-layer names (``tx1``, ``bg1``, ``tx2``, ``bg2``) are resolved
-    through the master's ``clrMap``, not assumed. This deck is a dark theme and
-    its map is inverted — ``tx1`` points at ``lt1`` — so hardcoding the usual
-    ``tx1``→``dk1`` renders the template's own footer text black on near-black.
-    """
-    rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme"
-    master = prs.slide_masters[0]
-    xml = master.part.part_related_by(rel).blob.decode("utf-8")
-    scheme = re.search(r"<a:clrScheme.*?</a:clrScheme>", xml, re.S)
-    out: dict[str, tuple[int, int, int]] = {}
-    if not scheme:
-        return out
-    pattern = r"<a:(dk1|dk2|lt1|lt2|accent[1-6]|hlink|folHlink)>(.*?)</a:\1>"
-    for tag, body in re.findall(pattern, scheme.group(0), re.S):
-        hit = re.search(r'(?:srgbClr val="|lastClr=")([0-9A-Fa-f]{6})', body)
-        if hit:
-            v = hit.group(1)
-            out[tag] = (int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16))
-    clr_map = master._element.find(f"{P}clrMap")
-    fallback = {"tx1": "dk1", "tx2": "dk2", "bg1": "lt1", "bg2": "lt2"}
-    for alias, default_src in fallback.items():
-        src = (clr_map.get(alias) if clr_map is not None else None) or default_src
-        if src in out:
-            out[alias] = out[src]
+def _cost_md(report: dict[str, Any]) -> list[str]:
+    """Cost section lines: the baseline text and projected total as the engineering
+    report words them, then one row per engine and the total, all stored figures."""
+    tco = report.get("tco_analysis") or {}
+    facts = report_facts(report)
+    current_text, savings_text = _cost_baseline_text(tco)
+    out = [
+        f"- Current monthly (source): {escaping.md_text(current_text)}",
+        f"- Projected monthly (target): {escaping.md_text(_fmt_usd(tco.get('projected_monthly_cost')))}",
+        f"- Savings: {escaping.md_text(savings_text)}",
+    ]
+    # #949: only an engine the source runs today; ``eliminated_engine_costs`` is not read.
+    retired_text = _retired_engine_savings_text(tco)
+    if retired_text:
+        out.append(
+            f"- Retired by this plan: {escaping.md_text(retired_text)}, "
+            "running today and not in this projection (see Migration trade-offs below "
+            "for why)."
+        )
+    out.append("")
+    engines = _architecture_engines(report)
+    if engines:
+        out += ["| Engine | Role | Est. monthly |", "|---|---|---|"]
+        for e in engines:
+            out.append(
+                f"| {escaping.md_cell(display_engine(e['engine']))} "
+                f"| {escaping.md_cell(e['role'])} | {escaping.md_cell(_fmt_usd(e.get('cost')))} |"
+            )
+        out.append(
+            f"| Total | | {escaping.md_cell(_fmt_usd(facts.get('engine_cost_total_usd')))} |"
+        )
+        out.append("")
     return out
 
 
-def color_from_element(el, theme: dict[str, tuple[int, int, int]]):
-    """Resolve an OOXML colour element (``srgbClr`` or ``schemeClr``) to RGB."""
-    if el is None:
-        return None
-    srgb = el.find(f"{A}srgbClr")
-    scheme = el.find(f"{A}schemeClr")
-    node = srgb if srgb is not None else scheme
-    if node is None:
-        return None
-    if node is srgb:
-        v = node.get("val") or "000000"
-        rgb = (int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16))
+def _risks_md(report: dict[str, Any]) -> list[str]:
+    """Risks section: the posture as the decision report words it, then the register."""
+    facts = report_facts(report)
+    risk = report.get("risk_assessment") or {}
+    open_count = int(facts.get("open_risk_count") or 0)
+    resolved_count = int(facts.get("resolved_risk_count") or 0)
+    out = [f"- Overall risk: {escaping.md_text(risk.get('overall_risk_level', 'not assessed'))}"]
+    if filtered_risks(report):
+        sev = _severity_counts_text(facts.get("open_risks_by_severity") or {})
+        out.append(f"- Open risks: {open_count} ({escaping.md_text(sev)})")
     else:
-        rgb = theme.get(node.get("val") or "", (0, 0, 0))
-    mod = node.find(f"{A}lumMod")
-    off = node.find(f"{A}lumOff")
-    if mod is not None or off is not None:
-        m = int(mod.get("val") or 100000) / 100000 if mod is not None else 1.0
-        o = int(off.get("val") or 0) / 100000 if off is not None else 0.0
-        rgb = lum_transform(rgb, m, o)
-    return rgb
-
-
-def run_color(
-    run,
-    theme: dict[str, tuple[int, int, int]],
-    default: tuple[int, int, int] = (255, 255, 255),
-) -> tuple[int, int, int]:
-    """The run's colour, resolving theme references; ``default`` when inherited.
-
-    The generated slides always set an explicit RGB. The retained intro slide
-    is template-authored and uses ``schemeClr`` (LIGHT_2), which is why theme
-    resolution exists at all.
-    """
-    try:
-        col = run.font.color
-        if col is not None and col.type is not None:
-            if col.type == 1:  # RGB
-                c = col.rgb
-                return (c[0], c[1], c[2])
-            name = getattr(col.theme_color, "name", "") or ""
-            key = {
-                "LIGHT_1": "lt1",
-                "LIGHT_2": "lt2",
-                "DARK_1": "dk1",
-                "DARK_2": "dk2",
-                "ACCENT_1": "accent1",
-                "ACCENT_2": "accent2",
-                "ACCENT_3": "accent3",
-                "ACCENT_4": "accent4",
-                "ACCENT_5": "accent5",
-                "ACCENT_6": "accent6",
-                "TEXT_1": "tx1",
-                "TEXT_2": "tx2",
-                "BACKGROUND_1": "bg1",
-                "BACKGROUND_2": "bg2",
-            }.get(name)
-            if key and key in theme:
-                rgb = theme[key]
-                brightness = getattr(col, "brightness", 0) or 0
-                if brightness:
-                    rgb = lum_transform(rgb, 1.0 - abs(brightness), max(brightness, 0.0))
-                return rgb
-    except (AttributeError, KeyError, TypeError):
-        pass
-    return default
-
-
-def shape_fill(shape, theme):
-    """Solid fill RGB, or None for anything else (background/gradient/no fill)."""
-    spPr = shape._element.find(f".//{A}xfrm/..")
-    solid = None
-    if spPr is not None:
-        solid = spPr.find(f"{A}solidFill")
-    if solid is None:
-        return None
-    return color_from_element(solid, theme)
-
-
-# ---------------------------------------------------------------------------
-# text layout
-# ---------------------------------------------------------------------------
-class _Tok:
-    """A word (or space) carrying the style it must be drawn with."""
-
-    __slots__ = ("text", "font", "size", "color", "width")
-
-    def __init__(self, text: str, font: str, size: float, color: Color, width: float):
-        self.text = text
-        self.font = font
-        self.size = size
-        self.color = color
-        self.width = width
-
-
-def _tokens(para, theme, default_size: float, default_color) -> list[_Tok]:
-    out: list[_Tok] = []
-    for run in para.runs:
-        if not run.text:
-            continue
-        size = run.font.size.pt if run.font.size is not None else default_size
-        bold = bool(run.font.bold)
-        font = font_for(run.font.name, bold)
-        color = rl(run_color(run, theme, default_color)) or Color(1, 1, 1)
-        # Split keeping the spaces, so a run boundary mid-phrase does not eat one.
-        for piece in re.split(r"(\s+)", run.text):
-            if not piece:
-                continue
-            out.append(_Tok(piece, font, size, color, pdfmetrics.stringWidth(piece, font, size)))
+        out.append(
+            f"- No open migration risks; {resolved_count} resolved by the assignment."
+            if resolved_count
+            else "- No risks were identified in this analysis."
+        )
+        out += ["", f"*{escaping.md_text(NO_OPEN_RISKS_CAVEAT)}*"]
+    if resolved_count and filtered_risks(report):
+        out.append(f"- Resolved by the assignment: {resolved_count}")
+    out.append("")
+    out += _risk_register_md(report)
+    out += _trade_offs_md(report, facts)
+    strategies = [s for s in (risk.get("mitigation_strategies") or []) if s]
+    if strategies:
+        out += ["## Mitigation strategies", ""]
+        out += [f"- {escaping.md_text(s)}" for s in strategies]
+        out.append("")
     return out
 
 
-def _wrap(tokens: list[_Tok], max_w: float) -> list[list[_Tok]]:
-    lines: list[list[_Tok]] = []
-    cur: list[_Tok] = []
-    w = 0.0
-    for tok in tokens:
-        if tok.text.isspace():
-            if cur:
-                cur.append(tok)
-                w += tok.width
-            continue
-        if cur and w + tok.width > max_w:
-            while cur and cur[-1].text.isspace():
-                w -= cur.pop().width
-            lines.append(cur)
-            cur, w = [tok], tok.width
-        else:
-            cur.append(tok)
-            w += tok.width
-    if cur:
-        while cur and cur[-1].text.isspace():
-            cur.pop()
-        lines.append(cur)
-    return lines
-
-
-def _line_width(line: list[_Tok]) -> float:
-    return sum(t.width for t in line)
-
-
-def draw_text_frame(
-    c: Canvas,
-    tf,
-    left: float,
-    top: float,
-    width: float,
-    height: float,
-    page_h: float,
-    theme,
-    *,
-    default_size: float = 18.0,
-    default_color=(255, 255, 255),
-    page_no: int = 1,
-) -> None:
-    """Lay out a text frame the way PowerPoint does for this deck: wrap inside
-    the frame's insets, honour paragraph alignment and space-after, and anchor
-    the whole block top or middle."""
-    ml = (tf.margin_left if tf.margin_left is not None else DEF_MARGIN_LR) / EMU_PT
-    mr = (tf.margin_right if tf.margin_right is not None else DEF_MARGIN_LR) / EMU_PT
-    mt = (tf.margin_top if tf.margin_top is not None else DEF_MARGIN_TB) / EMU_PT
-    mb = (tf.margin_bottom if tf.margin_bottom is not None else DEF_MARGIN_TB) / EMU_PT
-    avail = max(width - ml - mr, 1.0)
-
-    blocks: list[tuple[list[list[_Tok]], Any, float]] = []
-    total = 0.0
-    for para in tf.paragraphs:
-        toks = _tokens(para, theme, default_size, default_color)
-        if not toks:
-            # Empty paragraph still advances, which is how the deck spaces cards.
-            blocks.append(([], para, default_size))
-            total += default_size * LINE_FACTOR
-            continue
-        # A slide-number field renders as the page number, not its literal.
-        if len(toks) == 1 and toks[0].text == "\u2039#\u203a":
-            toks[0].text = str(page_no)
-            toks[0].width = pdfmetrics.stringWidth(toks[0].text, toks[0].font, toks[0].size)
-        lines = _wrap(toks, avail)
-        size = max(t.size for t in toks)
-        blocks.append((lines, para, size))
-        total += len(lines) * size * LINE_FACTOR
-        total += (para.space_after.pt if para.space_after is not None else 0.0) or 0.0
-
-    anchor = str(tf.vertical_anchor or "")
-    box_top = top + mt
-    inner_h = max(height - mt - mb, 0.0)
-    if "MIDDLE" in anchor and total < inner_h:
-        box_top += (inner_h - total) / 2.0
-
-    y = box_top
-    for lines, para, size in blocks:
-        if not lines:
-            y += size * LINE_FACTOR
-            continue
-        align = str(para.alignment or "")
-        for line in lines:
-            adv = size * LINE_FACTOR
-            baseline = page_h - (y + adv * BASELINE_FACTOR)
-            x = left + ml
-            if "CENTER" in align:
-                x += (avail - _line_width(line)) / 2.0
-            elif "RIGHT" in align:
-                x += avail - _line_width(line)
-            for tok in line:
-                if not tok.text.isspace():
-                    c.setFillColor(tok.color)
-                    c.setFont(tok.font, tok.size)
-                    c.drawString(x, baseline, tok.text)
-                x += tok.width
-            y += adv
-        y += (para.space_after.pt if para.space_after is not None else 0.0) or 0.0
-
-
-# ---------------------------------------------------------------------------
-# shapes
-# ---------------------------------------------------------------------------
-# Returned by ``_crop_box`` when the crop leaves no visible region.
-_EMPTY_CROP = (0, 0, 0, 0)
-
-
-def _crop_box(shape, width: int, height: int) -> tuple[int, int, int, int] | None:
-    """Pixel box of the picture's ``<a:srcRect>`` crop, or None when uncropped.
-
-    ``l``/``t``/``r``/``b`` are the fractions trimmed from each edge, in
-    1/100000ths. Negative values (PowerPoint pads the image) are clamped to the
-    bitmap: the frame is still filled, without the padding. A crop that trims
-    100% or more across either axis (``l + r`` or ``t + b``) leaves nothing to
-    show and returns ``_EMPTY_CROP`` -- never the uncropped image.
-    """
-    rect = shape._element.find(f"{P}blipFill/{A}srcRect")
-    if rect is None:
-        return None
-    frac = {k: max(int(rect.get(k) or 0), 0) / 100000 for k in ("l", "t", "r", "b")}
-    if not any(frac.values()):
-        return None
-    if frac["l"] + frac["r"] >= 1 or frac["t"] + frac["b"] >= 1:
-        return _EMPTY_CROP
-    left, top = round(frac["l"] * width), round(frac["t"] * height)
-    right, bottom = round(width - frac["r"] * width), round(height - frac["b"] * height)
-    if right <= left or bottom <= top:  # under a pixel left after rounding
-        return _EMPTY_CROP
-    return (left, top, right, bottom)
-
-
-def draw_picture(c: Canvas, shape, page_h: float) -> None:
-    """Draw a picture into its frame, cropped as the deck crops it."""
-    try:
-        pil = PILImage.open(io.BytesIO(shape.image.blob))
-        box = _crop_box(shape, *pil.size)
-        if box == _EMPTY_CROP:
-            logger.debug("picture %s cropped to nothing; not drawn", shape.name)
-            return
-        if box:
-            # A cropped PIL image is handed to reportlab directly, which cannot
-            # draw palette images carrying byte transparency: normalise to RGBA.
-            cropped = pil.crop(box)
-            if cropped.mode not in ("RGB", "RGBA", "L"):
-                cropped = cropped.convert("RGBA")
-            img = ImageReader(cropped)
-        else:
-            img = ImageReader(io.BytesIO(shape.image.blob))
-    except Exception as e:  # noqa: BLE001 — a bad image must not lose the page
-        logger.debug("picture %s skipped: %s", shape.name, e)
-        return
-    x, w = shape.left / EMU_PT, shape.width / EMU_PT
-    h = shape.height / EMU_PT
-    y = page_h - shape.top / EMU_PT - h
-    c.drawImage(img, x, y, w, h, mask="auto")
-
-
-def draw_autoshape(c: Canvas, shape, page_h: float, theme) -> None:
-    rgb = shape_fill(shape, theme)
-    if rgb is None:
-        return
-    x, w = shape.left / EMU_PT, shape.width / EMU_PT
-    h = shape.height / EMU_PT
-    y = page_h - shape.top / EMU_PT - h
-    c.setFillColor(rl(rgb))
-    name = str(shape.shape_type)
-    if "ROUNDED_RECTANGLE" in name:
-        try:
-            adj = float(shape.adjustments[0])
-        except (IndexError, ValueError, TypeError):
-            adj = 0.16667
-        radius = max(min(adj * min(w, h), min(w, h) / 2), 0.01)
-        c.roundRect(x, y, w, h, radius, stroke=0, fill=1)
-    else:
-        c.rect(x, y, w, h, stroke=0, fill=1)
-
-
-def draw_table(c: Canvas, shape, page_h: float, theme, page_no: int) -> None:
-    tbl = shape.table
-    x0 = shape.left / EMU_PT
-    y_top = shape.top / EMU_PT
-    widths = [col.width / EMU_PT for col in tbl.columns]
-    heights = [row.height / EMU_PT for row in tbl.rows]
-    for r, row in enumerate(tbl.rows):
-        x = x0
-        top = y_top + sum(heights[:r])
-        for i, cell in enumerate(row.cells):
-            w, h = widths[i], heights[r]
-            y = page_h - top - h
-            rgb = None
-            try:
-                if cell.fill.type == 1:
-                    col = cell.fill.fore_color.rgb
-                    rgb = (col[0], col[1], col[2])
-            except (AttributeError, TypeError, ValueError):
-                rgb = None
-            if rgb is not None:
-                c.setFillColor(rl(rgb))
-                c.rect(x, y, w, h, stroke=0, fill=1)
-            draw_text_frame(
-                c,
-                cell.text_frame,
-                x,
-                top,
-                w,
-                h,
-                page_h,
-                theme,
-                default_size=10.0,
-                default_color=(241, 243, 243),
-                page_no=page_no,
-            )
-            x += w
-
-
-def draw_shape(c: Canvas, shape, page_h: float, theme, page_no: int) -> None:
-    kind = str(shape.shape_type)
-    if shape.has_table:
-        draw_table(c, shape, page_h, theme, page_no)
-        return
-    if "PICTURE" in kind:
-        draw_picture(c, shape, page_h)
-        return
-    if "GROUP" in kind:
-        for child in shape.shapes:
-            draw_shape(c, child, page_h, theme, page_no)
-        return
-    if "AUTO_SHAPE" in kind or "PLACEHOLDER" in kind or "TEXT_BOX" in kind:
-        if "TEXT_BOX" not in kind:
-            draw_autoshape(c, shape, page_h, theme)
-        if shape.has_text_frame and shape.text_frame.text.strip():
-            draw_text_frame(
-                c,
-                shape.text_frame,
-                shape.left / EMU_PT,
-                shape.top / EMU_PT,
-                shape.width / EMU_PT,
-                shape.height / EMU_PT,
-                page_h,
-                theme,
-                page_no=page_no,
-            )
-        return
-    logger.debug("shape kind %s not drawn (%s)", kind, shape.name)
-
-
-def _is_placeholder(shape) -> bool:
-    return shape._element.find(f".//{P}ph") is not None
-
-
-def draw_background(c: Canvas, slide, page_w: float, page_h: float, theme) -> None:
-    """Fill the page with the slide's background colour.
-
-    Resolution order is PowerPoint's: the slide's own ``bg``, else its layout's,
-    else the master's. The layouts here all carry ``dk1`` + lumMod/lumOff.
-    """
-    for part in (slide, slide.slide_layout, slide.slide_layout.slide_master):
-        bg = part._element.find(f"{P}cSld/{P}bg")
-        if bg is None:
-            continue
-        solid = bg.find(f"{P}bgPr/{A}solidFill")
-        rgb = color_from_element(solid, theme) if solid is not None else None
-        if rgb is not None:
-            c.setFillColor(rl(rgb))
-            c.rect(0, 0, page_w, page_h, stroke=0, fill=1)
-            return
-    c.setFillColor(Color(0.086, 0.114, 0.149))
-    c.rect(0, 0, page_w, page_h, stroke=0, fill=1)
-
-
-def pptx_to_pdf(deck: bytes) -> bytes:
-    """Convert the rendered deck to PDF by drawing its own shape tree.
-
-    Deterministic: reportlab is put in invariant mode (no creation timestamp, no
-    random document id) and every string drawn comes from the deck, so the same
-    ``report.json`` yields byte-identical PDFs.
-    """
+def build_story(report: dict[str, Any], *, trust_generated_summary: bool | None = None):
+    """The flowables of the whole document, in section order, and the footer text."""
     register_fonts()
-    prs = Presentation(io.BytesIO(deck))
-    # slide_width/height are Optional on the part; the template always sets both.
-    page_w = int(prs.slide_width or 0) / EMU_PT
-    page_h = int(prs.slide_height or 0) / EMU_PT
-    theme = _theme_colors(prs)
+    st = _styles()
+    ms = _md_styles(st)
+    glyphs = _glyphs()
+    width = letter[0] - 1.5 * inch
 
-    buf = io.BytesIO()
-    c = Canvas(buf, pagesize=(page_w, page_h), invariant=1, pageCompression=1)
-    c.setTitle(prs.core_properties.title or "Executive Summary Report")
-    c.setSubject(prs.core_properties.comments or "")
-    c.setAuthor(pptx_report.DECK_NAME)
-    c.setCreator(pptx_report.DECK_NAME)
+    def md(lines: list[str]) -> list[Any]:
+        return pdf_markdown.to_flowables(lines, ms, width=width, glyphs=glyphs)
 
-    for i, slide in enumerate(prs.slides, start=1):
-        draw_background(c, slide, page_w, page_h, theme)
-        # Layout art (aurora background, AWS logo, footer rules) draws first.
-        # Layout *placeholders* are skipped: their sample copy ("Enter title")
-        # only renders through a slide that inherits them, and these slides do
-        # not — the deck sets its own title and subtitle shapes.
-        for shape in slide.slide_layout.shapes:
-            if not _is_placeholder(shape):
-                draw_shape(c, shape, page_h, theme, i)
-        for shape in slide.shapes:
-            draw_shape(c, shape, page_h, theme, i)
-        c.showPage()
+    def h1(text: str) -> list[Any]:
+        return [CondPageBreak(2.2 * inch), _Heading(text, st["h1"])]
 
-    c.save()
-    data = buf.getvalue()
-    logger.info("Rendered %s: %d pages, %d bytes", FILENAME, len(prs.slides._sldIdLst), len(data))
-    return data
+    def txt(s: Any) -> str:
+        return pdf_markdown.inline(escaping.md_text(s), ms, glyphs)
+
+    db = str(report.get("database_name") or "?")
+    arch = report.get("recommended_architecture") or {}
+    risk = report.get("risk_assessment") or {}
+    tco = report.get("tco_analysis") or {}
+    trust = _trust(report) if trust_generated_summary is None else trust_generated_summary
+    generated = _date(report)
+    footer = FOOTER
+
+    # -- cover ---------------------------------------------------------------
+    rows = [
+        ("Source database", db),
+        ("Architecture", str(arch.get("architecture_type") or "not determined").replace("_", " ")),
+        ("Overall risk", str(risk.get("overall_risk_level") or "not assessed")),
+        ("Projected monthly cost", _fmt_usd(tco.get("projected_monthly_cost"))),
+        ("Job", str(report.get("job_id") or "unknown")),
+    ]
+    if generated:
+        rows.append(("Generated", generated.isoformat()))
+    cover_tbl = Table(
+        [[Paragraph(txt(k), st["label"]), Paragraph(txt(v), st["body"])] for k, v in rows],
+        colWidths=[1.9 * inch, width - 1.9 * inch],
+        hAlign="LEFT",
+    )
+    cover_tbl.setStyle(
+        TableStyle(
+            [
+                ("LINEBELOW", (0, 0), (-1, -1), 0.4, RULE),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story: list[Any] = [
+        Spacer(1, 2.2 * inch),
+        Paragraph(PRODUCT_NAME, st["cover_title"]),
+        Paragraph(REPORT_NAME, st["cover_sub"]),
+        cover_tbl,
+        NextPageTemplate("body"),
+        PageBreak(),
+    ]
+
+    # -- executive summary ---------------------------------------------------
+    summary = report.get("summary") if trust else report.get("summary_deterministic")
+    summary = summary or report.get("summary_deterministic")
+    if summary and summary == report.get("summary_deterministic"):
+        summary = label_summary_counts(summary, report)
+    story += h1(H_SUMMARY)
+    if summary:
+        for chunk in str(summary).strip().split("\n"):
+            if chunk.strip():
+                story.append(Paragraph(txt(chunk.strip()), st["body"]))
+    else:
+        story.append(Paragraph(txt("No executive summary was generated for this run."), st["body"]))
+    story.append(Paragraph(txt(SEE_ALSO_NOTE), st["note"]))
+
+    # -- cost ----------------------------------------------------------------
+    story += h1(H_COST) + md(_cost_md(report))
+
+    # -- engines -------------------------------------------------------------
+    story += h1(H_ENGINES) + md(_target_engines_md(report))
+
+    # -- wave plan -----------------------------------------------------------
+    story += h1(H_WAVES) + md(_roadmap_md(report))
+
+    # -- risks ---------------------------------------------------------------
+    story += h1(H_RISKS) + md(_risks_md(report))
+
+    # -- close calls and unservable queries ----------------------------------
+    close = unservable_md(report) + close_calls_md(report)
+    if close:
+        story += h1(H_CLOSE) + md(close)
+
+    # -- traceability appendix -----------------------------------------------
+    traces = query_traces_md(report)
+    if traces:
+        story += h1(H_APPENDIX) + md(traces)
+
+    return story, footer, db
+
+
+_GLYPH_CACHE: list[set[int] | None] = []
+
+
+def _glyphs() -> set[int] | None:
+    """Code points the regular face can draw; None when running on the fallback font."""
+    if not _GLYPH_CACHE:
+        path = FONT_DIR / _FONT_FILES[("Amazon Ember", False)]
+        _GLYPH_CACHE.append(pdf_markdown.known_glyphs(str(path)) if path.exists() else None)
+    return _GLYPH_CACHE[0]
 
 
 def render_executive_summary_pdf(
     report: dict[str, Any],
     export_data: dict[str, Any] | None = None,
-) -> tuple[bytes, bytes]:
-    """Render the deck and its PDF from one pass.
+    *,
+    trust_generated_summary: bool | None = None,
+) -> bytes:
+    """Render the PDF report from ``report.json`` and return its bytes.
 
-    Returns ``(pptx_bytes, pdf_bytes)`` — the caller keeps the deck as the
-    editable source on S3 and publishes the PDF to the Artifacts panel.
+    ``export_data`` is accepted for call compatibility and unused: every figure
+    comes from the report's facts layer. Deterministic for a given report.
     """
-    deck = pptx_report.render_executive_summary_pptx(report, export_data)
-    return deck, pptx_to_pdf(deck)
+    story, footer, db = build_story(report, trust_generated_summary=trust_generated_summary)
+    buf = io.BytesIO()
+    w, h = letter
+    margin = 0.75 * inch
+    doc = _Doc(
+        buf,
+        pagesize=letter,
+        leftMargin=margin,
+        rightMargin=margin,
+        topMargin=0.85 * inch,
+        bottomMargin=0.85 * inch,
+        title=f"{PRODUCT_NAME} — {db}",
+        author=PRODUCT_NAME,
+        creator=PRODUCT_NAME,
+        subject=f"{REPORT_NAME} — job {report.get('job_id') or 'unknown'}",
+        invariant=1,
+        pageCompression=1,
+    )
+    cover = Frame(margin, 0.85 * inch, w - 2 * margin, h - 1.7 * inch, id="cover")
+    body = Frame(margin, 0.85 * inch, w - 2 * margin, h - 1.7 * inch, id="body")
+    doc.addPageTemplates(
+        [
+            PageTemplate(id="cover", frames=[cover], onPage=_cover_page),
+            PageTemplate(id="body", frames=[body], onPage=_furniture(db, footer)),
+        ]
+    )
+    doc.build(story, canvasmaker=_NumberedCanvas)
+    data = buf.getvalue()
+    logger.info("Rendered %s: %d bytes, database=%s", FILENAME, len(data), db)
+    return data
+
+
+__all__ = [
+    "FILENAME",
+    "H_APPENDIX",
+    "H_CLOSE",
+    "H_COST",
+    "H_ENGINES",
+    "H_RISKS",
+    "H_SUMMARY",
+    "H_WAVES",
+    "PRODUCT_NAME",
+    "SECTION_HEADINGS",
+    "render_executive_summary_pdf",
+]

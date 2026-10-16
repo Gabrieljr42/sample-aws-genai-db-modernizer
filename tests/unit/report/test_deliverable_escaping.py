@@ -15,8 +15,8 @@ These tests do two things the acceptance criteria call for:
   the Engineering Report (Markdown, including its Mermaid fences), and the
   Interactive Analysis Report (HTML).
 
-The PDF/PPTX deck is intentionally not covered here: those renderers draw glyphs
-through reportlab / python-pptx and have no markup context to inject into (R3/E2
+The PDF is intentionally not covered here: those renderers draw glyphs
+through reportlab and have no markup context to inject into (R3/E2
 scope the escaping concern to HTML/SVG/Markdown).
 """
 

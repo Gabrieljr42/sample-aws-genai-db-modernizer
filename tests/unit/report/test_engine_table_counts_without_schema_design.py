@@ -37,7 +37,7 @@ from typing import Any
 
 import pytest
 
-from src.report import architecture, pptx_report, renderers
+from src.report import architecture, renderers
 
 FIXTURE = Path(__file__).parent / "fixtures" / "wordpress_no_schema_design_report.json"
 DESIGNED_FIXTURE = Path(__file__).parent / "fixtures" / "e2e09_report.json"
@@ -95,21 +95,6 @@ def test_decision_report_scope_tile_and_roadmap_agree(report: dict[str, Any]) ->
     assert roadmap is not None, html
     roadmap_n = int(roadmap.group(1))
     assert scope_n == tile_n == roadmap_n == 8
-
-
-def test_deck_scope_column_matches_the_migrated_tile(report: dict[str, Any]) -> None:
-    facts = pptx_report.derive(report, {})
-    assert facts["migrated"] == 8
-    dynamodb = next(e for e in facts["engines"] if e["engine"] == "dynamodb")
-    assert dynamodb["migrates"] == 8
-    assert dynamodb["scope"] == "8 source tables"
-
-
-def test_decision_report_and_deck_agree_with_each_other(report: dict[str, Any]) -> None:
-    html = renderers.render_decision_report_html(report)
-    html_tile_n = int(re.search(r"<p>Tables migrate</p><p class=val>(\d+)</p>", html).group(1))
-    pptx_n = pptx_report.derive(report, {})["migrated"]
-    assert html_tile_n == pptx_n == 8
 
 
 def test_designed_engine_with_zero_mapped_tables_keeps_its_own_figure(

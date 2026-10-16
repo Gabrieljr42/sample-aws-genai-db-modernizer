@@ -19,7 +19,7 @@ appearance:
   under a section that run never renders;
 - the deck: the "Workload Coverage and Engine Assignment" slide's
   ``footer_note``, where the per-engine fit percentage first appears
-  (``pptx_report.slide_coverage``) -- exactly once, whether or not the report
+  (the PDF report's engines table) -- exactly once, whether or not the report
   carries ``routed_confidence``. Review round 1 found the deck restating the
   full definition a second time, verbatim, on the "Engine Fit and Open
   Decisions" slide whenever ``routed_confidence`` was present, and the
@@ -42,9 +42,9 @@ from typing import Any
 
 import pytest
 
-from src.report import pptx_report, renderers
+from src.report import renderers
 from src.shared.workload_fit_labels import WORKLOAD_FIT_DEFINITION
-from tests.unit.report.test_deck_routed_confidence import _report as _routed_report
+from tests.unit.report.pdf_text import pdf_text
 
 FIXTURE = Path(__file__).parent / "fixtures" / "e2e09_report.json"
 
@@ -58,6 +58,63 @@ def report() -> dict:
 def test_decision_report_states_the_definition_once(report: dict) -> None:
     html = renderers.render_decision_report_html(report)
     assert html.count(WORKLOAD_FIT_DEFINITION) == 1
+
+
+def _routed_report() -> dict[str, Any]:
+    """The discourse shape after #296/#304, with routed confidence."""
+    return {
+        "database_name": "discourse",
+        "job_id": "job-1",
+        "timestamp": "2026-10-04T00:00:00Z",
+        "ranking": [
+            {
+                "target": "aurora_postgresql",
+                "confidence_score": 67,
+                "analysis_confidence": 67,
+                "routed_confidence": 93,
+                "workload_percent": 76.5,
+                "assigned_queries": 1266,
+            },
+            {
+                "target": "dynamodb",
+                "confidence_score": 62,
+                "analysis_confidence": 62,
+                "routed_confidence": 91,
+                "workload_percent": 23.3,
+                "assigned_queries": 385,
+            },
+            {
+                "target": "opensearch",
+                "confidence_score": 2,
+                "analysis_confidence": 2,
+                "routed_confidence": 60,
+                "workload_percent": 0.2,
+                "assigned_queries": 3,
+            },
+            {
+                "target": "elasticache",
+                "role": "cache_layer",
+                "confidence_score": 56,
+                "analysis_confidence": 56,
+                "routed_confidence": 87,
+                "routed_confidence_basis": "cached_reads",
+                "workload_percent": 0.0,
+                "assigned_queries": 0,
+                "cache_overlay_queries": 3,
+                "cache_call_share_percent": 25.1,
+            },
+        ],
+        "cache_overlay": {"engine": "elasticache", "query_count": 3, "call_share_percent": 25.1},
+        "recommended_architecture": {
+            "databases": [
+                {"service": "aurora_postgresql", "table_count": 0},
+                {"service": "dynamodb", "table_count": 0},
+                {"service": "opensearch", "table_count": 0},
+                {"service": "elasticache", "table_count": 0},
+            ]
+        },
+        "schema_designs": {},
+    }
 
 
 def test_engineering_report_states_the_definition_once(report: dict) -> None:
@@ -87,30 +144,16 @@ def test_engineering_report_states_the_definition_without_schema_design() -> Non
     assert md.count(WORKLOAD_FIT_DEFINITION) == 1
 
 
-def _full_deck_text(rep: dict[str, Any]) -> str:
-    f = pptx_report.derive(rep, {})
-    prs = pptx_report.open_deck(keep=1)
-    for build in pptx_report.SLIDES:
-        build(prs, f)
-    texts = [
-        shape.text_frame.text
-        for slide in prs.slides
-        for shape in slide.shapes
-        if shape.has_text_frame
-    ]
-    return " ".join(" ".join(texts).split())
-
-
-def test_deck_states_the_definition_exactly_once_without_routed_confidence(
+def test_pdf_states_the_definition_exactly_once_without_routed_confidence(
     report: dict,
 ) -> None:
     assert "routed_confidence" not in report.get("ranking", [{}])[0]
-    full_text = _full_deck_text(report)
+    full_text = pdf_text(report)
     assert full_text.count(WORKLOAD_FIT_DEFINITION) == 1
 
 
-def test_deck_states_the_definition_exactly_once_with_routed_confidence() -> None:
+def test_pdf_states_the_definition_exactly_once_with_routed_confidence() -> None:
     rep = _routed_report()
     assert rep["ranking"][0].get("routed_confidence") is not None
-    full_text = _full_deck_text(rep)
+    full_text = pdf_text(rep)
     assert full_text.count(WORKLOAD_FIT_DEFINITION) == 1

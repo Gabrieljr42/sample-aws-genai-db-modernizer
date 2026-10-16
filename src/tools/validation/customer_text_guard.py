@@ -5,7 +5,7 @@ never survives in a reality-check consolidation's ``reason`` -- to every
 customer-facing string this pipeline writes: ``report.json``,
 ``assignment/v*/assignment.json`` (its per-query ``reason`` fields), the
 reality-check output, and the rendered deliverables (decision/analysis HTML,
-the engineering Markdown report, the deck). It flags five classes of leak:
+the engineering Markdown report, the PDF). It flags five classes of leak:
 
 - a raw engine id (``dynamodb``) where a display name belongs -- the engine
   ids are read from ``src.shared.engine_names.ENGINE_DISPLAY_NAMES``'s keys,
@@ -80,7 +80,7 @@ engineering report's own document metadata -- ``job_id``, ``source_artifact``,
 ``generated``, ...) before scanning: those are structured keys, the Markdown
 analogue of an ``ID_FIELDS`` exclusion, not reason text.
 
-``scan_html``/``scan_pptx_text`` strip markup/open a deck the same way, so the
+``scan_html`` strips markup the same way, so the
 rendered deliverables can be scanned with the same four detectors.
 """
 
@@ -435,7 +435,7 @@ def scan_json(obj: Any, path: str = "$") -> list[Finding]:
 # risk_engine_and_body``'s own docstring: "Risks carry no explicit engine field; the
 # engine is encoded as a leading [documentdb]/[elasticache] tag in the description").
 # Every renderer parses this tag off before display (risk_engine_and_body,
-# synthesis_grounding._ENGINE_TAG, pptx_report.risk_engine) -- it is the same kind of
+# synthesis_grounding._ENGINE_TAG) -- it is the same kind of
 # id-holding prefix ID_FIELDS excludes for a whole field, just embedded in one that
 # also carries a real prose body. Stripped before scanning so a genuine leak in that
 # body is still caught, without excluding the field (and its body) outright.
@@ -515,34 +515,3 @@ def scan_html(html: str, path: str = "") -> list[Finding]:
     text = _SCRIPT_OR_STYLE_RE.sub(" ", html)
     text = _TAG_RE.sub(" ", text)
     return scan_text(text, path)
-
-
-def _walk_shapes(shapes: Any, path: str, findings: list[Finding]) -> None:
-    """Recurse into every shape on a slide, including table cells (``add_table``,
-    which carries no ``text_frame`` of its own -- #572 review item 4) and group
-    shapes (whose members are not direct children of the slide's own ``shapes``)."""
-    from pptx.enum.shapes import MSO_SHAPE_TYPE
-
-    for shape in shapes:
-        if getattr(shape, "has_text_frame", False):
-            findings.extend(scan_text(shape.text_frame.text, path))
-        if getattr(shape, "has_table", False):
-            for r, row in enumerate(shape.table.rows):
-                for c, cell in enumerate(row.cells):
-                    findings.extend(scan_text(cell.text, f"{path}:table[{r}][{c}]"))
-        if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.GROUP:
-            _walk_shapes(shape.shapes, path, findings)
-
-
-def scan_pptx_text(pptx_path: str, path: str = "") -> list[Finding]:
-    """Scan every slide's text in a rendered ``.pptx`` deck: text frames, table
-    cells, and group shapes (recursively) -- the PDF export is drawn from these
-    same shapes, so this also covers what ``test_report_pdf.py`` cannot derive
-    structurally."""
-    from pptx import Presentation
-
-    findings: list[Finding] = []
-    prs = Presentation(pptx_path)
-    for i, slide in enumerate(prs.slides):
-        _walk_shapes(slide.shapes, f"{path}:slide{i}", findings)
-    return findings

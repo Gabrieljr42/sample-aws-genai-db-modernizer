@@ -4,7 +4,7 @@ Single source of truth for which engines play which role in the wave
 sequence (cache, key-value, search/analytics read model, document, retained
 relational). Before this module existed, ``src.agents.referee.migration_waves``
 (the builder), ``src.report.waves`` (the legacy on-the-fly fallback for
-reports written before #225) and ``src.report.pptx_report`` (deck accents)
+reports written before #225) and the retired executive deck (accents)
 each kept their own hand-written copy of these sets, and nothing enforced
 that the copies stayed in sync (#225). Importing
 from here instead means a new engine added to the rule only has to be added

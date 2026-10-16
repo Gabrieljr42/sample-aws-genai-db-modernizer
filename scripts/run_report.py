@@ -3,7 +3,7 @@
 
 Writes, next to the job's synthesis ``report.json``: the decision report (HTML),
 the engineering report (Markdown), the interactive analysis report (HTML), and the
-executive summary (PPTX + PDF). Deterministic, no LLM calls.
+executive summary (PDF). Deterministic, no LLM calls.
 
 When the rendered version is the job's latest, it also fills the customer folder
 ``artifacts/<db>/<job>/deliverables/`` with stable names and an ``index.md``

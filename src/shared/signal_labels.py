@@ -1,7 +1,7 @@
 """Short plural nouns for triage signals, for prose such as "led by full-text search".
 
-Used by the ranking rationale (#152). The deck keeps its own forms
-(``pptx_report.SIGNAL_LABEL`` / ``SIGNAL_MODIFIER``) because its sentences differ.
+Used by the ranking rationale (#152). The old deck kept its own forms
+because its sentences differed.
 """
 
 from __future__ import annotations

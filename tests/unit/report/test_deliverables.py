@@ -28,7 +28,7 @@ def _no_graph(*_):
     return False
 
 
-def test_renders_all_six_items_in_publish_order(store) -> None:
+def test_renders_all_five_items_in_publish_order(store) -> None:
     out = dl.render_deliverables(store, JOB, DB, KEY, assignment_version=1, graph_fetcher=_no_graph)
 
     assert out.errors == []
@@ -37,7 +37,6 @@ def test_renders_all_six_items_in_publish_order(store) -> None:
         "engineering-report",
         "assessment-data",
         "analysis-report",
-        "executive-summary-pptx",
         "executive-summary-pdf",
     ]
 
@@ -52,10 +51,9 @@ def test_staged_and_published_sets_match_the_atx_contract(store) -> None:
         "decision-report",
         "engineering-report",
         "analysis-report",
-        "executive-summary-pptx",
         "executive-summary-pdf",
     }
-    # The editable deck is staged but not published; the PDF is the delivery.
+    # Every staged item is also published.
     assert published == [
         "decision-report",
         "engineering-report",
@@ -74,7 +72,6 @@ def test_content_types_and_filenames(store) -> None:
     content = out["decision-report"].content
     assert content.startswith(b"<!DOCTYPE html") or b"<html" in content[:200]
     assert out["executive-summary-pdf"].content.startswith(b"%PDF")
-    assert out["executive-summary-pptx"].content[:2] == b"PK"  # zip container
     assert out["executive-summary-pdf"].filename == "summary-executive-report.pdf"
     # The label still carries the round (#146); #147 tracks the download name too.
     assert "(v1)" in out["executive-summary-pdf"].label
@@ -91,7 +88,6 @@ def test_a_failing_optional_deliverable_is_reported_not_raised(store, monkeypatc
 
     names = {d.name for d in out.items}
     assert "executive-summary-pdf" not in names
-    assert "executive-summary-pptx" not in names
     assert any(
         e.startswith("executive-summary: RuntimeError: template missing") for e in out.errors
     )
@@ -117,7 +113,7 @@ def test_analysis_report_failure_still_renders_the_rest(store, monkeypatch) -> N
 
 def test_select_frame_prefers_a_src_frame_over_a_deeper_third_party_one() -> None:
     """The actual deepest frame can be inside a third-party library (jinja2,
-    python-pptx, ...), which isn't actionable -- _select_frame should pick our
+    reportlab, ...), which isn't actionable -- _select_frame should pick our
     own nearest frame instead. Built from plain FrameSummary values (outermost
     first, as traceback.extract_tb returns them), no real exception needed."""
     middle = traceback.FrameSummary("/repo/src/report/pdf_report.py", 42, "middle")

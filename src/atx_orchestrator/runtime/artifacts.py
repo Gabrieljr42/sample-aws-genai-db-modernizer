@@ -50,7 +50,7 @@ CategoryType = Literal[
     "PLAN_STEP_SUMMARY",
     "STATE",
 ]
-FileType = Literal["CSV", "HTML", "JSON", "MARKDOWN", "OTHER", "PDF", "PPTX", "TXT", "XLSX", "ZIP"]
+FileType = Literal["CSV", "HTML", "JSON", "MARKDOWN", "OTHER", "PDF", "TXT", "XLSX", "ZIP"]
 
 
 # Download filename extension per file type, so a published artifact downloads
@@ -61,7 +61,6 @@ _FILE_TYPE_EXT: dict[str, str] = {
     "JSON": "json",
     "MARKDOWN": "md",
     "PDF": "pdf",
-    "PPTX": "pptx",
     "TXT": "txt",
     "XLSX": "xlsx",
     "ZIP": "zip",

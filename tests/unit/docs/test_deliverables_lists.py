@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from src.report import deliverables
+from tests.branding import hits
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -77,7 +78,7 @@ def test_each_list_names_exactly_the_documented_set(surface: str) -> None:
         )
         assert "deliverables/" in block, f"{surface}: list does not point at deliverables/"
         # Branding: "Database Modernizer Assessment Tool" is the only product name.
-        assert not re.search(r"transform|\bATX\b", block, re.IGNORECASE), surface
+        assert hits(block) == [], surface
 
 
 @pytest.mark.parametrize("path", SCANNED)
@@ -89,9 +90,9 @@ def test_no_surface_points_at_old_names_or_the_versioned_folder(path: str) -> No
 
 
 def test_the_pdf_points_at_real_files_in_the_deliverables_folder() -> None:
-    from src.report import pptx_report
+    from src.report import pdf_report
 
-    note = pptx_report.SEE_ALSO_NOTE
+    note = pdf_report.SEE_ALSO_NOTE
     assert "deliverables folder" in note
     named = set(_FILE_RE.findall(note))
     assert named and named <= DOCUMENTED_FILES, named

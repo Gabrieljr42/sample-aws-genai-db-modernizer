@@ -116,8 +116,7 @@ def clip(text: str, n: int) -> str:
     space to back up to) used to back the whole cut up to the word boundary
     *before* it, silently surrendering most of the character budget to that one
     word (#434 review); hard-cut at ``n`` instead whenever backing up would lose
-    more than half of it. Shared with ``pptx_report.py`` (deck slides hit the
-    same long-text problem); the Engineering Report's "Queries on Aurora by
+    more than half of it. The Engineering Report's "Queries on Aurora by
     table" section's joined reasons hit it too (#478).
     """
     text = " ".join(text.split())

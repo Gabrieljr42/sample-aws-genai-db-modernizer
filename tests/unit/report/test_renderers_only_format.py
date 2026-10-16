@@ -166,14 +166,7 @@ ARITHMETIC = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv)
 PRAGMA = re.compile(r"#\s*facts:\s*presentation\b(?:\s*\((?P<reason>[^)]*)\))?")
 
 # Every ``# facts: presentation`` exemption in use, by module and reason.
-PINNED_EXEMPTIONS = frozenset(
-    {
-        ("src/report/pptx_report.py", "verb agreement for the engines named"),
-        ("src/report/pptx_report.py", "bar widths"),
-        ("src/report/pptx_report.py", "bar width"),
-        ("src/report/pptx_report.py", "bar position"),
-    }
-)
+PINNED_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset()
 
 
 def _call_name(node: ast.Call) -> str:

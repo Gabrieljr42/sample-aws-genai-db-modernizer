@@ -9,7 +9,7 @@ heterogeneous source (SQL Server, Oracle, DB2) where the assignment resolver
 still picked an Aurora engine -- this test is the regression guard for that.
 
 It also renders every customer deliverable (decision/analysis HTML,
-engineering Markdown, PDF, PPTX) from the resulting report.json, since a
+engineering Markdown, PDF) from the resulting report.json, since a
 contract bump with no renderer regression is only half the fix.
 """
 
@@ -143,7 +143,6 @@ class TestAdventureWorksDeliverablesRender:
             "engineering-report",
             "analysis-report",
             "executive-summary-pdf",
-            "executive-summary-pptx",
         } <= names
 
     def test_decision_and_analysis_html_render(self, pipeline_report) -> None:
@@ -166,7 +165,7 @@ class TestAdventureWorksDeliverablesRender:
         assert b"Migration target" in decision_html
         assert b">Retained<" not in decision_html
 
-    def test_pdf_and_pptx_render(self, pipeline_report) -> None:
+    def test_pdf_renders(self, pipeline_report) -> None:
         store, _, version = pipeline_report
         report_key = f"{DB}/{JOB}/synthesis/v{version}/report.json"
         out = {
@@ -176,4 +175,4 @@ class TestAdventureWorksDeliverablesRender:
             ).items
         }
         assert out["executive-summary-pdf"].content.startswith(b"%PDF")
-        assert out["executive-summary-pptx"].content[:2] == b"PK"
+        assert "executive-summary-pptx" not in out

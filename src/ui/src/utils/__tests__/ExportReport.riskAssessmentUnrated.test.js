@@ -2,7 +2,7 @@
  * #270 round-1 review of PR #506: a risk whose severity is none of
  * CRITICAL/HIGH/MEDIUM/LOW used to silently count as LOW in the HTML
  * export's embedded buildRiskAssessment() -- the same risk the deck labels
- * "UNRATED" (pptx_report.py) read here as "known to be low severity"
+ * "UNRATED" (the PDF report) read here as "known to be low severity"
  * instead of simply unrated. This file exercises that case on its own (see
  * ExportReport.riskAssessment.test.js's header for why only one
  * generateHTMLReport()/script load is possible per test file).

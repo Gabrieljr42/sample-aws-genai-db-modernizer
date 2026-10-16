@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.report import architecture, pptx_report, renderers
+from src.report import architecture, renderers
 
 
 def _ap(pid: str, engine: str, in_scope: bool = True) -> dict[str, Any]:
@@ -95,11 +95,6 @@ class TestAccessPatternScope:
     def test_without_query_groups_nothing_is_labelled(self) -> None:
         assert renderers.label_in_scope_access_patterns(RUN5_SUMMARY, {}) == RUN5_SUMMARY
 
-    def test_deck_summary_says_in_scope(self) -> None:
-        rep = {**_design_report(), "summary_deterministic": RUN5_SUMMARY}
-        f = pptx_report.derive(rep, {})
-        assert "DynamoDB: 15 target tables, 47 in-scope access patterns" in f["summary"]
-
     def test_decision_report_fallback_summary_says_in_scope(self) -> None:
         rep = {**_design_report(), "summary_deterministic": RUN5_SUMMARY}
         html = renderers.render_decision_report_html(rep)
@@ -151,30 +146,6 @@ def _shape_texts(slide) -> list[str]:
         if sh.has_table:
             out += [c.text for row in sh.table.rows for c in row.cells]
     return out
-
-
-class TestLeaderboardCounts:
-    """#256: page 4 lists 15 leaderboard queries (whole workload), page 5 says
-    "14 leaderboard / top-n queries routed to ElastiCache"."""
-
-    def test_evidence_names_the_routed_share_of_the_signal(self) -> None:
-        f = pptx_report.derive(_cache_report(), _leaderboard_export())
-        against = next(d for d in f["decisions"] if d["question"].startswith("Confirm"))["against"]
-        assert "14 of 15 leaderboard / top-n queries routed to ElastiCache" in against
-
-    def test_evidence_keeps_the_plain_count_when_every_query_was_routed(self) -> None:
-        text = pptx_report._evidence_text(
-            {"name": "leaderboard_pattern", "count": 15, "served": 15}, "elasticache"
-        )
-        assert text == "15 leaderboard / top-n queries routed to ElastiCache"
-
-    def test_workload_table_says_it_counts_the_whole_workload(self) -> None:
-        f = pptx_report.derive(_cache_report(), _leaderboard_export())
-        slide = pptx_report.slide_workload(pptx_report.open_deck(keep=1), f)
-        texts = _shape_texts(slide)
-        assert any("WHOLE WORKLOAD" in t for t in texts)
-        # #679: the T-SQL/ANSI spellings count too, as in triage's own evidence text.
-        assert "Leaderboard / top-N (ORDER BY + LIMIT, TOP or FETCH)" in texts
 
 
 def _shared_tables_report() -> dict[str, Any]:
@@ -231,13 +202,6 @@ class TestSharedSourceTables:
         assert "<p>Tables migrate</p><p class=val>21</p>" in html
         assert "1921" not in html
 
-    def test_deck_totals_still_sum_mapped_tables(self) -> None:
-        f = pptx_report.derive(_shared_tables_report(), {})
-        # The schema-design-based figure (#257/#258) is preferred when it has
-        # one; #225 only needs the fallback below it for a
-        # report where that figure is 0 but a wave clearly moves real tables.
-        assert f["migrated"] == 21
-
 
 def _risk(rid: str, sev: str, n_queries: int, engine: str = "dynamodb") -> dict[str, Any]:
     return {
@@ -250,68 +214,9 @@ def _risk(rid: str, sev: str, n_queries: int, engine: str = "dynamodb") -> dict[
     }
 
 
-def _risk_slide(risks: list[dict[str, Any]]) -> tuple[list[list[str]], str]:
-    rep = {**_cache_report(), "risk_assessment": {"risks": risks}}
-    f = pptx_report.derive(rep, {})
-    slide = pptx_report.slide_risk(pptx_report.open_deck(keep=1), f)
-    rows = [
-        [c.text for c in row.cells] for sh in slide.shapes if sh.has_table for row in sh.table.rows
-    ]
-    caption = next(
-        sh.text_frame.text
-        for sh in slide.shapes
-        if sh.has_text_frame
-        and ("risk" in sh.text_frame.text.lower())
-        and any(w in sh.text_frame.text.lower() for w in ("mitigation", "remain", "recognised"))
-    )
-    return rows, caption
-
-
 class TestRiskProfileSeverityFallback:
     """#249: with no HIGH risks the Risk Profile table was empty and the caption
     still said "Each HIGH risk carries ..."."""
-
-    def test_only_medium_risks_lists_the_top_medium_risks(self) -> None:
-        risks = [_risk(f"RISK-00{i}", "MEDIUM", n) for i, n in enumerate([1, 6, 2, 1, 3], 1)]
-        rows, caption = _risk_slide(risks)
-        # The busiest four, by affected-query count; the count comes from query_ids.
-        assert [r[0] for r in rows[1:]] == ["RISK-002", "RISK-005", "RISK-003", "RISK-001"]
-        assert rows[1][4] == "6"
-        # Each row shows its own mitigation, not mitigation_strategies[0].
-        assert rows[1][3] == "Keep a counter per key via UpdateItem."
-        assert caption.startswith(
-            "No CRITICAL or HIGH risks remain; the table shows the top MEDIUM risks."
-        )
-        assert "below" not in caption and "above" not in caption
-        assert "Each HIGH risk" not in caption
-
-    def test_only_low_risks_lists_the_low_risks(self) -> None:
-        rows, caption = _risk_slide([_risk("RISK-001", "LOW", 2)])
-        assert [r[0] for r in rows[1:]] == ["RISK-001"]
-        assert caption.startswith(
-            "No CRITICAL, HIGH or MEDIUM risks remain; the table shows the top LOW risk."
-        )
-
-    def test_high_risks_keep_the_high_caption_and_rows(self) -> None:
-        rows, caption = _risk_slide([_risk("RISK-001", "MEDIUM", 9), _risk("RISK-002", "HIGH", 1)])
-        assert [r[0] for r in rows[1:]] == ["RISK-002"]
-        assert caption.startswith(
-            "Each HIGH risk carries an affected-query count and a documented mitigation."
-        )
-
-    def test_no_risks_says_so(self) -> None:
-        """No open risks and no resolved ones either (#434): the slide states that
-        plainly instead of an empty table and an empty "BY TYPE" box -- see
-        ``test_risk_profile_empty_state.py`` for the no-open-but-resolved case."""
-        rep = {**_cache_report(), "risk_assessment": {"risks": []}}
-        f = pptx_report.derive(rep, {})
-        slide = pptx_report.slide_risk(pptx_report.open_deck(keep=1), f)
-        assert not any(sh.has_table for sh in slide.shapes)
-        text = "\n".join(sh.text_frame.text for sh in slide.shapes if sh.has_text_frame)
-        assert "No open or resolved risks identified" in text
-        assert "No risks were identified in this analysis." in text
-        assert "0 risks:" not in text
-        assert "BY TYPE" not in text
 
 
 def _mapped_report() -> dict[str, Any]:
@@ -364,15 +269,6 @@ class TestUnlabelledCounts:
         md = renderers.render_engineering_report_md(rep)
         assert "## Migration map (21 tables)" in md
 
-    def test_deck_footer_reconciles_mapped_and_migrating_tables(self) -> None:
-        f = pptx_report.derive(_mapped_report(), {})
-        slide = pptx_report.slide_summary(pptx_report.open_deck(keep=1), f)
-        assert any(
-            "21 of the 22 mapped source tables (21 migrate, 1 to the cache layer) move to a "
-            "purpose-built engine" in t
-            for t in _shape_texts(slide)
-        )
-
     def test_decision_report_separates_open_and_resolved_risks(self) -> None:
         html = renderers.render_decision_report_html(_mapped_report(), trust_generated_summary=True)
         # #270: only non-zero severities are named -- all 8 fixture risks are
@@ -385,12 +281,6 @@ class TestUnlabelledCounts:
         out = renderers.label_resolved_risks(_mapped_report()["summary_deterministic"])
         assert "8 open risk(s) (overall: LOW); 4 more were resolved by the assignment." in out
         assert renderers.label_resolved_risks(out) == out
-
-    def test_deck_summary_separates_open_and_resolved(self) -> None:
-        f = pptx_report.derive(_mapped_report(), {})
-        assert "8 open risk(s) (overall: LOW); 4 more were resolved by the assignment." in (
-            f["summary"]
-        )
 
 
 class TestNumberFormatting:
@@ -423,14 +313,6 @@ class TestNumberFormatting:
         assert "<td data-figure=workload>58.9%</td>" in html
         assert "58.900000" not in html
 
-    def test_deck_throughput_uses_thousands_separators(self) -> None:
-        exp = _leaderboard_export()
-        for p in exp["collector"]["queries"]["query_patterns"]:
-            p["calls_per_second"] = 12.5
-        f = pptx_report.derive(_cache_report(), exp)
-        slide = pptx_report.slide_workload(pptx_report.open_deck(keep=1), f)
-        assert any("1,337.5 queries/sec" in t for t in _shape_texts(slide))
-
 
 class TestReviewFollowUps:
     """#267 review: singular resolved risk, unrated severities, colours, footnote."""
@@ -441,36 +323,9 @@ class TestReviewFollowUps:
             "3 open risk(s) (overall: LOW); 1 more was resolved by the assignment."
         )
 
-    def test_risks_without_a_recognised_severity_are_shown_as_unrated(self) -> None:
-        risks = [_risk("RISK-001", "SEVERE", 2), _risk("RISK-002", "", 5)]
-        rows, caption = _risk_slide(risks)
-        assert [r[0] for r in rows[1:]] == ["RISK-002", "RISK-001"]
-        assert "No open risks remain" not in caption
-        assert caption.startswith("No risk has a recognised severity; the table shows the top")
-        f = pptx_report.derive({**_cache_report(), "risk_assessment": {"risks": risks}}, {})
-        assert f["sev"] == {"UNRATED": 2}
-
-    def test_severity_bar_uses_the_table_colour(self) -> None:
-        f = pptx_report.derive(
-            {**_cache_report(), "risk_assessment": {"risks": [_risk("RISK-001", "LOW", 1)]}}, {}
-        )
-        slide = pptx_report.slide_risk(pptx_report.open_deck(keep=1), f)
-        fills = {
-            str(sh.fill.fore_color.rgb)
-            for sh in slide.shapes
-            if sh.shape_type == 1 and sh.fill.type == 1 and sh.height < 300000
-        }
-        assert str(pptx_report._risk_accent("LOW")) in fills
-        assert str(pptx_report.BLUE) not in fills
-
-    def test_shared_tables_footnote_in_decision_report_and_deck(self) -> None:
+    def test_shared_tables_footnote_in_decision_report(self) -> None:
         html = renderers.render_decision_report_html(_shared_tables_report())
         assert "including tables also served by another engine" in html
-        f = pptx_report.derive(_shared_tables_report(), {})
-        slide = pptx_report.slide_summary(pptx_report.open_deck(keep=1), f)
-        assert any(
-            "including tables also served by another engine" in t for t in _shape_texts(slide)
-        )
 
     def test_no_footnote_without_shared_tables(self) -> None:
         rep = _shared_tables_report()
@@ -539,43 +394,6 @@ SEPARATE_RISK = {
 }
 
 
-class TestRiskRowSplitsDescriptionAndMitigation:
-    """#249 review: descriptions shaped "<type>: <mitigation>" made the Mitigation
-    column repeat the "What it is" text."""
-
-    def _rows(self, *risks: dict[str, Any]) -> dict[str, list[str]]:
-        rows, _ = _risk_slide(list(risks))
-        return {r[0]: r for r in rows[1:]}
-
-    def test_type_prefixed_description_shows_type_and_mitigation_apart(self) -> None:
-        row = self._rows(RUN5_RISK_001)["RISK-001"]
-        assert row[1] == "DynamoDB"
-        assert row[2] == "Aggregation"
-        assert row[3].startswith("COUNT(*) on postmeta by post and meta_key")
-        assert "COUNT(*)" not in row[2]
-
-    def test_mitigation_suffix_is_removed_from_what_it_is(self) -> None:
-        row = self._rows(RUN5_RISK_007)["RISK-007"]
-        assert row[2].startswith("Unsupported pattern: Database metadata and session")
-        assert "None needed" not in row[2]
-        assert row[3] == "None needed; remain with the relational database."
-
-    def test_separate_mitigation_renders_both_columns(self) -> None:
-        row = self._rows(SEPARATE_RISK)["RISK-002"]
-        assert row[2].startswith("COUNT of comments per post and approval status")
-        assert row[3] == "Maintain a counter per (post, status) via UpdateItem on write."
-
-    def test_description_equal_to_mitigation_is_shown_once(self) -> None:
-        risk = {
-            **SEPARATE_RISK,
-            "mitigation": "COUNT of comments per post and approval "
-            "status has no server-side equivalent in DynamoDB.",
-        }
-        row = self._rows(risk)["RISK-002"]
-        assert row[2].startswith("COUNT of comments")
-        assert row[3] == "—"
-
-
 def _new_summary_report() -> dict[str, Any]:
     """A report whose summary synthesis wrote with the labels already in (#255, #258)."""
     from src.agents.referee.synthesis_data import EngineArtifacts, SynthesisData
@@ -638,15 +456,9 @@ class TestLabelsWrittenAtSource:
     def test_each_label_appears_once_in_every_deliverable(self) -> None:
         rep = _new_summary_report()
         html = renderers.render_decision_report_html(rep)
-        f = pptx_report.derive(rep, {})
-        slide = pptx_report.slide_summary(pptx_report.open_deck(keep=1), f)
-        deck = " ".join(_shape_texts(slide))
         for label in self.LABELS:
             assert html.count(label) == 1, (label, "decision report")
-            pretty = pptx_report.prettify_engines(label)
-            assert deck.count(pretty) == 1, (pretty, deck)
-        for text in (html, deck):
-            assert "in-scope in-scope" not in text
-            assert "open open" not in text
-            assert "risk(s)" not in text
-            assert "more more" not in text
+        assert "in-scope in-scope" not in html
+        assert "open open" not in html
+        assert "risk(s)" not in html
+        assert "more more" not in html

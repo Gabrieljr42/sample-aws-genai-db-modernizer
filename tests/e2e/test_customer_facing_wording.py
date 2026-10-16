@@ -21,14 +21,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from src.tools.validation.customer_text_guard import (
     Finding,
     scan_html,
     scan_json,
     scan_markdown,
-    scan_pptx_text,
+    scan_text,
 )
 from tests.e2e.pipeline import PipelineResult
 
@@ -84,7 +82,9 @@ def test_assignment_reasons_have_no_internal_wording(run: PipelineResult) -> Non
 def test_reality_check_output_has_no_internal_wording(run: PipelineResult) -> None:
     path = run.job_dir() / "reality-check" / "output.json"
     if not path.is_file():
-        pytest.skip("no reality-check output for this run")
+        # Nothing to scan: the run must then have no reality-check file at all.
+        assert not list((run.job_dir() / "reality-check").glob("*.json"))
+        return
     findings = scan_json(json.loads(path.read_text()))
     findings = _filtered(findings, "reality-check/output.json")
     assert findings == [], _describe(findings)
@@ -102,7 +102,10 @@ def test_engineering_report_markdown_has_no_internal_wording(run: PipelineResult
     assert findings == [], _describe(findings)
 
 
-def test_executive_deck_has_no_internal_wording(run: PipelineResult) -> None:
-    findings = scan_pptx_text(str(run.deliverable("summary-executive-report.pptx")))
-    findings = _filtered(findings, "summary-executive-report.pptx")
+def test_executive_summary_pdf_has_no_internal_wording(run: PipelineResult) -> None:
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(run.deliverable("summary-executive-report.pdf")))
+    text = "\n".join(p.extract_text() or "" for p in reader.pages)
+    findings = _filtered(scan_text(text), "summary-executive-report.pdf")
     assert findings == [], _describe(findings)

@@ -15,12 +15,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from . import analysis_report, pdf_report, pptx_report, renderers
+from . import analysis_report, pdf_report, renderers
 from .analysis_report import GraphFetcher
 
 logger = logging.getLogger(__name__)
 
-FileType = Literal["HTML", "MARKDOWN", "JSON", "PDF", "PPTX"]
+FileType = Literal["HTML", "MARKDOWN", "JSON", "PDF"]
 
 
 def _select_frame(
@@ -31,7 +31,7 @@ def _select_frame(
     actual deepest frame.
 
     The actual deepest frame can be inside a third-party library (jinja2,
-    python-pptx, ...), which isn't actionable -- our own frame nearest the
+    reportlab, ...), which isn't actionable -- our own frame nearest the
     failure is. Split out from ``_raising_frame`` so the selection logic can
     be tested against plain ``FrameSummary`` values, with no real traceback
     (and no ``exec``/``compile``) needed.
@@ -287,38 +287,26 @@ def render_deliverables(
         )
 
     try:
-        # export_data is passed even when the analysis report failed above (it is
-        # then None): slide 3 needs the collector query patterns and degrades to a
-        # stated gap without them, rather than losing the whole deck.
-        deck, deck_pdf = pdf_report.render_executive_summary_pdf(report, export_data)
-        out.items += [
-            # Fixed names, unlike the other deliverables above: this is the reusable
+        pdf = pdf_report.render_executive_summary_pdf(
+            report, export_data, trust_generated_summary=trust
+        )
+        out.items.append(
+            # Fixed name, unlike the other deliverables above: this is the reusable
             # executive deliverable, called the same thing in every engagement. The
             # job it belongs to is already in the key prefix (synthesis/v<N>/...), so
             # no per-round stem is needed on disk. The label still carries the round
             # (#146, #147 tracks the on-disk/download name too) so the panel can
             # tell rounds apart without opening the file.
             Deliverable(
-                "executive-summary-pptx",
-                deck,
-                "PPTX",
-                f"Executive Summary Deck — {database_name} (v{assignment_version})",
-                pptx_report.FILENAME,
-                stage=True,
-                # The editable deck is staged but not published -- the PDF is the
-                # delivery, the deck is the editable source for whoever presents it.
-                publish=False,
-            ),
-            Deliverable(
                 "executive-summary-pdf",
-                deck_pdf,
+                pdf,
                 "PDF",
                 f"Executive Summary Report — {database_name} (v{assignment_version})",
                 pdf_report.FILENAME,
                 stage=True,
                 publish=True,
-            ),
-        ]
+            )
+        )
     except Exception as e:  # noqa: BLE001 - optional deliverable
         out.errors.append(f"executive-summary: {type(e).__name__}: {e}")
         logger.debug("deliverable skipped: executive-summary", exc_info=True)

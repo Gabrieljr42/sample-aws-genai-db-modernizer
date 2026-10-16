@@ -238,16 +238,6 @@ class TestRiskFollowsItsQueries:
             "schema design, 1 remaining)"
         )
 
-    def test_reattributed_risk_count_survives_the_deck_parser(self, result) -> None:
-        from src.report.pptx_report import clean_risk_text
-
-        risk = _risks_by_type(result, "complex-aggregation")[0]
-        prose, count = clean_risk_text(risk["description"])
-        assert count == "1"
-        # The deck drops the attribution lead-in: its Engine column already names
-        # the engine, so the clipped row shows the risk itself (#222).
-        assert prose == "complex-aggregation description"
-
     def test_unknown_is_never_an_affected_table(self, result) -> None:
         for risk in result["risks"] + result["resolved_risks"]:
             assert "unknown" not in (risk.get("affected_tables") or [])

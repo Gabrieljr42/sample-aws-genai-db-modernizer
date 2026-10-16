@@ -52,8 +52,8 @@ def resolved_risk_label(risk: dict[str, Any]) -> str:
     A resolved risk whose queries never left its own engine (the risk was
     resolved some other way -- a schema change, a different access pattern)
     used to render as ``Aurora MySQL -> Aurora MySQL``, naming the same engine
-    twice as if something moved. Shared by the deck
-    (``src.report.pptx_report``) and this module's own engineering report
+    twice as if something moved. Shared by the PDF report
+    (``src.report.pdf_report``) and this module's own engineering report
     section so the two agree on the same risk.
     """
     engine = str(risk.get("engine") or "")
@@ -69,7 +69,7 @@ def resolved_risk_label(risk: dict[str, Any]) -> str:
 # The headline reminder every deliverable's no-open-risk state carries (#434
 # review): "0 open risks" must never read as "0 migration risk" when the
 # analysis never modeled production traffic, peak load or compliance in the
-# first place. Same wording in the deck/PDF (``pptx_report``), this module's
+# first place. Same wording in the PDF (``pdf_report``), this module's
 # Decision Report, and the interactive Analysis Report's no-open-risk state
 # (``src/ui/src/utils/ExportReport.js`` -- JavaScript cannot import this
 # constant, so that copy is kept in sync by hand).
