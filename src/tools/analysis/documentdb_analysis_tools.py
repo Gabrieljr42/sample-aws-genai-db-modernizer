@@ -38,7 +38,7 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, source_engine_of
 
 # ---------------------------------------------------------------------------
 # Target version. The text detectors (aggregate calls, window functions,
@@ -332,6 +332,7 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     """Detect DocumentDB migration patterns per-query against the specialist catalog."""
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
     tables = (collector_output.get("database_schema") or {}).get("tables") or []
+    source_engine = source_engine_of(collector_output)
 
     if not tables or not queries:
         return WorkloadAnalysis(patterns_detected=[], anti_patterns_detected=None)
@@ -381,7 +382,7 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     graph_hierarchy: list[dict] = []
 
     for q in queries:
-        facts = query_facts(q.get("query_text", ""))
+        facts = query_facts(q.get("query_text", ""), source_engine)
         qt = q.get("query_type", "").upper()
         accessed = q.get("tables_accessed") or []
         join_count = q.get("join_count") or 0
@@ -416,7 +417,7 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
                     break
 
         # aggregation-pipeline: GROUP BY + agg functions
-        if facts.aggregate_call_word_count and not has_joins:
+        if facts.aggregation and not has_joins:
             agg_pipeline.append(q)
 
         # flexible-schema: JSON columns or JSON_EXTRACT
@@ -436,9 +437,8 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
                 extended_ref.append(q)
 
         # write-time-aggregation: multiple agg functions + JOIN
-        if facts.aggregate_call_word_count and has_joins:
-            if facts.aggregate_call_word_count >= 2:
-                write_time_agg.append(q)
+        if has_joins and facts.aggregate_function_count >= 2:
+            write_time_agg.append(q)
 
         # --- Anti-pattern matching ---
 
@@ -451,11 +451,11 @@ def analyze_documentdb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             negation.append(q)
 
         # faceted analytics
-        if facts.group_by_substring and facts.comma_count >= 2 and facts.aggregate_call_word_count:
+        if facts.group_by and facts.comma_count >= 2 and facts.aggregation:
             faceted.append(q)
 
         # window functions
-        if facts.window_function_word:
+        if facts.window_function:
             window_fn.append(q)
 
         # correlated subqueries
@@ -889,13 +889,17 @@ def build_decision_trace(
         "documentdb_compatibility": {
             "target_version": DOCUMENTDB_TARGET_VERSION,
             "cluster_type": DOCUMENTDB_TARGET_CLUSTER,
-            "version_dependent_features_detected": _detect_version_dependent_features(queries),
-            "unsupported_features_detected": _detect_unsupported_features(queries),
+            "version_dependent_features_detected": _detect_version_dependent_features(
+                queries, source_engine_of(collector_output)
+            ),
+            "unsupported_features_detected": _detect_unsupported_features(
+                queries, source_engine_of(collector_output)
+            ),
         },
     }
 
 
-def _detect_version_dependent_features(queries: list[dict]) -> list[str]:
+def _detect_version_dependent_features(queries: list[dict], source_engine: str = "") -> list[str]:
     """Detect SQL patterns whose DocumentDB operator needs a recent 8.0 release.
 
     Each needs a DocumentDB 8.0 instance-based cluster (not 5.0 or earlier,
@@ -903,10 +907,10 @@ def _detect_version_dependent_features(queries: list[dict]) -> list[str]:
     """
     features: set[str] = set()
     for q in queries:
-        facts = query_facts(q.get("query_text", ""))
-        if facts.set_window_fields_shape:
+        facts = query_facts(q.get("query_text", ""), source_engine)
+        if facts.ranking_window_function or facts.windowed_aggregate:
             features.add("$setWindowFields (ranking and window aggregates): needs 8.0.2+")
-        elif facts.window_function_word and not facts.offset_or_bucket_window_call:
+        elif facts.window_function and not facts.offset_window_function:
             # A window function neither list names (FIRST_VALUE, PERCENT_RANK,
             # a nested aggregate ...): still flagged as the anti-pattern, so it
             # still gets an entry rather than silently none.
@@ -918,7 +922,7 @@ def _detect_version_dependent_features(queries: list[dict]) -> list[str]:
     return sorted(features)
 
 
-def _detect_unsupported_features(queries: list[dict]) -> list[str]:
+def _detect_unsupported_features(queries: list[dict], source_engine: str = "") -> list[str]:
     """Detect SQL patterns DocumentDB has no operator for on any version.
 
     LAG/LEAD need ``$shift`` and NTILE has no equivalent; the supported-APIs
@@ -926,7 +930,7 @@ def _detect_unsupported_features(queries: list[dict]) -> list[str]:
     """
     features: set[str] = set()
     for q in queries:
-        if query_facts(q.get("query_text", "")).offset_or_bucket_window_call:
+        if query_facts(q.get("query_text", ""), source_engine).offset_window_function:
             features.add("LAG/LEAD/NTILE (offset and bucketing window functions)")
     return sorted(features)
 

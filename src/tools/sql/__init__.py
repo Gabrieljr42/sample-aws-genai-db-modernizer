@@ -13,8 +13,9 @@
   sqlglot can't read a statement.
 - :mod:`src.tools.sql.bulk_load`: ``COPY ... FROM`` and ``LOAD DATA`` -- the
   table they load and the fact that they are writes (#777).
-- :mod:`src.tools.sql.query_facts`: the engine-neutral text facts every
-  routing detector reads (#491), one detector per fact.
+- :mod:`src.tools.sql.query_facts`: the engine-neutral facts every routing
+  and analysis detector reads (#491): the facade's parsed facts and the text
+  facts, one definition per fact (#893).
 - :mod:`src.tools.sql.shadow`: the cross-check -- records where the facade and
   the regex disagree, per job, without changing any output.
 """

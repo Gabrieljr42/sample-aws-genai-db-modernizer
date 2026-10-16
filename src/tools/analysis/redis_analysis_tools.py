@@ -21,7 +21,7 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, source_engine_of
 
 
 def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
@@ -47,6 +47,7 @@ def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
         WorkloadAnalysis with detected patterns and anti-patterns
     """
     queries = collector_output.get("queries", {}).get("query_patterns", [])
+    source_engine = source_engine_of(collector_output)
 
     # Single-pass classification. The text detectors are engine-neutral query
     # facts (``src.tools.sql.query_facts``, #491), read once per query.
@@ -58,7 +59,7 @@ def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
     large_result_queries: list[dict] = []
 
     for q in queries:
-        facts = query_facts(q.get("query_text", ""))
+        facts = query_facts(q.get("query_text", ""), source_engine)
 
         # Caching: hot SELECTs, at or above the overlay's inclusive floor (#398)
         if (
@@ -76,7 +77,7 @@ def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
             leaderboard_queries.append(q)
 
         # Time series: timestamp/date keywords + GROUP BY
-        if facts.timestamp_or_date_keyword and facts.group_by_substring:
+        if facts.timestamp_or_date_keyword and facts.group_by:
             timeseries_queries.append(q)
 
         # Time series: time binning functions (DATE_TRUNC()). The check this
@@ -84,7 +85,7 @@ def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # not a tuple, so it tested single letters, and every text with ``group
         # by`` in it has one of them: it has always been a ``GROUP BY`` check,
         # and it stays one here (#491 moves detectors, it does not change them).
-        if facts.group_by_substring:
+        if facts.group_by:
             timeseries_queries.append(q)
 
         # Geospatial: spatial SQL functions or coordinate columns

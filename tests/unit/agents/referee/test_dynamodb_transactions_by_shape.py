@@ -247,3 +247,35 @@ class TestTheScoreReflectsTheShape:
         }
         assert shapes["wide"]["shape"] == UNBOUNDED
         assert "does not bound them" in shapes["wide"]["reason"]
+
+
+def test_the_shape_reads_its_facts_in_the_source_engines_dialect(monkeypatch):
+    """The single-table check behind a keyed write reads the query facts in the
+    collected source engine's dialect (#893), and the DynamoDB analysis passes it."""
+    from src.agents.referee import transaction_shape as module
+    from src.agents.referee.table_resolution import SourceScope
+    from src.tools.analysis.dynamodb_analysis_tools import analyze_dynamodb_use_cases
+
+    seen = []
+    real = module.single_table_access_shape
+
+    def recording(query, *args, **kwargs):
+        seen.append(kwargs.get("source"))
+        return real(query, *args, **kwargs)
+
+    monkeypatch.setattr(module, "single_table_access_shape", recording)
+    query = {
+        "query_id": "q1",
+        "query_type": "DELETE",
+        "query_text": "DELETE TOP (5000) FROM [UserSession] WHERE [ExpiresAt] < @now",
+        "tables_accessed": ["trailgear.UserSession"],
+    }
+    module.transaction_shape(query, SourceScope(engine="sqlserver"))
+    assert seen[-1] == SourceScope(engine="sqlserver")
+    collector = {
+        "metadata": {"source_database": {"engine": "sqlserver", "database_name": "trailgear"}},
+        "database_schema": {"tables": [{"table_id": "trailgear.UserSession", "columns": []}]},
+        "queries": {"query_patterns": [query]},
+    }
+    analyze_dynamodb_use_cases(collector)
+    assert seen[-1] == SourceScope(name="trailgear", engine="sqlserver")

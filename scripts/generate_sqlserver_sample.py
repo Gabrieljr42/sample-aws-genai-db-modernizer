@@ -503,13 +503,20 @@ TABLES: list[dict[str, Any]] = [
         "columns": [
             _id("MessageID", "bigint"),
             _c("TicketID", "int"),
+            _c("ReplyToMessageID", "bigint", None, True),
             _c("Author", "nvarchar", 80),
             _c("Body", "nvarchar", None),
             _c("SentDate", "datetime2"),
         ],
         "pk": ["MessageID"],
-        "fks": [("FK_TicketMessage_Ticket", "TicketID", "Ticket", "TicketID")],
-        "indexes": [("IX_TicketMessage_TicketID", ["TicketID"], False)],
+        "fks": [
+            ("FK_TicketMessage_Ticket", "TicketID", "Ticket", "TicketID"),
+            ("FK_TicketMessage_ReplyTo", "ReplyToMessageID", "TicketMessage", "MessageID"),
+        ],
+        "indexes": [
+            ("IX_TicketMessage_TicketID", ["TicketID"], False),
+            ("IX_TicketMessage_ReplyTo", ["ReplyToMessageID"], False),
+        ],
     },
     {
         "schema": "dbo",
@@ -1214,16 +1221,20 @@ REPORTING: list[Q] = [
 
 # T-SQL features that tip (or reinforce) the Aurora choice: a recursive CTE,
 # MERGE, NEXT VALUE FOR, JSON_VALUE / OPENJSON (aurora_choice.FEATURE_SIGNALS).
+# The recursive CTE walks a ticket's reply thread, not the category tree: since
+# #893 a T-SQL recursive CTE is one for every reader, so Aurora PostgreSQL's
+# recursive-CTE pattern lifts the fit of the table it reads, and on
+# ProductCategory that would settle CATEGORY_GROUP's tie.
 DIALECT: list[Q] = [
     (
         0.9,
         6,
         3.4,
-        "WITH [Tree] AS (SELECT [CategoryID], [ParentCategoryID], [Name], 0 AS [Depth] "
-        "FROM [ProductCategory] WHERE [CategoryID] = @CategoryID UNION ALL "
-        "SELECT c.[CategoryID], c.[ParentCategoryID], c.[Name], t.[Depth] + 1 "
-        "FROM [ProductCategory] c JOIN [Tree] t ON c.[ParentCategoryID] = t.[CategoryID]) "
-        "SELECT [CategoryID], [Name], [Depth] FROM [Tree] OPTION (MAXRECURSION 16)",
+        "WITH [Thread] AS (SELECT [MessageID], [ReplyToMessageID], [Author], 0 AS [Depth] "
+        "FROM [TicketMessage] WHERE [MessageID] = @MessageID UNION ALL "
+        "SELECT m.[MessageID], m.[ReplyToMessageID], m.[Author], t.[Depth] + 1 "
+        "FROM [TicketMessage] m JOIN [Thread] t ON m.[ReplyToMessageID] = t.[MessageID]) "
+        "SELECT [MessageID], [Author], [Depth] FROM [Thread] OPTION (MAXRECURSION 16)",
     ),
     (
         0.02,

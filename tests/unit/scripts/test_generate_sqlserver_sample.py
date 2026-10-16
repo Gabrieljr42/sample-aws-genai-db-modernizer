@@ -160,7 +160,7 @@ def test_every_query_names_only_collected_tables() -> None:
     synthetic sample has no excuse for the #382 kind of mismatch)."""
     data = _collection()
     known = {t["table_name"] for t in data["tables"]}
-    ignore = {"Tree", "OrderNumberSeq"}  # the recursive CTE's name; a sequence
+    ignore = {"Thread", "OrderNumberSeq"}  # the recursive CTE's name; a sequence
     for q in data["queries"]:
         for name in re.findall(
             r"(?:FROM|JOIN|INTO|UPDATE|MERGE)\s+\[(?:\w+\]\.\[)?(\w+)\]", q["query_text"]

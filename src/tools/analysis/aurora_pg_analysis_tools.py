@@ -42,26 +42,27 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, source_engine_of
 
 # ==========================================================================
 # PG-specific feature detection
 # ==========================================================================
 
 
-def detect_pg_specific_features(query_text: str) -> list[str]:
+def detect_pg_specific_features(query_text: str, source_engine: str = "") -> list[str]:
     """Detect PG-specific SQL features in query text, from its engine-neutral
-    query facts (``src.tools.sql.query_facts``, #491).
+    query facts (``src.tools.sql.query_facts``, #491) read in ``source_engine``'s
+    dialect.
 
     Returns list of matched pattern_ids.
     """
-    facts = query_facts(query_text)
+    facts = query_facts(query_text, source_engine)
     matched: list[str] = []
 
     if facts.recursive_cte:
         matched.append("aurora-pg-01")
 
-    if facts.window_function_keyword:
+    if facts.window_function:
         matched.append("aurora-pg-02")
 
     if facts.jsonb_operation:
@@ -70,7 +71,7 @@ def detect_pg_specific_features(query_text: str) -> list[str]:
     if facts.array_operation:
         matched.append("aurora-pg-04")
 
-    if facts.tsvector_search:
+    if facts.fulltext_search:
         matched.append("aurora-pg-05")
 
     if facts.lateral_join:
@@ -98,6 +99,7 @@ def analyze_aurora_pg_use_cases(collector_output: dict) -> WorkloadAnalysis:
     # PG-specific detection
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
     total_query_count = len(queries)
+    source_engine = source_engine_of(collector_output)
 
     # Accumulators per PG pattern
     pg_accum: dict[str, dict] = {
@@ -109,7 +111,7 @@ def analyze_aurora_pg_use_cases(collector_output: dict) -> WorkloadAnalysis:
         text = q.get("query_text") or ""
         tables = q.get("tables_accessed") or []
 
-        matched_ids = detect_pg_specific_features(text)
+        matched_ids = detect_pg_specific_features(text, source_engine)
         for pid in matched_ids:
             if pid in pg_accum:
                 pg_accum[pid]["query_ids"].append(qid)
@@ -298,6 +300,7 @@ def build_aurora_pg_decision_trace(
 ) -> dict:
     """Build Aurora PG decision trace artifact for specialist calibration."""
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
+    source_engine = source_engine_of(collector_output)
 
     # Combined pattern lookup
     all_pattern_by_id = {**COMMON_PATTERN_BY_ID, **PG_PATTERN_BY_ID}
@@ -324,7 +327,9 @@ def build_aurora_pg_decision_trace(
                 "query_text_preview": (q.get("query_text") or "")[:120],
                 "matched_patterns": query_pattern_map.get(qid, []),
                 "matched_anti_patterns": query_anti_pattern_map.get(qid, []),
-                "pg_features": detect_pg_specific_features(q.get("query_text") or ""),
+                "pg_features": detect_pg_specific_features(
+                    q.get("query_text") or "", source_engine
+                ),
                 # A locking read's transactional need (#799): recorded, never scored.
                 "locking_clause": locking_clause(q.get("query_text") or ""),
             }
