@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -60,11 +61,22 @@ from sqlglot import exp
 
 from src.tools.sql.normalize import normalize_digest_text, quoted_mask
 from src.tools.sql.regex_facts import (
+    regex_aggregate_function_count,
+    regex_fulltext_search,
+    regex_group_by,
     regex_has_aggregation,
     regex_has_joins,
     regex_has_subquery,
     regex_join_count,
+    regex_like_parameter,
+    regex_offset_window_function,
+    regex_pattern_match,
+    regex_ranking_window_function,
+    regex_recursive_cte,
+    regex_similarity_match,
     regex_wildcard_leading,
+    regex_window_function,
+    regex_windowed_aggregate,
 )
 from src.tools.sql.regex_tables import regex_table_refs
 
@@ -227,6 +239,37 @@ class SqlFacts:
         parsed_by: ``"sqlglot"``, or ``"regex"`` when the facade fell back.
         fallback_reason: Why it fell back, or None.
         dialect: The sqlglot dialect used (``""`` is sqlglot's generic one).
+
+    The facts below were added by #893, each the one definition its readers
+    share (``src.tools.sql.query_facts``); ``has_aggregation`` is ``group_by``
+    or a positive ``aggregate_function_count``, read the same way.
+
+    Attributes:
+        group_by: A ``GROUP BY`` clause, in any statement or subquery.
+        aggregate_function_count: How many aggregate function calls (the
+            ``has_aggregation`` functions, windowed or not) the text has.
+        like_parameter: A ``LIKE``/``ILIKE`` whose whole pattern is a bind
+            parameter (``LIKE ?``, ``LIKE $1``): its value is unknown, so it
+            is neither a leading wildcard nor a prefix. A MySQL digest writes
+            every literal as ``?``, so its ``LIKE '%x%'`` reads this way.
+        fulltext_search: A full-text match: MySQL ``MATCH ... AGAINST``,
+            PostgreSQL's ``@@`` and ``tsvector``/``tsquery`` functions
+            (``to_tsvector``, ``plainto_tsquery``, ``ts_rank``, ...), SQL
+            Server's ``CONTAINS``/``FREETEXT``.
+        pattern_match: A regular-expression or ``SIMILAR TO`` match
+            (``REGEXP``, ``RLIKE``, ``~``, ``~*``, ``REGEXP_LIKE``).
+        similarity_match: A trigram similarity function (``similarity``,
+            ``word_similarity``, ``strict_word_similarity``).
+        window_function: A function with an ``OVER`` clause.
+        ranking_window_function: ``ROW_NUMBER``, ``RANK`` or ``DENSE_RANK``
+            over a window: it numbers rows and combines no values.
+        offset_window_function: ``LAG``, ``LEAD`` or ``NTILE`` over a window:
+            it reads another row, or buckets rows, and combines no values.
+        windowed_aggregate: An aggregate function over a window
+            (``SUM(...) OVER``, ``COUNT(*) OVER ()``).
+        recursive_cte: ``WITH RECURSIVE``, or a CTE whose own body has a
+            ``UNION`` and reads the CTE's own name (SQL Server and Oracle
+            have no ``RECURSIVE`` keyword).
     """
 
     join_count: int
@@ -237,6 +280,17 @@ class SqlFacts:
     parsed_by: ParsedBy
     fallback_reason: FallbackReason | None
     dialect: str
+    group_by: bool = False
+    aggregate_function_count: int = 0
+    like_parameter: bool = False
+    fulltext_search: bool = False
+    pattern_match: bool = False
+    similarity_match: bool = False
+    window_function: bool = False
+    ranking_window_function: bool = False
+    offset_window_function: bool = False
+    windowed_aggregate: bool = False
+    recursive_cte: bool = False
 
 
 @dataclass(frozen=True)
@@ -489,6 +543,11 @@ _RANKING_WINDOW_FUNCTIONS: tuple[type[exp.Expr], ...] = (
     exp.NthValue,
 )
 
+# The window functions ``SqlFacts.ranking_window_function`` and
+# ``offset_window_function`` name.
+_RANKING_FUNCTIONS: tuple[type[exp.Expr], ...] = (exp.RowNumber, exp.Rank, exp.DenseRank)
+_OFFSET_FUNCTIONS: tuple[type[exp.Expr], ...] = (exp.Lag, exp.Lead, exp.Ntile)
+
 # Pattern-match predicates whose pattern is ``.expression``.
 _LIKE_NODES: tuple[type[exp.Expr], ...] = (exp.Like, exp.ILike)
 
@@ -504,6 +563,17 @@ def _regex_facts(sql: str, reason: FallbackReason, dialect: str) -> SqlFacts:
         parsed_by="regex",
         fallback_reason=reason,
         dialect=dialect,
+        group_by=regex_group_by(sql),
+        aggregate_function_count=regex_aggregate_function_count(sql),
+        like_parameter=regex_like_parameter(sql),
+        fulltext_search=regex_fulltext_search(sql),
+        pattern_match=regex_pattern_match(sql),
+        similarity_match=regex_similarity_match(sql),
+        window_function=regex_window_function(sql),
+        ranking_window_function=regex_ranking_window_function(sql),
+        offset_window_function=regex_offset_window_function(sql),
+        windowed_aggregate=regex_windowed_aggregate(sql),
+        recursive_cte=regex_recursive_cte(sql),
     )
 
 
@@ -513,19 +583,56 @@ def _facts_from_statements(statements: tuple[exp.Expr, ...], dialect: str) -> Sq
     join_count = sum(
         1 for node in nodes if isinstance(node, exp.Join) and _joins_a_row_source(node)
     )
+    group_by = any(isinstance(node, exp.Group) for node in nodes)
+    aggregate_function_count = sum(1 for node in nodes if _is_aggregate_function(node))
+    kinds = {_text_search_kind(node) for node in nodes}
+    windows = [node.this for node in nodes if isinstance(node, exp.Window)]
     return SqlFacts(
         join_count=join_count,
         has_joins=join_count > 0,
-        has_aggregation=any(_is_aggregation(node) for node in nodes),
+        has_aggregation=group_by or aggregate_function_count > 0,
         has_subquery=sum(1 for node in nodes if isinstance(node, exp.Select)) > 1,
-        wildcard_leading=any(
-            isinstance(node, _LIKE_NODES) and _starts_with_wildcard(node.expression)
-            for node in nodes
-        ),
+        wildcard_leading="leading_wildcard" in kinds,
         parsed_by="sqlglot",
         fallback_reason=None,
         dialect=dialect,
+        group_by=group_by,
+        aggregate_function_count=aggregate_function_count,
+        like_parameter="parameter" in kinds,
+        fulltext_search="fulltext" in kinds,
+        pattern_match="pattern" in kinds,
+        similarity_match="similarity" in kinds,
+        window_function=bool(windows),
+        ranking_window_function=any(isinstance(w, _RANKING_FUNCTIONS) for w in windows),
+        offset_window_function=any(isinstance(w, _OFFSET_FUNCTIONS) for w in windows),
+        windowed_aggregate=_has_windowed_aggregate(nodes),
+        recursive_cte=any(_is_recursive_with(node) for node in nodes),
     )
+
+
+def _has_windowed_aggregate(nodes: Iterable[exp.Expr]) -> bool:
+    """An aggregate function over a window (``SqlFacts.windowed_aggregate``,
+    ``AccessFacts.windowed_aggregate``)."""
+    return any(isinstance(node, exp.Window) and _is_aggregation(node.this) for node in nodes)
+
+
+def _is_recursive_with(node: exp.Expr) -> bool:
+    """``WITH RECURSIVE``, or a CTE of this ``WITH`` whose body has a ``UNION``
+    and reads the CTE's own (unqualified) name."""
+    if not isinstance(node, exp.With):
+        return False
+    if node.args.get("recursive"):
+        return True
+    for cte in node.expressions:
+        name = cte.alias_or_name.lower()
+        body = cte.this
+        if body is None or body.find(exp.Union) is None:
+            continue
+        if any(
+            not t.db and not t.catalog and t.name.lower() == name for t in body.find_all(exp.Table)
+        ):
+            return True
+    return False
 
 
 def _joins_a_row_source(join: exp.Join) -> bool:
@@ -536,10 +643,13 @@ def _joins_a_row_source(join: exp.Join) -> bool:
     return source.find(exp.Select) is not None
 
 
-def _is_aggregation(node: exp.Expr) -> bool:
-    if isinstance(node, exp.Group):
-        return True
+def _is_aggregate_function(node: exp.Expr) -> bool:
+    """A function that combines many rows' values into one (not a ranking or offset one)."""
     return isinstance(node, exp.AggFunc) and not isinstance(node, _RANKING_WINDOW_FUNCTIONS)
+
+
+def _is_aggregation(node: exp.Expr) -> bool:
+    return isinstance(node, exp.Group) or _is_aggregate_function(node)
 
 
 def _starts_with_wildcard(pattern: exp.Expr | None) -> bool:
@@ -571,8 +681,9 @@ def _starts_with_wildcard(pattern: exp.Expr | None) -> bool:
 
 StatementKind = Literal["select", "insert", "update", "delete", "merge", "other"]
 
-# Functions that are a text or similarity match, whatever the dialect calls them.
-_TEXT_SEARCH_FUNCTIONS = frozenset(
+# Full-text and similarity functions, whatever the dialect calls them (#893:
+# :func:`_text_search_kind` sorts every text-search node into one kind).
+_FULLTEXT_FUNCTIONS = frozenset(
     {
         "to_tsvector",
         "to_tsquery",
@@ -581,20 +692,17 @@ _TEXT_SEARCH_FUNCTIONS = frozenset(
         "websearch_to_tsquery",
         "ts_rank",
         "ts_rank_cd",
-        "similarity",
-        "word_similarity",
-        "strict_word_similarity",
         "freetext",
         "freetexttable",
         "containstable",
     }
 )
-_TEXT_SEARCH_NODES: tuple[type[exp.Expr], ...] = (
-    exp.MatchAgainst,
+_SIMILARITY_FUNCTIONS = frozenset({"similarity", "word_similarity", "strict_word_similarity"})
+_FULLTEXT_NODES: tuple[type[exp.Expr], ...] = (exp.MatchAgainst, exp.Contains)
+_PATTERN_MATCH_NODES: tuple[type[exp.Expr], ...] = (
     exp.RegexpLike,
     exp.RegexpILike,
     exp.SimilarTo,
-    exp.Contains,
 )
 _RANGE_NODES: tuple[type[exp.Expr], ...] = (exp.GT, exp.GTE, exp.LT, exp.LTE)
 # T-SQL table hints that skip rows another transaction holds (like SKIP LOCKED).
@@ -753,11 +861,7 @@ def _access_facts(statements: list[exp.Expr]) -> AccessFacts:
         kind=kind,
         scopes=tuple(scopes),
         inserts_values=inserts_values,
-        windowed_aggregate=any(
-            isinstance(node, exp.Window) and _is_aggregation(node.this)
-            for s in statements
-            for node in s.walk()
-        ),
+        windowed_aggregate=_has_windowed_aggregate(node for s in statements for node in s.walk()),
         parsed_by="sqlglot",
         fallback_reason=None,
     )
@@ -773,15 +877,40 @@ def _cte_bodies(statement: exp.Expr, index_of: dict[int, int]) -> dict[str, int]
     return bodies
 
 
-def _is_text_search(node: exp.Expr) -> bool:
-    if isinstance(node, _TEXT_SEARCH_NODES):
-        return True
+TextSearchKind = Literal["leading_wildcard", "parameter", "fulltext", "pattern", "similarity"]
+
+
+def _text_search_kind(node: exp.Expr) -> TextSearchKind | None:
+    """Which text search ``node`` is, or None (#893: the one definition behind
+    :class:`SqlFacts`' text-search facts and :class:`ScopeFacts`' ``text_search``
+    and ``like_parameter``).
+
+    ``leading_wildcard`` and ``parameter``: a ``LIKE``/``ILIKE`` (:func:`_like_kind`;
+    a prefix or any other pattern is no text search). ``fulltext``: ``MATCH ...
+    AGAINST``, ``@@``, ``CONTAINS`` or a full-text function. ``pattern``: a
+    regular-expression or ``SIMILAR TO`` match. ``similarity``: a trigram
+    similarity function.
+    """
     if isinstance(node, _LIKE_NODES):
-        return _like_kind(node) == "leading_wildcard"
+        kind = _like_kind(node)
+        return kind if kind in ("leading_wildcard", "parameter") else None  # type: ignore[return-value]
+    if isinstance(node, _FULLTEXT_NODES):
+        return "fulltext"
+    if isinstance(node, _PATTERN_MATCH_NODES):
+        return "pattern"
     if isinstance(node, exp.Func):
         name = (node.name if isinstance(node, exp.Anonymous) else node.sql_name()).lower()
-        return name in _TEXT_SEARCH_FUNCTIONS
-    return False
+        if name in _FULLTEXT_FUNCTIONS:
+            return "fulltext"
+        if name in _SIMILARITY_FUNCTIONS:
+            return "similarity"
+    return None
+
+
+def _is_text_search(node: exp.Expr) -> bool:
+    """A text search other than a parameterised ``LIKE`` (``ScopeFacts.text_search``)."""
+    kind = _text_search_kind(node)
+    return kind is not None and kind != "parameter"
 
 
 def _pattern_pieces(pattern: exp.Expr) -> list[exp.Expr]:
@@ -798,6 +927,20 @@ def _pattern_pieces(pattern: exp.Expr) -> list[exp.Expr]:
 # A bind parameter. ``NULL`` too: the digest step writes a MySQL ``?`` as ``NULL``
 # (:mod:`src.tools.sql.normalize`), and a literal ``LIKE NULL`` matches nothing.
 _BIND_NODES: tuple[type[exp.Expr], ...] = (exp.Placeholder, exp.Parameter, exp.Null)
+# sqlglot's generic dialect (no source engine known) reads PostgreSQL's ``$1`` as
+# a column named ``$1``; no real column has that name.
+_POSITIONAL_PARAMETER_NAME_RE = re.compile(r"\$\d+")
+
+
+def _is_bind(node: exp.Expr) -> bool:
+    if isinstance(node, _BIND_NODES):
+        return True
+    return (
+        isinstance(node, exp.Column)
+        and not node.table
+        and bool(_POSITIONAL_PARAMETER_NAME_RE.fullmatch(node.name))
+    )
+
 
 LikeKind = Literal["leading_wildcard", "prefix", "parameter", "other"]
 
@@ -826,7 +969,7 @@ def _like_kind(node: exp.Expr) -> LikeKind:
         and str(last.this or "").endswith("%")
     ):
         return "prefix"
-    if len(pieces) == 1 and isinstance(first, _BIND_NODES):
+    if len(pieces) == 1 and _is_bind(first):
         return "parameter"
     return "other"
 
@@ -1165,8 +1308,6 @@ def _scope_facts(
         aggregate=_has_own_aggregate(root),
         skip_locked=_skips_locked(root, source_nodes),
         text_search=any(_is_text_search(n) for n in own),
-        like_parameter=any(
-            isinstance(n, (exp.Like, exp.ILike)) and _like_kind(n) == "parameter" for n in own
-        ),
+        like_parameter=any(_text_search_kind(n) == "parameter" for n in own),
         time_bucket=_has_time_bucket(root),
     )

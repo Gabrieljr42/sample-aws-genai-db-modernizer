@@ -51,7 +51,7 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, source_engine_of
 
 # ==========================================================================
 # WorkloadType enum
@@ -137,6 +137,7 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
     """
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
     total_query_count = len(queries)
+    source_engine = source_engine_of(collector_output)
 
     # --- Accumulators for patterns (query_ids, table_ids, cps) ---
     # Search patterns
@@ -187,7 +188,7 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
     for q in queries:
         qid = q.get("query_id", "")
         qt = (q.get("query_type") or "").upper()
-        facts = query_facts(q.get("query_text") or "")
+        facts = query_facts(q.get("query_text") or "", source_engine)
         tables = q.get("tables_accessed") or []
         cps = float(q.get("calls_per_second") or 0.0)
         has_joins = bool(q.get("has_joins", False))
@@ -196,25 +197,26 @@ def analyze_opensearch_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # ---- Search pattern detection (uses `if`, not `elif`) ----
 
         # os-01 full-text-search
-        if facts.fulltext_keyword:
+        if facts.fulltext_search:
             ft_query_ids.append(qid)
             ft_table_ids.extend(tables)
             ft_cps += cps
 
-        # os-02 wildcard-search
-        if facts.like_keyword:
+        # os-02 wildcard-search: a LIKE that can start with a wildcard (a
+        # leading-wildcard or parameterised pattern); a prefix LIKE is a range.
+        if facts.leading_wildcard_like or facts.like_parameter:
             wc_query_ids.append(qid)
             wc_table_ids.extend(tables)
             wc_cps += cps
 
         # os-03 regex-search
-        if facts.regex_keyword:
+        if facts.pattern_match:
             rx_query_ids.append(qid)
             rx_table_ids.extend(tables)
             rx_cps += cps
 
         # os-04 fuzzy-search
-        if facts.fuzzy_keyword:
+        if facts.similarity_match:
             fz_query_ids.append(qid)
             fz_table_ids.extend(tables)
             fz_cps += cps
@@ -854,6 +856,7 @@ def build_opensearch_decision_trace(
     final_recommendation in derivations (OpenSearch-specific extensions).
     """
     queries = (collector_output.get("queries") or {}).get("query_patterns") or []
+    source_engine = source_engine_of(collector_output)
 
     # Build per-query match lookup
     query_pattern_map: dict[str, list[str]] = {}
@@ -871,7 +874,7 @@ def build_opensearch_decision_trace(
     def _signals_for_query(qid: str, q: dict) -> list[str]:
         signals = []
         matched_pids = query_pattern_map.get(qid, [])
-        facts = query_facts(q.get("query_text") or "")
+        facts = query_facts(q.get("query_text") or "", source_engine)
         for pid in matched_pids:
             catalog = PATTERN_BY_ID.get(pid)
             if catalog:

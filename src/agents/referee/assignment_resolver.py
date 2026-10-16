@@ -818,6 +818,7 @@ class AssignmentResolver:
             ],
             queries,
             analysis_outputs.keys(),
+            source_database_engine(collector_output),
         )
         overlay_by_id = {o["query_id"]: o for o in overlay_dicts}
 

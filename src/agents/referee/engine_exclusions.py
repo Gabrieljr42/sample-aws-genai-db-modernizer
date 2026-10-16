@@ -45,26 +45,28 @@ class ExclusionRule:
     rule_id: str
     description: str
     customer_message: str
-    check: Callable[[str], bool]
+    check: Callable[[str, str], bool]
 
 
 # Each check reads one engine-neutral query fact (#491,
-# ``src.tools.sql.query_facts``); the detectors live there, once each.
+# ``src.tools.sql.query_facts``), in the source engine's dialect (#893); the
+# detectors live there, once each.
 
 
-def _has_leading_wildcard(query_text: str) -> bool:
-    """Detect LIKE '%...' patterns (leading wildcard)."""
-    return query_facts(query_text).leading_wildcard_like
+def _has_leading_wildcard(query_text: str, source_engine: str) -> bool:
+    """A ``LIKE '%...'`` (leading wildcard): the ``leading_wildcard_like`` fact, part
+    of the ``text_search`` fact the capability gate reads for DynamoDB too."""
+    return query_facts(query_text, source_engine).leading_wildcard_like
 
 
-def _has_write_with_subquery(query_text: str) -> bool:
+def _has_write_with_subquery(query_text: str, source_engine: str) -> bool:
     """Detect INSERT/UPDATE/DELETE containing a subquery."""
-    return query_facts(query_text).write_with_subquery
+    return query_facts(query_text, source_engine).write_with_subquery
 
 
-def _has_two_joins(query_text: str) -> bool:
-    """Detect two or more JOIN keywords."""
-    return query_facts(query_text).join_keyword_count >= 2
+def _has_two_joins(query_text: str, source_engine: str) -> bool:
+    """Two or more joins (the facade's ``join_count``, the collector's own)."""
+    return query_facts(query_text, source_engine).join_count >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +79,7 @@ def _has_two_joins(query_text: str) -> bool:
 #   - customer_message: plain-language verb-phrase fragment for a
 #     customer-facing rejection (#548); no leading subject, no engine name,
 #     no "auto-reassigned" wording
-#   - check: function(query_text) -> bool
+#   - check: function(query_text, source_engine) -> bool
 # ---------------------------------------------------------------------------
 
 EXCLUSION_RULES: list[ExclusionRule] = [
@@ -134,13 +136,16 @@ class ExclusionResult:
     customer_message: str
 
 
-def check_exclusions(query_id: str, query_text: str, engine: str) -> ExclusionResult | None:
+def check_exclusions(
+    query_id: str, query_text: str, engine: str, source_engine: str | None = None
+) -> ExclusionResult | None:
     """Check if a query is excluded from a specific engine.
 
-    Returns the first matching ExclusionResult, or None if no exclusion applies.
+    ``source_engine`` (the collector's) picks the dialect its query facts are read
+    in. Returns the first matching ExclusionResult, or None if no exclusion applies.
     """
     for rule in _RULES_BY_ENGINE.get(engine, []):
-        if rule.check(query_text):
+        if rule.check(query_text, source_engine or ""):
             return ExclusionResult(
                 query_id=query_id,
                 excluded_engine=engine,
@@ -151,14 +156,16 @@ def check_exclusions(query_id: str, query_text: str, engine: str) -> ExclusionRe
     return None
 
 
-def check_all_exclusions(query_id: str, query_text: str) -> list[ExclusionResult]:
+def check_all_exclusions(
+    query_id: str, query_text: str, source_engine: str | None = None
+) -> list[ExclusionResult]:
     """Check a query against ALL engines' exclusion rules.
 
     Returns a list of all exclusions that apply (can be empty).
     """
     results = []
     for engine in _RULES_BY_ENGINE:
-        result = check_exclusions(query_id, query_text, engine)
+        result = check_exclusions(query_id, query_text, engine, source_engine)
         if result:
             results.append(result)
     return results
@@ -167,6 +174,7 @@ def check_all_exclusions(query_id: str, query_text: str) -> list[ExclusionResult
 def validate_customer_overrides(
     query_assignments: list[dict],
     queries: list[dict],
+    source_engine: str | None = None,
 ) -> list[dict]:
     """Validate customer-assigned queries against exclusion rules.
 
@@ -178,6 +186,7 @@ def validate_customer_overrides(
     Args:
         query_assignments: list of assignment dicts with query_id, assigned_engine, customer_override
         queries: list of query dicts with query_id and query_text
+        source_engine: the collector's source engine (the query facts' dialect)
 
     Returns:
         List of dicts: {query_id, original_engine, rule_id, customer_message}
@@ -197,7 +206,7 @@ def validate_customer_overrides(
         if not query_text:
             continue
 
-        exclusion = check_exclusions(qid, query_text, engine)
+        exclusion = check_exclusions(qid, query_text, engine, source_engine)
         if exclusion:
             violations.append(
                 {

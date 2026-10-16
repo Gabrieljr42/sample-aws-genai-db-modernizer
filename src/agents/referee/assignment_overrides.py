@@ -207,7 +207,7 @@ def _gate_failure(
         return _ownership_failure(query, engine)
     result = score_query_for_engine({**(query or {}), "query_id": query_id}, engine, ctx)
     if result.gate_kind == GATE_KIND_HARD_EXCLUSION:
-        exclusion = check_exclusions(query_id, query_text, engine)
+        exclusion = check_exclusions(query_id, query_text, engine, ctx.source_engine)
         if exclusion:
             return GATE_KIND_HARD_EXCLUSION, exclusion.customer_message
     if result.gate_kind == GATE_KIND_CAPABILITY:
@@ -476,7 +476,7 @@ def _apply_cache_override(
                 f"and is cached by {cache}."
             )
         d = qa.model_dump()
-        pin_customer_cache(d, cache, query, heavy)
+        pin_customer_cache(d, cache, query, heavy, source_engine)
         for k in ("cache_engine", "cache_pattern", "cache_reason", "warnings"):
             setattr(qa, k, d[k])
         qa.cache_customer_override = True
@@ -1043,7 +1043,10 @@ def refresh_consolidated_assignment(
     # Re-evaluate the cache overlay against the consolidated routing (#296): an
     # overlay survives its owner's consolidation, and the summary follows scope.
     refresh_cache_overlay(
-        out, collector_output.get("queries", {}).get("query_patterns", []), analysis_outputs
+        out,
+        collector_output.get("queries", {}).get("query_patterns", []),
+        analysis_outputs,
+        source_database_engine(collector_output),
     )
     if dead_engines:
         pruned: list[dict] = []

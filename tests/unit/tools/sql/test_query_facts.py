@@ -174,63 +174,66 @@ class TestFacts:
         [
             ("SELECT * FROM t WHERE a LIKE '%x'", "leading_wildcard_like"),
             ("SELECT * FROM t WHERE a ILIKE '%x'", "leading_wildcard_like"),
-            ("SELECT * FROM t WHERE MATCH (a) AGAINST ('x')", "fulltext_match"),
-            ("SELECT * FROM t WHERE v @@ to_tsquery('x')", "text_search_operator"),
+            ("SELECT * FROM t WHERE a LIKE CONCAT('%', ?)", "leading_wildcard_like"),
+            ("SELECT * FROM t WHERE a LIKE ?", "like_parameter"),
+            ("SELECT * FROM t WHERE a NOT ILIKE ?", "like_parameter"),
+            ("SELECT * FROM t WHERE MATCH (a) AGAINST ('x')", "fulltext_search"),
+            ("SELECT * FROM t WHERE v @@ to_tsquery('x')", "fulltext_search"),
+            ("SELECT ts_rank(v, q) FROM t", "fulltext_search"),
+            ("SELECT * FROM t WHERE CONTAINS(a, 'x')", "fulltext_search"),
+            ("SELECT * FROM t WHERE a ~* 'x'", "pattern_match"),
+            ("SELECT * FROM t WHERE a RLIKE 'x'", "pattern_match"),
+            ("SELECT similarity(a, 'x') FROM t", "similarity_match"),
+            ("SELECT * FROM t WHERE a LIKE ?", "text_search"),
+            ("SELECT * FROM t WHERE a REGEXP 'x'", "text_search"),
             ("SELECT ROW_NUMBER() OVER (ORDER BY id) FROM t", "ranking_window_function"),
+            ("SELECT LAG(a, 1) OVER (ORDER BY a) FROM t", "offset_window_function"),
+            ("SELECT NTILE(4) OVER (ORDER BY a) FROM t", "offset_window_function"),
+            ("SELECT SUM(x) OVER (PARTITION BY y) FROM t", "windowed_aggregate"),
             ("WITH RECURSIVE r AS (SELECT 1) SELECT * FROM r", "recursive_cte"),
-            ("SELECT `COUNT` (id) FROM t", "aggregate_function_call"),
-            ("SELECT SQL_CALC_FOUND_ROWS * FROM t", "sql_calc_found_rows"),
+            (
+                "WITH tree AS (SELECT id FROM n UNION ALL SELECT n.id FROM n JOIN tree ON 1=1) "
+                "SELECT * FROM tree",
+                "recursive_cte",
+            ),
+            ("SELECT `COUNT` (id) FROM t", "aggregation"),
+            ("SELECT COUNT(*) FROM t", "aggregation"),
+            ("SELECT a FROM t GROUP BY a", "aggregation"),
+            ("SELECT SQL_CALC_FOUND_ROWS * FROM t", "found_rows"),
+            ("SELECT FOUND_ROWS()", "found_rows"),
             ("SELECT SUM(x) OVER (PARTITION BY y) FROM t", "window_function"),
             ("SELECT a FROM t GROUP BY a", "group_by"),
             ("SELECT a FROM t GROUP BY a", "dedup_only_group_by"),
             ("SELECT * FROM g JOIN u ON lower(g.name) = u.name_lower", "computed_join_key"),
             ("INSERT INTO t SELECT * FROM u", "write_with_subquery"),
-            ("SELECT a, count(*) FROM t", "aggregation_keyword"),
             ("SELECT * FROM t WHERE NOT EXISTS (SELECT 1 FROM u)", "exists_or_in_subquery"),
             ("SELECT * FROM t WHERE a IN ( SELECT b FROM u)", "exists_or_in_subquery"),
             ("SELECT * FROM t LIMIT 10", "pagination_keyword"),
             ("SELECT * FROM t FETCH FIRST 5 ROWS ONLY", "pagination_keyword"),
             ("SELECT * FROM t WHERE id IN (1, 2)", "in_list"),
-            ("SELECT * FROM t WHERE a ILIKE '%x'", "like_percent_literal"),
-            ("SELECT * FROM t WHERE to_tsvector(a) @@ q", "text_search_keyword"),
             ("SELECT JSON_EXTRACT(doc, '$.a') FROM t", "json_function_keyword"),
             ("SELECT doc->'a' FROM t", "json_function_keyword"),
-            ("SELECT * FROM t WHERE MATCH (a) AGAINST ('x')", "match_against_keyword"),
             ("INSERT INTO t VALUES (1) ON DUPLICATE KEY UPDATE a = 1", "duplicate_key_upsert"),
             ("REPLACE INTO t VALUES (1)", "duplicate_key_upsert"),
             ("SELECT GROUP_CONCAT(a) FROM t", "group_concat_call"),
             ("CALL refresh_stats()", "stored_routine_keyword"),
-            ("SELECT RANK() OVER (ORDER BY a) FROM t", "window_function_keyword"),
-            ("SELECT lag(a, 1) FROM t", "window_function_keyword"),
             ("SELECT doc->>'a' FROM t", "jsonb_operation"),
             ("SELECT * FROM t WHERE doc @> '{\"a\": 1}'", "jsonb_operation"),
             ("SELECT * FROM t WHERE id = ANY(ARRAY[1, 2])", "array_operation"),
             ("SELECT unnest(tags) FROM t", "array_operation"),
-            ("SELECT ts_rank(v, q) FROM t", "tsvector_search"),
             ("SELECT * FROM t JOIN LATERAL (SELECT 1) x ON true", "lateral_join"),
             ("INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING", "on_conflict_or_returning"),
             ("INSERT INTO t VALUES (1) RETURNING id", "on_conflict_or_returning"),
             ("SELECT * FROM t WHERE created_at > ?", "timestamp_column_word"),
             ("SELECT * FROM t WHERE last_seen_at > ?", "timestamp_column_word"),
             ("SELECT * FROM sessions WHERE token = ?", "session_word"),
-            ("SELECT count(id) FROM t", "aggregation_call_word"),
-            ("SELECT a FROM t GROUP BY a", "aggregation_call_word"),
             ("SELECT * FROM t WHERE a BETWEEN 1 AND 2 ORDER BY a", "range_with_order_by"),
             ("SELECT * FROM t WHERE a>=1 ORDER BY a", "range_with_order_by"),
             ("SELECT * FROM t LIMIT 5", "limit_word"),
-            ("SELECT ROW_NUMBER() OVER (ORDER BY a) FROM t", "window_function_word"),
-            ("SELECT RANK() OVER (ORDER BY a) FROM t", "set_window_fields_shape"),
-            ("SELECT SUM(x) OVER (PARTITION BY y) FROM t", "set_window_fields_shape"),
-            ("SELECT LAG(a) OVER (ORDER BY a) FROM t", "offset_or_bucket_window_call"),
             ("SELECT * FROM t WHERE a NOT IN (1)", "negation_word"),
             ("SELECT * FROM t WHERE a!=b", "negation_word"),
             ("SELECT (SELECT 1 FROM u WHERE u.id = t.uid) FROM t", "correlated_subquery_shape"),
             ("SELECT JSON_EXTRACT(doc, '$.a') FROM t", "json_extract_word"),
-            ("SELECT a, b, count(id) FROM t GROUP BY a, b", "group_by_substring"),
-            ("SELECT * FROM t WHERE v @@ q", "fulltext_keyword"),
-            ("SELECT * FROM t WHERE a LIKE ?", "like_keyword"),
-            ("SELECT * FROM t WHERE a ~* 'x'", "regex_keyword"),
-            ("SELECT similarity(a, 'x') FROM t", "fuzzy_keyword"),
             ("SELECT * FROM t WHERE event_time >= ?", "timestamp_keyword"),
             ("SELECT * FROM t WHERE event_time >= ?", "time_range_operator"),
             ("SELECT date_trunc('day', ts) FROM t", "time_function_keyword"),
@@ -240,15 +243,9 @@ class TestFacts:
             ("SELECT ST_Distance(a, b) FROM t", "geospatial_keyword"),
             ("SELECT MAX(id) FROM t", "min_max_call"),
             ("SELECT * FROM t WHERE status = ?", "status_equals_value"),
-            ("SELECT * FROM t WHERE EXISTS (SELECT 1)", "exists_call"),
             ("SELECT * FROM t WHERE a IS NULL", "is_null"),
             ("SELECT COUNT(*) FROM t", "count_star_or_one"),
             ("SELECT * FROM t WHERE event_date > ?", "event_timestamp_word"),
-            ("SELECT * FROM t WHERE a LIKE ?", "like_pattern_value"),
-            ("SELECT * FROM t WHERE MATCH AGAINST", "fulltext_word"),
-            ("SELECT * FROM t WHERE a RLIKE 'x'", "regexp_word"),
-            ("SELECT * FROM t WHERE similarity(a, 'x') > 0.3", "similarity_or_trigram"),
-            ("SELECT id FROM themes WHERE user_selectable", "select_word_repeated"),
             ("SELECT * FROM t ORDER BY score DESC LIMIT 10", "top_n_shape"),
             ("SELECT TOP (5) * FROM t ORDER BY a", "top_n_shape"),
             ("SELECT * FROM sessions WHERE token = ?", "session_key"),
@@ -258,15 +255,8 @@ class TestFacts:
             ("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", "merge_statement"),
             ("SELECT JSON_VALUE(doc, '$.a') FROM t", "json_function_call"),
             ("SELECT * FROM t FOR JSON PATH", "json_function_call"),
-            (
-                "WITH tree AS (SELECT id FROM n UNION ALL SELECT n.id FROM n JOIN tree ON 1=1) "
-                "SELECT * FROM tree",
-                "self_referencing_recursive_cte",
-            ),
             ("SELECT * FROM t WHERE id = ?", "where_word"),
             ("SELECT * FROM t WHERE id IN (1, 2)", "keyed_after_where"),
-            ("SELECT a, SUM(b) FROM t GROUP BY a", "aggregate_or_group_by_word"),
-            ("SELECT * FROM t WHERE a ILIKE ?", "pattern_match_or_text_search_word"),
             (
                 "WITH w AS (INSERT INTO t VALUES (1) RETURNING id) SELECT * FROM w",
                 "write_statement_text",
@@ -300,29 +290,34 @@ class TestFacts:
         [
             ("SELECT a AS returning FROM t", "on_conflict_or_returning"),
             ("SELECT * FROM t WHERE a @> ARRAY[1]", "jsonb_operation"),
-            ("SELECT * FROM t WHERE a LIKE  '%x'", "like_percent_literal"),  # two spaces
+            ("SELECT * FROM t WHERE a LIKE 'x%'", "leading_wildcard_like"),  # a prefix
+            ("SELECT * FROM t WHERE a LIKE 'x%'", "text_search"),  # a prefix is a range
+            ("SELECT * FROM t -- a LIKE '%x'", "leading_wildcard_like"),  # a comment
+            ("SELECT * FROM t WHERE note = 'a LIKE ?'", "like_parameter"),  # a literal
+            ("SELECT ROW_NUMBER() OVER (ORDER BY a) FROM t", "aggregation"),
+            ("SELECT * FROM t ORDER BY rank", "window_function"),  # a column
+            ("SELECT rank FROM t", "ranking_window_function"),
+            ("SELECT LAG(a) FROM t", "offset_window_function"),  # no OVER
+            ("SELECT COUNT(*) FROM t", "windowed_aggregate"),
+            ("SELECT * FROM t WHERE a = 'MATCH (b) AGAINST (c)'", "fulltext_search"),
+            ("SELECT regexp_replace(a, 'x', 'y') FROM t", "pattern_match"),
+            ("SELECT * FROM t -- GROUP BY a", "group_by"),
+            ("SELECT count FROM t", "aggregation"),  # a column named count
             ("SELECT * FROM t WHERE a = 'x'", "in_list"),
             ("SELECT fooWITH RECURSIVE", "recursive_cte"),
-            ("SELECT count(*) FROM t", "aggregation_call_word"),  # no word after "("
             ("SELECT * FROM t WHERE a >= 1 ORDER BY a", "range_with_order_by"),  # space
             ("SELECT * FROM t WHERE a BETWEEN 1 AND 2", "range_with_order_by"),  # no ORDER BY
             ("SELECT * FROM t WHERE mydate_x = ?", "timestamp_column_word"),
             ("SELECT * FROM t WHERE a != 1", "negation_word"),  # space before !=
-            ("SELECT a FROM t GROUP  BY a", "group_by_substring"),  # two spaces
-            ("SELECT * FROM t WHERE a LIKE\n'x'", "like_keyword"),  # newline, no space
             ("SELECT * FROM t WHERE a > ?", "time_range_operator"),
             ("SELECT * FROM t WHERE status = 1", "status_equals_value"),  # a bare number
             ("SELECT COUNT(id) FROM t", "count_star_or_one"),
-            ("SELECT * FROM t WHERE a LIKE CONCAT('%', ?)", "like_pattern_value"),
             ("SELECT * FROM t LIMIT 10", "top_n_shape"),  # no ORDER BY
             ("SELECT * FROM t WHERE [SessionTimeout] > 5", "session_key"),
             ("SELECT * FROM t WHERE a LIKE $1", "search_depth"),  # a plain LIKE filter
             ("SELECT * FROM t WHERE a = 'x' -- MERGE INTO t USING s", "merge_statement"),
             ("SELECT json_value FROM t", "json_function_call"),  # a column, not a call
-            (
-                "WITH a AS (SELECT 1 UNION SELECT 2) SELECT * FROM a",
-                "self_referencing_recursive_cte",
-            ),
+            ("WITH a AS (SELECT 1 UNION SELECT 2) SELECT * FROM a", "recursive_cte"),
             ("SELECT * FROM t WHERE a > ?", "keyed_after_where"),  # a range
             ("SELECT * FROM t WHERE a >= ?", "keyed_after_where"),
             ("/* delete from t */ SELECT 1", "write_statement_text"),
@@ -331,19 +326,41 @@ class TestFacts:
     def test_near_misses_are_not_the_fact(self, sql, fact):
         assert getattr(query_facts(sql), fact) is False
 
-    def test_recursive_cte_needs_a_word_boundary_before_with(self):
-        # One definition for the capability gate and the Aurora PostgreSQL
-        # recursive-CTE pattern (#491); the gate's copy had no leading \b.
+    def test_parsed_facts_are_read_in_the_source_engines_dialect(self, monkeypatch):
+        calls = []
+        real = query_facts_module.sql_facts
+
+        def recording(text, engine):
+            calls.append(engine)
+            return real(text, engine)
+
+        monkeypatch.setattr(query_facts_module, "sql_facts", recording)
+        sql = "SELECT * FROM t WHERE a LIKE :1 -- dialect"
+        assert query_facts(sql, "Oracle").like_parameter
+        assert query_facts(sql, "oracle") is query_facts(sql, "Oracle")
+        assert query_facts(sql).like_parameter  # the generic dialect's reading
+        assert calls == ["oracle", ""]
+
+    def test_recursive_cte_is_one_fact_for_every_dialect(self):
+        # One definition for the capability gate, the Aurora PostgreSQL and
+        # DocumentDB patterns and the Aurora engine choice (#893).
         assert query_facts("with recursive r as (select 1) select * from r").recursive_cte
+        tsql = (
+            "WITH [Tree] AS (SELECT Id FROM Nodes UNION ALL SELECT n.Id FROM Nodes n "
+            "JOIN [Tree] t ON n.ParentId = t.Id) SELECT * FROM [Tree]"
+        )
+        assert query_facts(tsql, "sqlserver").recursive_cte
 
     def test_counts(self):
         facts = query_facts("SELECT a, b, count(id), max(id) FROM t GROUP BY a, b")
-        assert (facts.aggregate_call_word_count, facts.comma_count) == (3, 4)
+        assert (facts.aggregate_function_count, facts.comma_count) == (2, 4)
         joined = query_facts("SELECT * FROM a JOIN b ON 1=1 JOIN c ON 1=1\nJOIN d ON 1=1")
-        assert joined.join_with_spaces_count == 2
+        assert joined.join_count == 3
 
-    def test_join_keyword_count_reads_every_join_word(self):
-        assert query_facts("SELECT * FROM a JOIN b ON 1=1 -- join c").join_keyword_count == 2
+    def test_join_count_is_the_facades(self):
+        # A join word in a comment is not a join; a comma-separated FROM list is.
+        assert query_facts("SELECT * FROM a JOIN b ON 1=1 -- join c").join_count == 1
+        assert query_facts("SELECT * FROM a, b WHERE a.id = b.id").join_count == 1
 
     def test_facts_are_cached_per_text(self):
         sql = "SELECT * FROM cached_t WHERE a LIKE '%x'"
@@ -359,13 +376,20 @@ class TestOneFactBothGates:
             "SELECT * FROM t WHERE a NOT ILIKE '%x'",
             "SELECT * FROM t WHERE a LIKE 'x%'",
             "SELECT * FROM t WHERE a LIKE ?",
+            "SELECT * FROM t WHERE a REGEXP 'x'",
             "SELECT * FROM t",
         ],
     )
-    def test_dynamodb_exclusion_and_text_search_capability_agree(self, sql):
+    def test_the_dynamodb_exclusion_is_the_leading_wildcard_part_of_text_search(self, sql):
+        """The DynamoDB exclusion reads ``leading_wildcard_like``, one of the parts of
+        the ``text_search`` fact the capability gate and triage's text_search signal
+        read (#893): an excluded query always needs the inverted index."""
         excluded = check_exclusions("q", sql, "dynamodb") is not None
         needs_text_search = "inverted_index" in detect_required_capabilities(sql, [])
-        assert excluded is needs_text_search is query_facts(sql).leading_wildcard_like
+        facts = query_facts(sql)
+        assert excluded is facts.leading_wildcard_like
+        assert needs_text_search is facts.text_search
+        assert needs_text_search or not excluded
 
 
 # ---------------------------------------------------------------------------
@@ -395,10 +419,8 @@ def _read_non_documentdb_facts(text: str) -> None:
 # Read by the DocumentDB analysis alone.
 _DOCUMENTDB_ONLY_FACTS = frozenset(
     {
-        "aggregate_call_word_count",
-        "window_function_word",
-        "set_window_fields_shape",
-        "offset_or_bucket_window_call",
+        "aggregate_function_count",
+        "windowed_aggregate",
         "negation_word",
         "correlated_subquery_shape",
         "json_extract_word",

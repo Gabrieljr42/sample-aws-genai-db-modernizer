@@ -181,8 +181,9 @@ ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
         _ROUTING + ": the heterogeneous Aurora choice",
     ),
     "src/agents/referee/capability_registry.py": (
-        frozenset({"ENGINE_CAPABILITIES", "SIGNAL_TO_CAPABILITY"}),
-        _ROUTING + ": the hard capability gate (collapses into the pattern files' supported flags)",
+        frozenset({"ENGINE_CAPABILITIES", "SIGNAL_TO_CAPABILITY", "CAPABILITY_FACTS"}),
+        _ROUTING + ": the hard capability gate (collapses into the pattern files' supported flags);"
+        " CAPABILITY_FACTS names the text_search query fact, which shares the pattern's name",
     ),
     "src/shared/capability_labels.py": (
         frozenset({"CAPABILITY_REDESIGN_HINTS"}),

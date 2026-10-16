@@ -34,6 +34,18 @@ _REGEX = {
     "has_aggregation": regex_facts.regex_has_aggregation,
     "has_subquery": regex_facts.regex_has_subquery,
     "wildcard_leading": regex_facts.regex_wildcard_leading,
+    # The facts #893 added, each the one definition its readers share.
+    "group_by": regex_facts.regex_group_by,
+    "aggregate_function_count": regex_facts.regex_aggregate_function_count,
+    "like_parameter": regex_facts.regex_like_parameter,
+    "fulltext_search": regex_facts.regex_fulltext_search,
+    "pattern_match": regex_facts.regex_pattern_match,
+    "similarity_match": regex_facts.regex_similarity_match,
+    "window_function": regex_facts.regex_window_function,
+    "ranking_window_function": regex_facts.regex_ranking_window_function,
+    "offset_window_function": regex_facts.regex_offset_window_function,
+    "windowed_aggregate": regex_facts.regex_windowed_aggregate,
+    "recursive_cte": regex_facts.regex_recursive_cte,
 }
 
 

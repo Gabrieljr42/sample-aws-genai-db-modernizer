@@ -88,11 +88,12 @@ ENGINE_CAPABILITIES: dict[str, set[str]] = {
 # ---------------------------------------------------------------------------
 
 CAPABILITY_FACTS: dict[str, tuple[str, ...]] = {
-    # A leading-wildcard LIKE, MySQL MATCH ... AGAINST, PostgreSQL full-text
-    # search (to_tsvector/to_tsquery/@@).
-    "inverted_index": ("leading_wildcard_like", "fulltext_match", "text_search_operator"),
-    # A ranking/offset window function, WITH RECURSIVE.
-    "scan_engine": ("ranking_window_function", "recursive_cte"),
+    # A text search: a leading-wildcard or parameterised LIKE, a full-text,
+    # regular-expression or similarity match (``QueryFacts.text_search``, the
+    # fact triage's text_search signal reads too, #893).
+    "inverted_index": ("text_search",),
+    # A ranking or offset window function, a recursive CTE.
+    "scan_engine": ("ranking_window_function", "offset_window_function", "recursive_cte"),
     # An aggregate call, SQL_CALC_FOUND_ROWS, a window function, or a GROUP
     # BY that does more than de-duplicate (#338, #336:
     # ``QueryFacts.needs_aggregation``).
@@ -112,20 +113,25 @@ def _required_by_facts(facts: QueryFacts) -> set[str]:
     }
 
 
-def requires_aggregation_capability(query_text: str | None) -> bool:
+def requires_aggregation_capability(
+    query_text: str | None, source_engine: str | None = None
+) -> bool:
     """Whether ``query_text`` needs the "aggregation" hard capability (#338, #336).
 
-    True for any aggregate function call (SUM/COUNT/AVG/MIN/MAX/FOUND_ROWS/
-    GROUP_CONCAT/STRING_AGG/ARRAY_AGG), MySQL's SQL_CALC_FOUND_ROWS modifier, or
-    a window function, regardless of GROUP BY or join count. For a plain
+    True for any aggregate function call (SUM/COUNT/AVG/MIN/MAX/GROUP_CONCAT/
+    STRING_AGG/ARRAY_AGG, ...), MySQL's FOUND_ROWS()/SQL_CALC_FOUND_ROWS, or a
+    window function, regardless of GROUP BY or join count. For a plain
     GROUP BY with none of those, defers to is_dedup_only_group_by (#336):
     true unless that call says the GROUP BY is only de-duplicating rows.
-    The fact is ``QueryFacts.needs_aggregation`` (``src.tools.sql.query_facts``).
+    The fact is ``QueryFacts.needs_aggregation`` (``src.tools.sql.query_facts``),
+    read in ``source_engine``'s dialect.
     """
-    return query_facts(query_text).needs_aggregation
+    return query_facts(query_text, source_engine).needs_aggregation
 
 
-def requires_computed_join_capability(query_text: str | None) -> bool:
+def requires_computed_join_capability(
+    query_text: str | None, source_engine: str | None = None
+) -> bool:
     """Whether ``query_text`` joins on a computed expression (review finding B2).
 
     True when some ``JOIN ... ON`` clause's condition applies a function call
@@ -136,7 +142,7 @@ def requires_computed_join_capability(query_text: str | None) -> bool:
     against a bind parameter (``lower(g.name) = $1``), which is a filter, not
     a computed join key. The fact is ``QueryFacts.computed_join_key``.
     """
-    return query_facts(query_text).computed_join_key
+    return query_facts(query_text, source_engine).computed_join_key
 
 
 # ---------------------------------------------------------------------------
@@ -182,9 +188,9 @@ def detect_required_capabilities(
         if cap:
             required.add(cap)
 
-    # 2. The query's engine-neutral facts (#491)
+    # 2. The query's engine-neutral facts (#491), read in the source's dialect
     if query_text:
-        required |= _required_by_facts(query_facts(query_text))
+        required |= _required_by_facts(query_facts(query_text, source.engine if source else None))
 
     # 3. Utility/metadata statements (#327) -- only Aurora understands DDL,
     # session variables and transaction control.

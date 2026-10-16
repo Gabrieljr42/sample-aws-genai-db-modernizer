@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.tools.sql import facade
-from src.tools.sql.facade import read_sql, regex_reading, sql_facts, table_references
+from src.tools.sql import facade, regex_facts
+from src.tools.sql.facade import access_facts, read_sql, regex_reading, sql_facts, table_references
 from src.tools.sql.regex_facts import (
     regex_has_aggregation,
     regex_has_joins,
@@ -19,6 +19,21 @@ from src.tools.sql.regex_facts import (
     regex_wildcard_leading,
 )
 from tests.unit.tools.sql._timing import assert_linear
+
+# The regex fallback of each fact #893 added.
+_ADDED_FACT_FALLBACKS = {
+    "group_by": regex_facts.regex_group_by,
+    "aggregate_function_count": regex_facts.regex_aggregate_function_count,
+    "like_parameter": regex_facts.regex_like_parameter,
+    "fulltext_search": regex_facts.regex_fulltext_search,
+    "pattern_match": regex_facts.regex_pattern_match,
+    "similarity_match": regex_facts.regex_similarity_match,
+    "window_function": regex_facts.regex_window_function,
+    "ranking_window_function": regex_facts.regex_ranking_window_function,
+    "offset_window_function": regex_facts.regex_offset_window_function,
+    "windowed_aggregate": regex_facts.regex_windowed_aggregate,
+    "recursive_cte": regex_facts.regex_recursive_cte,
+}
 
 
 class TestJoinCount:
@@ -166,6 +181,121 @@ class TestLeadingWildcard:
         assert sql_facts(sql, engine).wildcard_leading is False
 
 
+class TestTheFactsAddedFor893:
+    """Each is the one definition its readers share (``src.tools.sql.query_facts``)."""
+
+    @pytest.mark.parametrize(
+        "sql,engine,fact,expected",
+        [
+            ("SELECT a FROM t GROUP BY a", "postgresql", "group_by", True),
+            ("SELECT a FROM t -- GROUP BY a", "postgresql", "group_by", False),
+            ("SELECT COUNT(*), MAX(b) FROM t GROUP BY a", "mysql", "aggregate_function_count", 2),
+            ("SELECT COUNT ( * ) FROM `t`", "mysql", "aggregate_function_count", 1),
+            ("SELECT count FROM t", "postgresql", "aggregate_function_count", 0),
+            ("SELECT * FROM t WHERE a LIKE ?", "mysql", "like_parameter", True),
+            ("SELECT * FROM t WHERE a ILIKE $1", "postgresql", "like_parameter", True),
+            ("SELECT * FROM t WHERE a ILIKE $1", "", "like_parameter", True),  # generic
+            ("SELECT * FROM t WHERE a LIKE ? || '%'", "postgresql", "like_parameter", False),
+            ("SELECT * FROM t WHERE a LIKE '%x'", "mysql", "like_parameter", False),
+            ("SELECT * FROM t WHERE MATCH (a) AGAINST ('x')", "mysql", "fulltext_search", True),
+            (
+                "SELECT * FROM t WHERE v @@ plainto_tsquery($1)",
+                "postgresql",
+                "fulltext_search",
+                True,
+            ),
+            ("SELECT * FROM t WHERE CONTAINS([Body], @q)", "sqlserver", "fulltext_search", True),
+            (
+                "SELECT * FROM t WHERE a = 'MATCH (b) AGAINST (c)'",
+                "mysql",
+                "fulltext_search",
+                False,
+            ),
+            ("SELECT * FROM t WHERE a ~ $1", "postgresql", "pattern_match", True),
+            ("SELECT * FROM t WHERE a REGEXP ?", "mysql", "pattern_match", True),
+            ("SELECT regexp_replace(a, $1, $2) FROM t", "postgresql", "pattern_match", False),
+            (
+                "SELECT * FROM t WHERE similarity(a, $1) > 0.3",
+                "postgresql",
+                "similarity_match",
+                True,
+            ),
+            (
+                "SELECT * FROM t WHERE word_similarity(a, $1) > 0.3",
+                "postgresql",
+                "similarity_match",
+                True,
+            ),
+            ("SELECT similarity FROM t", "postgresql", "similarity_match", False),
+            ("SELECT SUM(a) OVER (ORDER BY b) FROM t", "postgresql", "window_function", True),
+            ("SELECT * FROM t ORDER BY rank", "postgresql", "window_function", False),
+            (
+                "SELECT DENSE_RANK() OVER (ORDER BY a) FROM t",
+                "postgresql",
+                "ranking_window_function",
+                True,
+            ),
+            (
+                "SELECT LEAD(a, 2) OVER (ORDER BY a) FROM t",
+                "postgresql",
+                "offset_window_function",
+                True,
+            ),
+            (
+                "SELECT NTILE($1) OVER (ORDER BY a) FROM t",
+                "postgresql",
+                "offset_window_function",
+                True,
+            ),
+            ("SELECT ROW_NUMBER() OVER () FROM t", "postgresql", "offset_window_function", False),
+            ("SELECT COUNT(*) OVER () FROM t", "postgresql", "windowed_aggregate", True),
+            ("SELECT RANK() OVER (ORDER BY a) FROM t", "postgresql", "windowed_aggregate", False),
+            ("WITH RECURSIVE r AS (SELECT 1) SELECT * FROM r", "postgresql", "recursive_cte", True),
+            (
+                "WITH [T] AS (SELECT Id FROM N UNION ALL SELECT n.Id FROM N n JOIN [T] t ON 1=1) "
+                "SELECT * FROM [T]",
+                "sqlserver",
+                "recursive_cte",
+                True,
+            ),
+            (
+                "WITH a AS (SELECT 1 UNION SELECT 2) SELECT * FROM a",
+                "postgresql",
+                "recursive_cte",
+                False,
+            ),
+        ],
+    )
+    def test_each_fact(self, sql, engine, fact, expected):
+        facts = sql_facts(sql, engine)
+        assert facts.parsed_by == "sqlglot"
+        assert getattr(facts, fact) == expected
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT a, COUNT(*) FROM t GROUP BY a",
+            "SELECT a FROM t GROUP BY a",
+            "SELECT COUNT(*) FROM t",
+            "SELECT a FROM t",
+            "SELECT ROW_NUMBER() OVER (ORDER BY a) FROM t",
+        ],
+    )
+    def test_aggregation_is_group_by_or_an_aggregate_function(self, sql):
+        facts = sql_facts(sql, "postgresql")
+        assert facts.has_aggregation is (facts.group_by or facts.aggregate_function_count > 0)
+
+    def test_the_access_facts_read_the_same_text_search_definition(self):
+        sql = "SELECT * FROM t WHERE a ~ $1 AND b LIKE $2"
+        scope = access_facts(sql, "postgresql").scopes[0]
+        facts = sql_facts(sql, "postgresql")
+        assert (scope.text_search, scope.like_parameter) == (True, True)
+        assert (facts.pattern_match, facts.like_parameter) == (True, True)
+        windowed = "SELECT SUM(a) OVER () FROM t"
+        assert access_facts(windowed, "postgresql").windowed_aggregate
+        assert sql_facts(windowed, "postgresql").windowed_aggregate
+
+
 class TestFallback:
     @pytest.mark.parametrize(
         "sql,engine,reason",
@@ -187,6 +317,10 @@ class TestFallback:
         assert facts.has_aggregation == regex_has_aggregation(sql)
         assert facts.has_subquery == regex_has_subquery(sql)
         assert facts.wildcard_leading == regex_wildcard_leading(sql)
+        for name, regex in _ADDED_FACT_FALLBACKS.items():
+            assert getattr(facts, name) == regex(sql), name
+        # has_aggregation stays exactly group_by or a positive count (#893).
+        assert facts.has_aggregation is (facts.group_by or facts.aggregate_function_count > 0)
 
     def test_over_the_size_cap_is_the_regex_answer(self):
         sql = "SELECT count(*) FROM a JOIN b ON a.id = b.id WHERE n = '" + "x" * 100_001 + "'"
@@ -247,3 +381,26 @@ def test_facts_are_read_in_linear_time():
         return "SELECT count(*) FROM a JOIN b ON a.id = b.id WHERE n LIKE '%" + "a" * n + "'"
 
     assert_linear(build, lambda text: sql_facts(text, "postgresql"))
+
+
+class TestTheFallbackReadsLikeTheParse:
+    """Where a cheap regex can, the fallback gives the parsed answer (#893 review)."""
+
+    @pytest.mark.parametrize(
+        "sql,expected",
+        [
+            ("SELECT * FROM t WHERE a LIKE ?", True),
+            ("SELECT * FROM t WHERE a LIKE @Term", True),
+            ("SELECT * FROM t WHERE a LIKE @Prefix + '%'", False),  # a prefix
+            ("SELECT * FROM t WHERE a LIKE $1 || '%'", False),
+        ],
+    )
+    def test_a_concatenated_pattern_is_not_a_parameter(self, sql, expected):
+        assert regex_facts.regex_like_parameter(sql) is expected
+
+    @pytest.mark.parametrize(
+        "sql", ["SELECT GROUP_CONCAT(a) FROM t", "SELECT string_agg(a, ',') FROM t"]
+    )
+    def test_string_and_array_aggregates_are_aggregation(self, sql):
+        assert regex_facts.regex_aggregate_function_count(sql) == 1
+        assert regex_has_aggregation(sql)

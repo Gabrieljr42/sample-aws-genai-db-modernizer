@@ -54,7 +54,7 @@ from src.agents.referee.capability_registry import (
     requires_aggregation_capability,
 )
 from src.agents.referee.table_resolution import SourceScope
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, source_engine_of
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +275,9 @@ def _is_eav_table(t: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 # The text detectors below are engine-neutral query facts
-# (``src.tools.sql.query_facts``, #491), read once per query.
+# (``src.tools.sql.query_facts``, #491), read once per query in the source
+# engine's dialect. The joins and subqueries are the collector's own facade
+# facts (``join_count``, ``has_joins``, ``has_subqueries``, #796, #893).
 
 
 def _detect_query_signals(co: dict) -> list[TriageSignal]:
@@ -283,6 +285,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
     queries = co.get("queries", {}).get("query_patterns", [])
     if not queries:
         return signals
+    source_engine = source_engine_of(co)
 
     # Accumulators: list of query_ids per signal
     kv_lookups: list[str] = []
@@ -304,8 +307,8 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
     high_freq_reads: list[str] = []
 
     for q in queries:
-        text = (q.get("query_text") or "").lower()
-        facts = query_facts(q.get("query_text") or "")
+        text = q.get("query_text") or ""
+        facts = query_facts(text, source_engine)
         qtype = (q.get("query_type") or "").upper()
         cps = q.get("calls_per_second") or 0
         rows_avg = q.get("rows_returned_avg") or 0
@@ -325,7 +328,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         # Group 3: Status-based filters
         if facts.status_equals_value:
             status_filters.append(qid)
-        if facts.exists_call:
+        if facts.exists_or_in_subquery:
             status_filters.append(qid)
         if facts.is_null and q.get("has_joins"):
             status_filters.append(qid)
@@ -345,7 +348,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         # Group 5: Complex joins (3+ tables, i.e. 2+ JOIN clauses). join_count
         # >= 3 used to require 4+ tables -- a 3-table join (join_count == 2)
         # scored no signal at all and was free to move to DynamoDB (#338).
-        if join_count >= 2 or (q.get("has_joins") and facts.join_with_spaces_count >= 2):
+        if join_count >= 2:
             complex_joins.append(qid)
 
         # Group 6: Aggregations -- an aggregate function call needs real
@@ -354,7 +357,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         # all). A GROUP BY with no aggregate function and no HAVING is a
         # dedup technique (#336), not an aggregation, so it is excluded here
         # the same way the capability gate excludes it.
-        if requires_aggregation_capability(text):
+        if requires_aggregation_capability(text, source_engine):
             aggregations.append(qid)
 
         # Group 7: Large result sets / bulk scans
@@ -378,17 +381,9 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         if qtype == "SELECT" and rows_avg <= 10 and cps >= 1:
             metadata_config.append(qid)
 
-        # Cross-cutting: Text search → OpenSearch
-        # Check both the collector's has_text_search flag AND SQL text patterns
-        if q.get("has_text_search"):
-            text_searches.append(qid)
-        elif facts.like_pattern_value:
-            text_searches.append(qid)
-        elif facts.fulltext_word:
-            text_searches.append(qid)
-        elif facts.regexp_word:
-            text_searches.append(qid)
-        elif facts.similarity_or_trigram:
+        # Cross-cutting: Text search → OpenSearch. The collector's has_text_search
+        # flag, or the text_search fact the capability gate reads too (#893).
+        if q.get("has_text_search") or facts.text_search:
             text_searches.append(qid)
 
         # Cross-cutting: Time range filters
@@ -404,8 +399,8 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         if qtype == "SELECT" and cps >= HOT_READ_MIN_CALLS_PER_SECOND and facts.top_n_shape:
             leaderboards.append(qid)
 
-        # Cross-cutting: Subqueries
-        if q.get("has_subqueries") or facts.select_word_repeated:
+        # Cross-cutting: Subqueries (the collector's facade fact)
+        if q.get("has_subqueries"):
             subqueries.append(qid)
 
         # Cross-cutting: High-frequency reads

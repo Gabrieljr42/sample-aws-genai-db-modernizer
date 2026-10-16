@@ -40,7 +40,7 @@ from src.tools.analysis.aurora_common_pattern_catalog import (
 )
 from src.tools.analysis.pattern_catalog_base import HIGH_INGEST_CPS_THRESHOLD
 from src.tools.analysis.scoring import TableProfile
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, source_engine_of
 
 # ==========================================================================
 # Internal helpers
@@ -139,6 +139,7 @@ def analyze_aurora_common_use_cases(
     tables_schema = (collector_output.get("database_schema") or {}).get("tables") or []
     total_query_count = len(queries)
     source = SourceScope.from_collector(collector_output)
+    source_engine = source_engine_of(collector_output)
 
     # --- Accumulators for patterns ---
     # aurora-common-01: complex-join
@@ -206,7 +207,7 @@ def analyze_aurora_common_use_cases(
     for q in queries:
         qid = q.get("query_id", "")
         qt = (q.get("query_type") or "").upper()
-        facts = query_facts(q.get("query_text") or "")
+        facts = query_facts(q.get("query_text") or "", source_engine)
         tables = q.get("tables_accessed") or []
         cps = float(q.get("calls_per_second") or 0.0)
         has_joins = bool(q.get("has_joins", False))
@@ -228,7 +229,7 @@ def analyze_aurora_common_use_cases(
             cj_table_ids.extend(tables)
 
         # aurora-common-02: aggregation-analytics
-        if facts.aggregation_keyword:
+        if facts.aggregation:
             ag_query_ids.append(qid)
             ag_table_ids.extend(tables)
 
@@ -238,7 +239,7 @@ def analyze_aurora_common_use_cases(
             tw_table_ids.extend(tables)
 
         # aurora-common-05: reporting-query (large result sets + aggregation or date range)
-        if rows_avg > 100 and facts.aggregation_keyword:
+        if rows_avg > 100 and facts.aggregation:
             rp_query_ids.append(qid)
             rp_table_ids.extend(tables)
 
@@ -301,8 +302,8 @@ def analyze_aurora_common_use_cases(
                 cr_query_ids.append(qid)
                 cr_table_ids.extend(tables)
 
-        # aurora-anti-03: full-text-search-candidate
-        if facts.like_percent_literal:
+        # aurora-anti-03: full-text-search-candidate (a leading-wildcard LIKE)
+        if facts.leading_wildcard_like:
             ft_query_ids.append(qid)
             ft_table_ids.extend(tables)
 
@@ -315,7 +316,7 @@ def analyze_aurora_common_use_cases(
                 ingest_per_table[tid]["total_cps"] += cps
 
         # aurora-anti-07: track text search volume per table
-        if facts.text_search_keyword:
+        if facts.text_search:
             for tid in tables:
                 if tid not in text_search_per_table:
                     text_search_per_table[tid] = {"query_ids": [], "total_cps": 0.0}
@@ -326,7 +327,7 @@ def analyze_aurora_common_use_cases(
     for q in queries:
         qt = (q.get("query_type") or "").upper()
         if qt == "SELECT" and (
-            q.get("has_joins") or query_facts(q.get("query_text") or "").aggregation_keyword
+            q.get("has_joins") or query_facts(q.get("query_text") or "", source_engine).aggregation
         ):
             for tid in q.get("tables_accessed") or []:
                 if tid in ingest_per_table:
