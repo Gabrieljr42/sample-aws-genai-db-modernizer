@@ -24,6 +24,7 @@ import pytest
 
 from scripts import run_assessment
 from scripts._compact_output import CompactConsole
+from tests.shared_runs import cached_run, copy_run
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "run_assessment.py"
@@ -58,12 +59,26 @@ def _run_script(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.fixture(scope="module")
-def discourse_compact(tmp_path_factory):
-    tmp_path = tmp_path_factory.mktemp("compact")
+def _compact_run(tmp_path: Path) -> None:
     src = _discourse(tmp_path)
     proc = _run_script(tmp_path, "--file", str(src), "--db", "discourse", "--mode", "chat")
-    return tmp_path, proc
+    (tmp_path / "proc.json").write_text(
+        json.dumps({"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr})
+    )
+
+
+@pytest.fixture(scope="module")
+def discourse_compact(tmp_path_factory):
+    """The compact discourse run, built once per session (tests/shared_runs.py).
+
+    Shared and read-only: a test that writes to the job copies it first.
+    """
+    root = cached_run(tmp_path_factory, "assessment-compact-discourse", _compact_run)
+    saved = json.loads((root / "proc.json").read_text())
+    proc = subprocess.CompletedProcess(
+        [str(SCRIPT)], saved["returncode"], saved["stdout"], saved["stderr"]
+    )
+    return root, proc
 
 
 def _json_lines(stdout: str) -> list[dict]:
@@ -118,7 +133,8 @@ def test_discourse_log_has_the_progress(discourse_compact):
 
 
 def test_resume_appends_to_the_same_log(discourse_compact, tmp_path):
-    root, proc = discourse_compact
+    shared, proc = discourse_compact
+    root = copy_run(shared, tmp_path / "run")  # the resume writes to the job
     first = _json_lines(proc.stdout)
     job_id, pointer = first[0]["job_id"], first[-1]
     rerun = _run_script(root, "--job-id", job_id, "--db", "discourse", "--llm-mode", "none")

@@ -33,6 +33,7 @@ from src.agents.referee.reality_check_request import (
 )
 from src.agents.schema_design.group_input import READ_PAGE_CHARS, READ_PAGE_LINES
 from src.contracts.model_flag import ModelFlag
+from tests.shared_runs import cached_run, copy_run
 
 REPO = Path(__file__).resolve().parents[4]
 SCRIPT = REPO / "scripts" / "run_assessment.py"
@@ -100,14 +101,44 @@ def _external_run(name: str, tmp: Path) -> dict:
     return {"cwd": tmp, "root": root, "db": name, "path": path, "text": path.read_text()}
 
 
+def _shared_external_run(name: str, tmp_path_factory) -> Path:
+    """``_external_run`` on ``name``, built once per session (tests/shared_runs.py).
+
+    The returned directory is shared and read-only; load it with
+    ``_load_run``, or ``copy_run`` it first when the test finalizes the job.
+    """
+
+    def build(directory: Path) -> None:
+        run = _external_run(name, directory)
+        (directory / "run.json").write_text(
+            json.dumps({"db": run["db"], "path": str(run["path"].relative_to(directory))})
+        )
+
+    return cached_run(tmp_path_factory, f"assessment-external-{name}", build)
+
+
+def _load_run(directory: Path) -> dict:
+    saved = json.loads((directory / "run.json").read_text())
+    path = directory / saved["path"]
+    return {
+        "cwd": directory,
+        "root": directory / "artifacts",
+        "db": saved["db"],
+        "path": path,
+        "text": path.read_text(),
+    }
+
+
 @pytest.fixture(scope="module")
 def discourse(tmp_path_factory) -> dict:
-    return _external_run("discourse", tmp_path_factory.mktemp("discourse"))
+    return _load_run(_shared_external_run("discourse", tmp_path_factory))
 
 
 @pytest.fixture(scope="module")
 def wordpress(tmp_path_factory) -> dict:
-    return _external_run("wordpress", tmp_path_factory.mktemp("wordpress"))
+    # A private copy: test_a_correction_from_the_request_is_applied_at_finalize writes to it.
+    shared = _shared_external_run("wordpress", tmp_path_factory)
+    return _load_run(copy_run(shared, tmp_path_factory.mktemp("wordpress") / "run"))
 
 
 def _assert_readable(text: str) -> dict:
@@ -249,8 +280,9 @@ class TestAFlagOnWordpressNeverBringsBackDocumentDB:
 
     FLAGGED = "d72966f8"
 
-    def test_one_flag_goes_to_the_best_kept_engine(self, tmp_path):
-        run = _external_run("wordpress", tmp_path)
+    def test_one_flag_goes_to_the_best_kept_engine(self, tmp_path, tmp_path_factory):
+        shared = _shared_external_run("wordpress", tmp_path_factory)
+        run = _load_run(copy_run(shared, tmp_path / "run"))
         request = json.loads(run["text"])
         from_documentdb = [
             c

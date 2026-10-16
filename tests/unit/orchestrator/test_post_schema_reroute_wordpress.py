@@ -24,6 +24,7 @@ from src.agents.referee.assignment_overrides import mark_assignment_customer_app
 from src.orchestrator.local_orchestrator import LocalOrchestrator
 from src.storage.local_store import LocalArtifactStore
 from tests.e2e.pipeline import REPO, PipelineResult, _run, run_pipeline
+from tests.shared_runs import cached_run, copy_run
 
 DB, JOB = "wordpress", "job-reroute"
 FLAGGED = "d72966f8"
@@ -60,10 +61,19 @@ def _fake_design(job_id, database_name, engine, store, assignment_version=0, llm
     store.write_json(f"{base}/design_trace.json", {"trace": []})
 
 
+def _pipeline_copy(tmp_path_factory, name: str):
+    """A private copy of the deterministic wordpress run (built once per session)."""
+    cached = cached_run(
+        tmp_path_factory,
+        f"pipeline-wordpress-{JOB}",
+        lambda d: run_pipeline("wordpress", d / "artifacts", JOB),
+    )
+    return copy_run(cached, tmp_path_factory.mktemp(name) / "run") / "artifacts"
+
+
 @pytest.fixture(scope="module")
 def rerouted(tmp_path_factory) -> dict:
-    root = tmp_path_factory.mktemp("reroute") / "artifacts"
-    run_pipeline("wordpress", root, JOB)
+    root = _pipeline_copy(tmp_path_factory, "reroute")
     store = LocalArtifactStore(base_dir=str(root))
     mark_assignment_customer_approved(store, DB, JOB)
     _fake_design(JOB, DB, "dynamodb", store, 2)
@@ -197,8 +207,7 @@ def overridden(tmp_path_factory) -> dict:
         apply_assignment_overrides,
     )
 
-    root = tmp_path_factory.mktemp("override") / "artifacts"
-    run_pipeline("wordpress", root, JOB)
+    root = _pipeline_copy(tmp_path_factory, "override")
     store = LocalArtifactStore(base_dir=str(root))
     mark_assignment_customer_approved(store, DB, JOB)
     _fake_design(JOB, DB, "dynamodb", store, 2)

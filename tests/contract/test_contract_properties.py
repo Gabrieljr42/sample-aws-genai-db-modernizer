@@ -35,6 +35,7 @@ from src.contracts.collector_output import (
     TriggerForEach,
     TriggerTiming,
 )
+from tests.hypothesis_examples import scaled
 
 # ============================================================================
 # Hypothesis Strategies for Contract Data Generation
@@ -1042,7 +1043,7 @@ class TestErrorMessageDescriptiveness:
     Validates: Requirements 6.8
     """
 
-    @settings(max_examples=100)
+    @settings(max_examples=scaled(100))
     @given(st.data())
     def test_missing_field_errors_are_descriptive(self, data):
         """
@@ -1087,7 +1088,7 @@ class TestErrorMessageDescriptiveness:
             f"Got: {exc_info.value}"
         )
 
-    @settings(max_examples=100)
+    @settings(max_examples=scaled(100))
     @given(st.data())
     def test_type_mismatch_errors_are_descriptive(self, data):
         """
@@ -1137,7 +1138,7 @@ class TestErrorMessageDescriptiveness:
             for keyword in ["type", "invalid", "expected", "input should be", "instance of"]
         ), (f"Error message should indicate a type mismatch. " f"Got: {exc_info.value}")
 
-    @settings(max_examples=100)
+    @settings(max_examples=scaled(100))
     @given(st.data())
     def test_constraint_violation_errors_are_descriptive(self, data):
         """
@@ -1198,7 +1199,7 @@ class TestErrorMessageDescriptiveness:
             f"Error message should indicate a constraint violation. " f"Got: {exc_info.value}"
         )
 
-    @settings(max_examples=100)
+    @settings(max_examples=scaled(100))
     @given(st.data())
     def test_enum_validation_errors_are_descriptive(self, data):
         """
@@ -1259,7 +1260,7 @@ class TestErrorMessageDescriptiveness:
             f"Error message should indicate an enum validation error. " f"Got: {exc_info.value}"
         )
 
-    @settings(max_examples=100)
+    @settings(max_examples=scaled(100))
     @given(st.data())
     def test_nested_field_errors_are_descriptive(self, data):
         """

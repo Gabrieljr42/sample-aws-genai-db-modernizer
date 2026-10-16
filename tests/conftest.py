@@ -4,10 +4,14 @@ import os
 
 from hypothesis import settings
 
-# CI profile: fewer examples for faster pipeline runs
+# Selected with HYPOTHESIS_PROFILE, read here so that every entry point
+# (ci/test.sh, make test, a plain `uv run pytest tests/`) honours it.
+# ci: fewer examples, for pull request runs (ci/test.sh sets it on PRs; see
+# ci/README.md). Tests that set their own max_examples use
+# tests/hypothesis_examples.scaled(n) so they shrink with it.
 settings.register_profile("ci", max_examples=20, deadline=None)
 
-# Default: full 100 examples for local development
+# Default: the full 100 examples, for local runs and main/nightly CI.
 settings.register_profile("default", max_examples=100, deadline=None)
 
 settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "default"))

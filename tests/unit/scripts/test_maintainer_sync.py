@@ -126,13 +126,60 @@ def _rev_parse(path: Path, env: dict, ref: str) -> str:
     return _git("rev-parse", ref, cwd=path, env=env).stdout.strip()
 
 
-def _make_target(
+# --- Template repos (#956) ---
+#
+# Building the target and source repos costs about 20 git processes per
+# test. Each distinct shape is built once per module (per xdist worker) in a
+# template directory, and every test gets its own full copy under its own
+# tmp_path, so a test can still push, stash, reset or delete anything
+# without another test seeing it. The only absolute paths a copy inherits
+# are the clones' 'origin' URLs; _copy_template rewrites them and refuses
+# to hand out a copy that still points at the template.
+_TEMPLATE_ROOT: list[Path] = []
+_TEMPLATES: dict[tuple, Path] = {}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _repo_templates(tmp_path_factory):
+    _TEMPLATE_ROOT.append(tmp_path_factory.mktemp("maintainer-sync-templates"))
+    yield
+    _TEMPLATE_ROOT.clear()
+    _TEMPLATES.clear()
+
+
+def _template(key: tuple, build) -> Path:
+    if key not in _TEMPLATES:
+        base = _TEMPLATE_ROOT[0] / f"t{len(_TEMPLATES)}"
+        base.mkdir()
+        build(base, _git_env(base / "home"))
+        # git's inactive *.sample hooks are most of a fresh repo's files;
+        # dropping them keeps each per-test copy small.
+        for sample in base.glob("**/hooks/*.sample"):
+            sample.unlink()
+        _TEMPLATES[key] = base
+    return _TEMPLATES[key]
+
+
+def _copy_template(template: Path, tmp_path: Path, names: tuple[str, ...]) -> None:
+    for name in names:
+        shutil.copytree(template / name, tmp_path / name, symlinks=True)
+        config = tmp_path / name / ".git" / "config"
+        if not config.exists():
+            continue  # a bare repo: its config holds no paths
+        text = config.read_text()
+        if "url = " in text:
+            assert str(template) in text, f"unexpected origin URL in {config}:\n{text}"
+            text = text.replace(str(template), str(tmp_path))
+            config.write_text(text)
+        assert str(template) not in config.read_text(), f"{config} still points at the template"
+
+
+def _build_target(
     tmp_path: Path,
     env: dict,
-    protect: list[str] | None = None,
-    extra_seed_files: dict[str, str] | None = None,
-) -> tuple[Path, Path]:
-    """A bare 'remote' plus a clone of it, with a minimal .sync-config."""
+    protect: list[str] | None,
+    extra_seed_files: dict[str, str] | None,
+) -> None:
     bare = tmp_path / "target-remote.git"
     bare.mkdir()
     _git("init", "-q", "--bare", "-b", "main", cwd=bare, env=env)
@@ -155,17 +202,40 @@ def _make_target(
     _git("config", "user.email", "test@example.com", cwd=clone, env=env)
     _git("config", "user.name", "Test", cwd=clone, env=env)
     _git("config", "commit.gpgsign", "false", cwd=clone, env=env)
-    return bare, clone
 
 
-def _make_source(tmp_path: Path, env: dict, branch: str = "fix/sync-flow") -> Path:
+def _make_target(
+    tmp_path: Path,
+    env: dict,
+    protect: list[str] | None = None,
+    extra_seed_files: dict[str, str] | None = None,
+) -> tuple[Path, Path]:
+    """A bare 'remote' plus a clone of it, with a minimal .sync-config."""
+    key = ("target", tuple(protect or ()), tuple(sorted((extra_seed_files or {}).items())))
+    template = _template(key, lambda base, e: _build_target(base, e, protect, extra_seed_files))
+    _copy_template(template, tmp_path, ("target-remote.git", "target-seed", "target-clone"))
+    return tmp_path / "target-remote.git", tmp_path / "target-clone"
+
+
+_TEMPLATE_SOURCE_BRANCH = "fix/sync-flow"
+
+
+def _build_source(tmp_path: Path, env: dict) -> None:
     source = tmp_path / "source-repo"
     _init_repo(source, env)
     _write(source / "README.md", "source repo\n")
     _commit_all(source, env, "chore: initial source commit")
-    _git("checkout", "-q", "-b", branch, cwd=source, env=env)
+    _git("checkout", "-q", "-b", _TEMPLATE_SOURCE_BRANCH, cwd=source, env=env)
     _write(source / "feature.txt", "a new feature\n")
     _commit_all(source, env, "feat: add a feature")
+
+
+def _make_source(tmp_path: Path, env: dict, branch: str = _TEMPLATE_SOURCE_BRANCH) -> Path:
+    template = _template(("source",), _build_source)
+    _copy_template(template, tmp_path, ("source-repo",))
+    source = tmp_path / "source-repo"
+    if branch != _TEMPLATE_SOURCE_BRANCH:
+        _git("branch", "-m", _TEMPLATE_SOURCE_BRANCH, branch, cwd=source, env=env)
     return source
 
 
