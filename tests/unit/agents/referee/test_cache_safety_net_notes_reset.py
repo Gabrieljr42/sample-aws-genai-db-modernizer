@@ -204,7 +204,6 @@ def test_reality_check_resets_safety_net_notes(tmp_path):
         "executive_summary": None,
         "before_distribution": {"opensearch": 1, "aurora_mysql": 1},
         "after_distribution": {"aurora_mysql": 2},
-        "lightweight_recommendations": [],
         "collector_output": {},
         "analysis_outputs": {},
         "assignment": {

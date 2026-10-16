@@ -102,7 +102,6 @@ def _identity_reality_check(
         "architectural_patterns": [],
         "unique_value_assessment": {},
         "revised_assignments": copy.deepcopy(assignment["query_assignments"]),
-        "lightweight_recommendations": [],
     }
 
 
@@ -254,7 +253,6 @@ class TestExternalFinalizeRunsTheSameSweep:
                 "architectural_patterns": [],
                 "unique_value_assessment": {},
                 "revised_assignments": revised,
-                "lightweight_recommendations": [],
             }
 
         assignment = _assignment(1)

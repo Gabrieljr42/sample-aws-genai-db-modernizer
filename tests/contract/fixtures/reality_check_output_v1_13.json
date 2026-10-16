@@ -1,0 +1,21 @@
+{
+  "contract_version": "1.13",
+  "source_assignment_version": 1,
+  "unique_value_assessment": {},
+  "consolidations": [],
+  "architectural_patterns": [],
+  "recommendations": [],
+  "before_distribution": {"dynamodb": 3},
+  "after_distribution": {"dynamodb": 3},
+  "lightweight_recommendations": [
+    {
+      "capability": "text_pattern_match",
+      "service": "Amazon Athena + S3",
+      "query_ids": ["q1"],
+      "pattern": "Query the exported data in place",
+      "cost_profile": "Pay per query",
+      "replaces_engine": "opensearch",
+      "limitations": "No low-latency serving"
+    }
+  ]
+}

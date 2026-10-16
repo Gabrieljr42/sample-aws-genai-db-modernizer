@@ -221,9 +221,8 @@ def run_reality_check_deterministic(
         "triage": triage,
         "collector_output": collector_output,
         "analysis_outputs": analysis_outputs,
-        # Keep revised_assignments and lightweight_recommendations for the write step
+        # Keep revised_assignments for the write step
         "revised_assignments": result["revised_assignments"],
-        "lightweight_recommendations": result.get("lightweight_recommendations", []),
         # This check's Moves so far (#616); the later steps add theirs.
         "move_ledger": ledger,
         # The stored input's (engine, tied_engines) per query: what the
@@ -392,12 +391,6 @@ def run_reality_check_handler(
     for p in det["architectural_patterns"]:
         print(f"[reality-check] Pattern: {p['name']}")
 
-    for lw in det.get("lightweight_recommendations", []):
-        print(
-            f"[reality-check] LIGHTWEIGHT: {lw['service']} for "
-            f"{len(lw['query_ids'])} queries (replaces {lw['replaces_engine']})"
-        )
-
     # Step 2: LLM phase — determined by llm_mode. Bedrock validates the
     # consolidations here; its summary is written after the sweep (step 3b).
     if llm_mode == "bedrock":
@@ -502,7 +495,6 @@ def write_reality_check_result(
             "before_distribution": result["before_distribution"],
             "after_distribution": result["after_distribution"],
             "eliminated_engines": sorted(eliminated),
-            "lightweight_recommendations": result.get("lightweight_recommendations", []),
             "validation_incomplete": result.get("validation_incomplete", []),
             # #503 review item 1: how many queries are still an unresolved,
             # per-query exact-score tie once the reality check has

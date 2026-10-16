@@ -87,7 +87,6 @@ def _run_reality_check(store: LocalArtifactStore) -> dict:
         "executive_summary": None,
         "before_distribution": {"dynamodb": 1, "documentdb": 2},
         "after_distribution": {"dynamodb": 2, "documentdb": 1},
-        "lightweight_recommendations": [],
         "assignment": {"version": 1, "query_assignments": before},
         "collector_output": {},
         "analysis_outputs": {},

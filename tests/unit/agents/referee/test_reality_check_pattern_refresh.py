@@ -141,7 +141,6 @@ def _rc_result(revised: list[dict]) -> dict:
         "executive_summary": None,
         "before_distribution": {"dynamodb": 5, "elasticache": 2, "opensearch": 3},
         "after_distribution": {},
-        "lightweight_recommendations": [],
         "assignment": {"query_assignments": revised},
     }
 

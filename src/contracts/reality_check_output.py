@@ -76,6 +76,11 @@ Version History:
   ``blocking_query_ids``, instead of recording it ``removed`` while the
   customer-override restore puts the query back. No field is added or
   removed; an artifact written before 1.13 never carries the new value.
+- 2.0 (2026-10-16, #790): MAJOR. Removed ``lightweight_recommendations`` and the
+  ``LightweightRecommendation`` model. Nothing ever filled the list (the
+  lightweight-alternative table behind it was already gone), so it was always
+  empty. Artifacts saved before 2.0 that carry the key still load: the model
+  ignores unknown keys, and the key is not written back out.
 """
 
 from typing import Literal
@@ -272,20 +277,6 @@ class FlagDecision(BaseModel):
     )
 
 
-class LightweightRecommendation(BaseModel):
-    """Recommendation to use a lightweight managed service instead of a full engine."""
-
-    capability: str = Field(..., description="The capability that requires this service")
-    service: str = Field(..., description="AWS service name (e.g., 'Amazon Athena + S3')")
-    query_ids: list[str] = Field(..., description="Query IDs served by this recommendation")
-    pattern: str = Field(..., description="Integration pattern description")
-    cost_profile: str = Field(..., description="Cost characteristics")
-    replaces_engine: str = Field(
-        ..., description="The engine this recommendation replaces for these queries"
-    )
-    limitations: str = Field(..., description="Known limitations of this approach")
-
-
 class ArchitecturalPattern(BaseModel):
     """Detected architectural pattern for multi-engine setup."""
 
@@ -303,7 +294,7 @@ class RealityCheckOutputContract(BaseModel):
     which get consolidated, and what architectural patterns emerge.
     """
 
-    contract_version: str = Field(default="1.13", description="Contract version")
+    contract_version: str = Field(default="2.0", description="Contract version")
     source_assignment_version: int = Field(
         ..., ge=1, description="Base assignment version this check was run against"
     )
@@ -361,10 +352,6 @@ class RealityCheckOutputContract(BaseModel):
             "query, in or out of scope -- an engine can be eliminated here while still "
             "owning out-of-scope queries"
         ),
-    )
-    lightweight_recommendations: list[LightweightRecommendation] = Field(
-        default_factory=list,
-        description="Lightweight managed-service alternatives for small orphan query sets",
     )
     validation_incomplete: list[dict] = Field(
         default_factory=list,
