@@ -10,6 +10,9 @@ repos:
         name: Trim trailing whitespace
       - id: end-of-file-fixer
         name: Fix end of files
+        # .test_durations is written by pytest-split (./ci/test.sh --store-durations),
+        # which ends it without a newline; leave it exactly as the tool writes it.
+        exclude: ^\.test_durations$
       - id: check-yaml
         name: Check YAML syntax
         args: ['--unsafe']  # Allow custom tags in docker-compose
@@ -18,9 +21,10 @@ repos:
       - id: check-added-large-files
         name: Check for large files
         args: ['--maxkb=1000']
-        # The README / help-site demo GIF is a time-lapse of a full run; keep the
-        # 1 MB limit for everything else.
-        exclude: ^docs/assets/[^/]+\.gif$
+        # The README / help-site demo GIF is a time-lapse of a full run, and
+        # .test_durations is pytest-split's per-test timing file (one entry per
+        # test, about 1.9 MB; #956). Keep the 1 MB limit for everything else.
+        exclude: (^docs/assets/[^/]+\.gif$|^\.test_durations$)
       - id: check-merge-conflict
         name: Check for merge conflicts
       - id: check-case-conflict

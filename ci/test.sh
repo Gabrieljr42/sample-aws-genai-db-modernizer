@@ -9,6 +9,12 @@
 # fails before the marker ever gets a chance to deselect anything. The marker
 # stays as a second, belt-and-suspenders guard for anyone who *does* have the
 # e2e extra installed and runs this script directly.
+#
+# TEST_SHARD=N/M (optional, #956): run only shard N of M, split by pytest-split
+# from the recorded per-test durations in .test_durations (least_duration, so
+# each shard gets about the same total time). The M shards together run exactly
+# the tests one unsharded run does. Unset runs everything. Refresh the
+# durations after adding or renaming many tests: ./ci/test.sh --store-durations --clean-durations
 source "$(dirname "$0")/lib.sh"
 # Pull requests run the Hypothesis `ci` profile (fewer examples, see
 # tests/conftest.py); main, nightly and local runs keep the full `default`
@@ -16,5 +22,14 @@ source "$(dirname "$0")/lib.sh"
 if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
   export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci}"
 fi
-log "pytest (not integration, not e2e; Hypothesis profile: ${HYPOTHESIS_PROFILE:-default})"
-uv run pytest tests/ --ignore=tests/e2e -m "not integration and not e2e" --fail-on-skip -n auto "$@"
+shard_args=()
+if [ -n "${TEST_SHARD:-}" ]; then
+  case "$TEST_SHARD" in
+    */*) ;;
+    *) echo "error: TEST_SHARD must look like N/M, got '$TEST_SHARD'" >&2; exit 2 ;;
+  esac
+  shard_args=(--splits "${TEST_SHARD#*/}" --group "${TEST_SHARD%/*}" --splitting-algorithm least_duration)
+fi
+log "pytest (not integration, not e2e; Hypothesis profile: ${HYPOTHESIS_PROFILE:-default}${TEST_SHARD:+; shard $TEST_SHARD})"
+uv run pytest tests/ --ignore=tests/e2e -m "not integration and not e2e" --fail-on-skip -n auto \
+  ${shard_args[@]+"${shard_args[@]}"} "$@"
