@@ -44,3 +44,43 @@ class TestRealityCheckCoreLlmMode:
 
     def test_the_variable_selects_the_deterministic_mode(self, store, monkeypatch) -> None:
         assert _llm_mode_passed_to_the_handler(store, monkeypatch, "none") == "none"
+
+    def test_external_is_rejected_with_a_clear_error(self, store, monkeypatch) -> None:
+        """ADR-026 Decision 4 (#716): the core cannot take the out-of-band response."""
+        monkeypatch.setenv("REALITY_CHECK_LLM_MODE", "external")
+        with patch(HANDLER) as handler:
+            with pytest.raises(ValueError, match="external.*not supported"):
+                run_reality_check_core(JOB, DB, assignment_version=1, store=store)
+        handler.assert_not_called()
+
+    def test_external_writes_no_awaiting_artifacts(self, store, monkeypatch) -> None:
+        monkeypatch.setenv("REALITY_CHECK_LLM_MODE", "external")
+        with pytest.raises(ValueError):
+            run_reality_check_core(JOB, DB, assignment_version=1, store=store)
+        prefix = f"{DB}/{JOB}/reality-check"
+        assert not store.exists(f"{prefix}/awaiting_llm.json")
+        assert not store.exists(f"{prefix}/llm_input.json")
+
+    def test_external_is_rejected_before_the_prerequisite_check(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A bad mode is a configuration error whatever the job holds."""
+        monkeypatch.setenv("REALITY_CHECK_LLM_MODE", "external")
+        empty = LocalArtifactStore(str(tmp_path))
+        with pytest.raises(ValueError, match="REALITY_CHECK_LLM_MODE"):
+            run_reality_check_core(JOB, DB, assignment_version=1, store=empty)
+
+    def test_bedrock_and_none_are_still_accepted(self, store, monkeypatch) -> None:
+        assert _llm_mode_passed_to_the_handler(store, monkeypatch, "bedrock") == "bedrock"
+        assert _llm_mode_passed_to_the_handler(store, monkeypatch, "none") == "none"
+
+    @pytest.mark.parametrize("value", ["bedrok", "NONE", "", "chat"])
+    def test_an_unknown_value_is_rejected_listing_the_valid_ones(
+        self, store, monkeypatch, value
+    ) -> None:
+        monkeypatch.setenv("REALITY_CHECK_LLM_MODE", value)
+        with patch(HANDLER) as handler:
+            with pytest.raises(ValueError, match="bedrock.*none") as err:
+                run_reality_check_core(JOB, DB, assignment_version=1, store=store)
+        assert repr(value) in str(err.value)
+        handler.assert_not_called()
