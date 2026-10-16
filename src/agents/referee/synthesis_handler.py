@@ -60,6 +60,7 @@ from src.contracts.executive_summary_response import (
 )
 from src.contracts.synthesis_output import SynthesisOutputContract
 from src.shared.engine_names import display_engine
+from src.shared.engines_in_use import engines_in_use
 from src.storage.artifact_store import ArtifactStore
 
 # ---------------------------------------------------------------------------
@@ -156,23 +157,30 @@ def run_synthesis_deterministic(
     } or set(data.engines)
     eliminated = eliminated_engines(effective, reality_check_output)
     print("[synthesis] Building TCO analysis...")
-    # #380: an eliminated engine's own analysed cost, read directly -- ``data.engines``
+    # #380: a retired engine's own analysed cost, read directly -- ``data.engines``
     # has already dropped it (ADR-029 Layer E, #202) by this point, so a dollar figure
     # a recommendation quotes for it is also traceable in the TCO facts, not just prose.
     # #475 review, finding 3: an engine none of whose first-assignment queries ever
     # cleared the #326 floor was never justified by the workload, so its removal is
     # not a "saving" to carry into the TCO facts -- excluded here, the same way
-    # ``_build_recommendations`` skips the dollar figure in prose. Only ``eliminated_
+    # ``_build_recommendations`` skips the dollar figure in prose. Only ``retired_
     # costs`` is filtered: ``eliminated`` itself still names the engine for every
     # other consumer (risk assessment, the deliverables' "eliminated_engines" field).
     never_justified = never_justified_engines(reality_check_output)
-    eliminated_costs = _eliminated_engine_costs(
+    # #949: only an engine the source runs today is a saving when the plan retires it.
+    # Every other eliminated engine was a candidate the plan considered and dropped:
+    # the customer never paid for it, so it is listed with no dollar figure.
+    running = engines_in_use(data.collector)
+    retired_costs = _eliminated_engine_costs(
         store,
         database_name,
         job_id,
-        {e: a for e, a in eliminated.items() if e not in never_justified},
+        {e: a for e, a in eliminated.items() if e in running and e not in never_justified},
     )
-    tco = build_tco_analysis(data, eliminated_costs=eliminated_costs)
+    considered = [
+        {"engine": e, "absorbed_by": a} for e, a in sorted(eliminated.items()) if e not in running
+    ]
+    tco = build_tco_analysis(data, retired_costs=retired_costs)
     # Per-engine table scope of the effective assignment, for the summary LLM input and
     # the summary post-check (#205).
     known_tables: list[str] = sorted(
@@ -385,6 +393,7 @@ def run_synthesis_deterministic(
         "assignment_summary": assignment_summary,
         "reality_check_summary": reality_check_summary,
         "eliminated_engines": eliminated,
+        "considered_not_recommended": considered,
         "cache_overlay": cache_overlay,
         "migration_waves": migration_waves,
         "unresolved_names": unresolved_names,
@@ -719,6 +728,8 @@ def _write_synthesis_report(
         "trade_offs": result["trade_offs"],
         "assignment_summary": result["assignment_summary"],
         "cache_overlay": result.get("cache_overlay"),
+        # #949: candidate engines the plan analysed and dropped, never a saving.
+        "considered_not_recommended": result.get("considered_not_recommended"),
         "migration_waves": result.get("migration_waves"),
         # #225: how many table_assignments names the waves dropped as parser noise.
         "unresolved_names": result.get("unresolved_names"),

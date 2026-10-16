@@ -810,9 +810,13 @@ def removed_engine_facts(
         str(c.get("from_engine") or "") for c in consolidations if c.get("action") == "full"
     ]
     candidates += sorted(e for e, n in (rc.get("before_distribution") or {}).items() if n)
+    # A retired engine (#949) and, for a report before contract 1.25, a priced
+    # candidate (``eliminated_engine_costs``) both say an engine left the plan.
+    tco = report.get("tco_analysis") or {}
     eliminated = [
         str(row.get("database") or "")
-        for row in (report.get("tco_analysis") or {}).get("eliminated_engine_costs") or []
+        for key in ("retired_engine_savings", "eliminated_engine_costs")
+        for row in tco.get(key) or []
         if isinstance(row, dict)
     ]
     candidates += eliminated

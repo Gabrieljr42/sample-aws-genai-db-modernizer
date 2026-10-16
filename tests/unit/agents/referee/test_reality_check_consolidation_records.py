@@ -267,8 +267,13 @@ class TestReconcile:
                 qa["assigned_engine"] = "aurora_mysql"
         records.append(_record("opensearch", "aurora_mysql", 3, saved=450))
 
+        # #949: both removed engines run today, so their removal is a saving.
         final = records_from_moves(
-            before, revised, records, engine_costs={"opensearch": 450, "documentdb": 500}
+            before,
+            revised,
+            records,
+            engine_costs={"opensearch": 450, "documentdb": 500},
+            engines_in_use={"opensearch", "documentdb"},
         )
 
         _assert_invariant(before, revised, final)
@@ -281,7 +286,9 @@ class TestReconcile:
     def test_unrecorded_move_gets_a_record(self) -> None:
         before = [_qa("a", "aurora_mysql"), _qa("b", "aurora_mysql"), _qa("c", "opensearch")]
         after = [_qa("a", "dynamodb"), _qa("b", "aurora_mysql"), _qa("c", "aurora_mysql")]
-        final = records_from_moves(before, after, [], engine_costs={"opensearch": 240.96})
+        final = records_from_moves(
+            before, after, [], engine_costs={"opensearch": 240.96}, engines_in_use={"opensearch"}
+        )
         _assert_invariant(before, after, final)
         am = next(c for c in final if c["from_engine"] == "aurora_mysql")
         assert am["query_count"] == 1 and am["action"] == "partial"
@@ -296,7 +303,9 @@ class TestReconcile:
             _record("documentdb", "dynamodb", 5, saved=500),
             _record("opensearch", "documentdb", 1, saved=450),
         ]
-        final = records_from_moves(before, after, records, engine_costs={"documentdb": 500})
+        final = records_from_moves(
+            before, after, records, engine_costs={"documentdb": 500}, engines_in_use={"documentdb"}
+        )
         _assert_invariant(before, after, final)
         assert [(c["from_engine"], c["query_count"]) for c in final] == [("documentdb", 2)]
         assert final[0]["saved_cost_estimate"] == 500
@@ -308,14 +317,21 @@ class TestReconcile:
             _record("documentdb", "dynamodb", 1, saved=500),
             _record("documentdb", "aurora_mysql", 1, saved=500),
         ]
-        final = records_from_moves(before, after, records, engine_costs={"documentdb": 500})
+        final = records_from_moves(
+            before, after, records, engine_costs={"documentdb": 500}, engines_in_use={"documentdb"}
+        )
         assert sum(c["saved_cost_estimate"] for c in final) == 500
 
     def test_out_of_scope_leftovers_do_not_keep_an_engine(self) -> None:
         before = [_qa("a", "documentdb"), _qa("b", "documentdb", in_scope=False)]
         after = [_qa("a", "dynamodb"), _qa("b", "documentdb", in_scope=False)]
         final = records_from_moves(
-            before, after, [_record("documentdb", "dynamodb", 1, 500)], {}, {"documentdb": 500}
+            before,
+            after,
+            [_record("documentdb", "dynamodb", 1, 500)],
+            {},
+            {"documentdb": 500},
+            engines_in_use={"documentdb"},
         )
         assert final[0]["action"] == "full" and final[0]["saved_cost_estimate"] == 500
 
@@ -524,9 +540,13 @@ class TestRecommendations:
         """Review of #375: with no analysed cost estimate for the removed engine,
         the sentence must not fall back to the ENGINE_BASE_COST heuristic -- no
         dollar figure is claimed at all, only the qualitative overhead reduction."""
-        rec = _build_recommendations([], [_record("documentdb", "dynamodb", 6, saved=500)], [], {})[
-            0
-        ]
+        rec = _build_recommendations(
+            [],
+            [_record("documentdb", "dynamodb", 6, saved=500)],
+            [],
+            {},
+            engines_in_use={"documentdb"},
+        )[0]
         assert "Saves" not in rec
         assert "$" not in rec
         assert "Avoids running a dedicated DocumentDB cluster" in rec
@@ -549,6 +569,7 @@ class TestRecommendations:
             [],
             {},
             {"opensearch": 240.96},
+            engines_in_use={"opensearch"},
         )[0]
         assert "$240.96" in rec
         assert "$450" not in rec
@@ -560,9 +581,13 @@ class TestRecommendations:
         """#380: the no-real-cost-estimate branch used to point at
         ``tco_analysis`` for "when available"; it now just says no figure is
         available here, with no internal field name."""
-        rec = _build_recommendations([], [_record("documentdb", "dynamodb", 6, saved=500)], [], {})[
-            0
-        ]
+        rec = _build_recommendations(
+            [],
+            [_record("documentdb", "dynamodb", 6, saved=500)],
+            [],
+            {},
+            engines_in_use={"documentdb"},
+        )[0]
         assert "tco_analysis" not in rec
         assert "cost_breakdown" not in rec
 

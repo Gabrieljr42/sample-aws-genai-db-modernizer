@@ -1346,7 +1346,10 @@ def _build_output(
     views=None,
     procedures=None,
     triggers=None,
+    engines_in_use=None,
 ) -> CollectorOutputContract:
+    """``engines_in_use`` (#949): the engine ids an offline collection records as
+    already running next to the source; anything but a list of strings is ignored."""
     elapsed = time.monotonic() - start
     return CollectorOutputContract(
         job_id=inp.job_id,
@@ -1362,6 +1365,11 @@ def _build_output(
                 database_size_gb=db_size,
                 deployment_type=DeploymentType.rds_instance if inp.aws_config else None,
                 rds_instance_metadata=rds_meta,
+            ),
+            engines_in_use=(
+                [e for e in engines_in_use if isinstance(e, str)]
+                if isinstance(engines_in_use, list)
+                else []
             ),
         ),
         database_schema=Schema(

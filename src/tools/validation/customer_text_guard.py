@@ -167,6 +167,9 @@ ID_FIELD_PATHS = frozenset(
         ("ranking", "target"),  # EngineRanking.target (synthesis_output.py:219)
         ("cost_breakdown", "database"),  # CostBreakdown.database (synthesis_output.py:298)
         ("eliminated_engine_costs", "database"),  # same CostBreakdown shape, TCO's own list
+        ("retired_engine_savings", "database"),  # same CostBreakdown shape (#949)
+        ("considered_not_recommended", "engine"),  # ConsideredEngine.engine (#949)
+        ("considered_not_recommended", "absorbed_by"),  # ConsideredEngine.absorbed_by (#949)
         ("databases", "service"),  # recommended_architecture.databases[].service
         ("access_patterns", "engine"),  # QueryGroup.access_patterns[].engine (extra field)
         ("cache_overlay", "engine"),  # CacheOverlaySummary.engine (assignment_models.py:203)

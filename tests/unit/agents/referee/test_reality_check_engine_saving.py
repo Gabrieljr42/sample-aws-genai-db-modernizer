@@ -5,6 +5,10 @@ The reality check used to store ``ENGINE_BASE_COST + EXTRA_ENGINE_BURDEN_MONTHLY
 deliverables quote the engine's analysed cost (``tco_analysis.eliminated_engine_costs``,
 $367.39 for DocumentDB on the wordpress sample). ADR-031 Decision 7 stays: a saving
 is claimed only for an engine the first assignment justified, and counted once.
+
+#949: and only for an engine the source runs today. These records retire engines the
+collection records as in use (``RUNNING``); a dropped candidate claims nothing
+(``test_no_manufactured_saving.py``).
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ from src.agents.referee.reality_check_records import removal_log_lines
 from tests.unit.agents.referee.ledger_fakes import records_from_moves
 
 WORDPRESS_DOCDB_COST = 367.39
+RUNNING = frozenset({"mysql", "documentdb", "opensearch"})
 
 
 def _qa(qid: str, engine: str) -> dict:
@@ -49,7 +54,11 @@ class TestReconcileUsesTheAnalysedCost:
     def test_saving_is_the_analysed_cost_not_the_placeholder(self) -> None:
         before, after, records = _wordpress_like()
         final = records_from_moves(
-            before, after, records, engine_costs={"documentdb": WORDPRESS_DOCDB_COST}
+            before,
+            after,
+            records,
+            engine_costs={"documentdb": WORDPRESS_DOCDB_COST},
+            engines_in_use=RUNNING,
         )
         assert sum(c["saved_cost_estimate"] for c in final) == WORDPRESS_DOCDB_COST
         assert all(c["saved_cost_estimate"] != 500.0 for c in final)
@@ -57,13 +66,17 @@ class TestReconcileUsesTheAnalysedCost:
     def test_every_record_of_the_engine_marks_the_removal_as_claimed(self) -> None:
         before, after, records = _wordpress_like()
         final = records_from_moves(
-            before, after, records, engine_costs={"documentdb": WORDPRESS_DOCDB_COST}
+            before,
+            after,
+            records,
+            engine_costs={"documentdb": WORDPRESS_DOCDB_COST},
+            engines_in_use=RUNNING,
         )
         assert [c["removal_saving_claimed"] for c in final] == [True, True]
 
     def test_no_analysed_cost_claims_no_dollar_figure(self) -> None:
         before, after, records = _wordpress_like()
-        final = records_from_moves(before, after, records, engine_costs={})
+        final = records_from_moves(before, after, records, engine_costs={}, engines_in_use=RUNNING)
         assert [c["saved_cost_estimate"] for c in final] == [0.0, 0.0]
         assert [c["removal_saving_claimed"] for c in final] == [True, True]
 
@@ -97,9 +110,15 @@ class TestRecommendationWording:
     def _recs(self) -> list[str]:
         before, after, records = _wordpress_like()
         final = records_from_moves(
-            before, after, records, engine_costs={"documentdb": WORDPRESS_DOCDB_COST}
+            before,
+            after,
+            records,
+            engine_costs={"documentdb": WORDPRESS_DOCDB_COST},
+            engines_in_use=RUNNING,
         )
-        return _build_recommendations(after, final, [], {}, {"documentdb": WORDPRESS_DOCDB_COST})
+        return _build_recommendations(
+            after, final, [], {}, {"documentdb": WORDPRESS_DOCDB_COST}, engines_in_use=RUNNING
+        )
 
     def test_first_move_states_the_figure_first_and_later_moves_refer_back(self) -> None:
         first, later = self._recs()
@@ -127,15 +146,18 @@ class TestRecommendationWording:
             after,
             [_record("opensearch", "aurora_mysql", 1)],
             engine_costs={"opensearch": 240.96},
+            engines_in_use=RUNNING,
         )
-        rec = _build_recommendations(after, final, [], {}, {"opensearch": 240.96})[0]
+        rec = _build_recommendations(
+            after, final, [], {}, {"opensearch": 240.96}, engines_in_use=RUNNING
+        )[0]
         assert "Removes $240.96/mo of infrastructure cost" in rec
         assert "counted once" not in rec
 
     def test_a_multi_move_engine_without_a_cost_names_no_figure(self) -> None:
         before, after, records = _wordpress_like()
-        final = records_from_moves(before, after, records, engine_costs={})
-        recs = _build_recommendations(after, final, [], {}, {})
+        final = records_from_moves(before, after, records, engine_costs={}, engines_in_use=RUNNING)
+        recs = _build_recommendations(after, final, [], {}, {}, engines_in_use=RUNNING)
         assert all("$" not in r for r in recs)
         assert "Retiring DocumentDB (2 queries to Aurora MySQL, 5 to DynamoDB)" in recs[0]
         assert recs[1].endswith("Part of retiring DocumentDB.")
@@ -145,7 +167,11 @@ class TestLogLines:
     def test_one_saving_line_per_removed_engine_with_the_same_figure(self) -> None:
         before, after, records = _wordpress_like()
         final = records_from_moves(
-            before, after, records, engine_costs={"documentdb": WORDPRESS_DOCDB_COST}
+            before,
+            after,
+            records,
+            engine_costs={"documentdb": WORDPRESS_DOCDB_COST},
+            engines_in_use=RUNNING,
         )
         lines = removal_log_lines(final)
         assert lines == [
@@ -161,6 +187,7 @@ class TestLogLines:
                 **_record("opensearch", "aurora_postgresql", 2),
                 "saved_cost_estimate": 0,
                 "removal_saving_claimed": False,
+                "workload_justified": False,
             }
         ]
         assert removal_log_lines(records)[-1] == (

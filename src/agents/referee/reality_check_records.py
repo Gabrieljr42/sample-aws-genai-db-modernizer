@@ -120,6 +120,8 @@ def consolidations_from_moves(
     consolidations: list[dict],
     unique_value_assessment: Mapping[str, Mapping] | None = None,
     engine_costs: Mapping[str, float] | None = None,
+    *,
+    engines_in_use: Iterable[str] = (),
 ) -> list[dict]:
     """The consolidation records of a reality check, from its Moves (#616).
 
@@ -145,6 +147,7 @@ def consolidations_from_moves(
         consolidations,
         unique_value_assessment,
         engine_costs,
+        engines_in_use,
     )
 
 
@@ -154,6 +157,7 @@ def _fit_records(
     consolidations: list[dict],
     unique_value_assessment: Mapping[str, Mapping] | None,
     engine_costs: Mapping[str, float] | None,
+    engines_in_use: Iterable[str] = (),
 ) -> list[dict]:
     """Fit the consolidation records to the net per-query moves (#218).
 
@@ -196,10 +200,15 @@ def _fit_records(
     without an analysed cost claims the removal but carries no dollar figure (0);
     the flat ``ENGINE_BASE_COST`` placeholder is never shown as a saving.
 
+    ``engines_in_use`` (#949, ``src.shared.engines_in_use``) is what the source runs
+    today. Removing any other engine -- a candidate the plan analysed and dropped --
+    saves the customer nothing, so it claims no saving and carries no figure.
+
     Record order is kept; new records follow. Inputs are not mutated.
     """
     before = {qa["query_id"]: qa["assigned_engine"] for qa in before_assignments}
     after_engine = {qid: engine for qid, engine, _ in after}
+    running = set(engines_in_use)
     # The single rule ("no in-scope query remains") lives in one place
     # (src.shared.engine_elimination, #235); ``had_in_scope`` and ``remaining``
     # are its two halves, kept as separate names here because ``remaining``'s
@@ -297,7 +306,8 @@ def _fit_records(
         # to make for this engine, and this field also reaches the
         # handler's own log line and the context graph
         # (``src/graph/populators.py``) directly, not only that prose.
-        claimed = full and not never_justified
+        # #949: only an engine the source runs today can be retired for a saving.
+        claimed = full and not never_justified and src in running
         if claimed and src not in savings_claimed:
             savings_claimed.add(src)
             saved = float((engine_costs or {}).get(src) or 0.0)
@@ -341,7 +351,12 @@ def removal_log_lines(consolidations: list[dict]) -> list[str]:
     for engine, records in by_engine.items():
         saving = sum(r.get("saved_cost_estimate") or 0 for r in records)
         if not records[0].get("removal_saving_claimed", bool(saving)):
-            lines.append(f"Removed {engine}: no saving claimed (never justified by the workload)")
+            why = (
+                "never justified by the workload"
+                if records[0].get("workload_justified") is False
+                else "not running today; a candidate the plan considered"
+            )
+            lines.append(f"Removed {engine}: no saving claimed ({why})")
         elif saving:
             moves = f"{len(records)} move{'s' if len(records) != 1 else ''}"
             lines.append(

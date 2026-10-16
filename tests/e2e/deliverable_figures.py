@@ -219,10 +219,11 @@ def expected_figures(report: dict[str, Any]) -> dict[str, Any]:
     exp["risks:total"] = len(risks)
 
     # #793: the removal saving of every retired engine, stated in each deliverable's
-    # reality-check lines as "Removes $X/mo ...".
+    # reality-check lines as "Removes $X/mo ...". #949: only an engine the source
+    # runs today (``retired_engine_savings``); a dropped candidate states none.
     savings = frozenset(
         round(float(row["monthly_cost_usd"]), 2)
-        for row in tco.get("eliminated_engine_costs") or []
+        for row in tco.get("retired_engine_savings") or []
         if isinstance(row, dict) and isinstance(row.get("monthly_cost_usd"), (int, float))
     )
     if savings:
@@ -641,19 +642,19 @@ def decision_figures(page: Any) -> Figures:
     summary = page.locator("p.exec")
     if summary.count():
         removed |= _other_targets(norm(summary.inner_text()))
-    note = page.locator("[data-figure=eliminated-engines]")
+    note = page.locator("[data-figure=retired-engines]")
     if note.count():
         removed |= engines_in(re.sub(r"see Engines not used below.*", "", note.inner_text()))
         if "see Engines not used below" in note.inner_text():
             f.add(
                 "engines_not_used_section",
                 page.locator("[data-figure=engines-not-used]").count() > 0,
-                "Already removed note points to Engines not used",
+                "Retired by this plan note points to Engines not used",
             )
     not_used = page.locator("[data-figure=engines-not-used] li[data-engine]")
     removed |= {li.get_attribute("data-engine") for li in not_used.all()}
     if removed or summary.count():
-        f.add("removed", frozenset(removed), "summary, Already removed note and Engines not used")
+        f.add("removed", frozenset(removed), "summary, Retired note and Engines not used")
     return f
 
 
@@ -802,7 +803,7 @@ def engineering_figures(md_text: str) -> Figures:
     f.add("cost:total", _usd(m.group(1)) if m else UNREADABLE, "Cost: Projected monthly")
     f.add("removal_savings", removal_savings(plain), "Migration trade-offs")
     removed: set[str] = set()
-    m = re.search(r"^- Already removed from this comparison: (.+)$", plain, re.M)
+    m = re.search(r"^- Retired by this plan: (.+)$", plain, re.M)
     if m:
         removed |= {engine_id(x) for x in re.findall(r"/mo \(([^)]+)\)", m.group(1))}
 
@@ -843,7 +844,7 @@ def engineering_figures(md_text: str) -> Figures:
     )
     if "Unresolved engine ties" not in " ".join(h2):
         f.add("tied", 0, "no Unresolved engine ties section")
-    f.add("removed", frozenset(removed), "Already removed line and Migration trade-offs")
+    f.add("removed", frozenset(removed), "Retired line and Migration trade-offs")
 
     queries_on_aurora = h2.get("Queries on Aurora by table", "")
     for m in re.finditer(r"^### (.+) \(([\d,]+) quer(?:y|ies)\)$", queries_on_aurora, re.M):

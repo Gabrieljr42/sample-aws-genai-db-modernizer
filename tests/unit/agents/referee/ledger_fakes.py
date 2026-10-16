@@ -43,6 +43,7 @@ def records_from_moves(
     consolidations: list[dict],
     unique_value_assessment: Mapping[str, Mapping] | None = None,
     engine_costs: Mapping[str, float] | None = None,
+    engines_in_use: Iterable[str] = (),
 ) -> list[dict]:
     """The records a reality check that moved ``before`` to ``after`` writes (#846).
 
@@ -57,4 +58,5 @@ def records_from_moves(
         consolidations,
         unique_value_assessment,
         engine_costs,
+        engines_in_use=engines_in_use,
     )

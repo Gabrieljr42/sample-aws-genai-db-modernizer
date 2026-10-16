@@ -74,7 +74,11 @@ class TestConsolidationsFromMoves:
         )
 
         records = consolidations_from_moves(
-            before, ledger.moves, [], engine_costs={"documentdb": 300.0}
+            before,
+            ledger.moves,
+            [],
+            engine_costs={"documentdb": 300.0},
+            engines_in_use={"documentdb"},  # #949: the source runs it today
         )
 
         assert [(c["from_engine"], c["to_engine"], c["query_count"]) for c in records] == [

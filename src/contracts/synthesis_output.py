@@ -294,6 +294,18 @@ Version History:
   redesign hint each, so every deliverable flags them and points at the
   assignment review to re-run. Backward compatible: ``unservable`` defaults
   to empty, ``facts.unservable`` to None.
+- 1.25 (2026-10-16, #949): Added optional ``TCOAnalysis.retired_engine_savings``
+  (``list[CostBreakdown]``): engines the source runs today (the source engine, or
+  one the collection records in ``metadata.engines_in_use``) that the plan
+  retires, each with its analysed monthly cost -- the only retirement saving a
+  deliverable may state. ``eliminated_engine_costs`` is no longer written: it
+  priced every candidate engine the plan analysed and dropped as if the customer
+  paid for it today. Added optional ``considered_not_recommended``
+  (``list[ConsideredEngine]``): those dropped candidates, with the engine that
+  absorbed their queries and no dollar figure. Backward compatible: both default
+  to None; a report before 1.25 still loads, and its ``eliminated_engine_costs``
+  rows read back as ``considered_not_recommended``, never as a saving
+  (``src.shared.engines_in_use``).
 """
 
 from datetime import datetime
@@ -417,10 +429,32 @@ class TCOAnalysis(BaseModel):
     savings_percent: float = Field(...)
     cost_breakdown: list[CostBreakdown] | None = Field(None)
     # #380: engines the reality check eliminated, each with its own analysed
-    # cost before removal -- so a saving a recommendation names for one is
-    # traceable here too, not only in prose.
+    # cost before removal. Not written since 1.25 (#949): it priced candidate
+    # engines the source never ran. Kept so an older report still loads; never
+    # read as a saving (``src.shared.engines_in_use.retired_engine_savings``).
     eliminated_engine_costs: list[CostBreakdown] | None = Field(None)
+    # #949: engines the source runs today that the plan retires, each with its
+    # analysed monthly cost -- the only retirement saving a deliverable states.
+    retired_engine_savings: list[CostBreakdown] | None = Field(
+        None,
+        description=(
+            "Engines the source runs today (the source engine, or one the collection "
+            "records in metadata.engines_in_use) that the plan retires, with their "
+            "analysed monthly cost. A candidate engine the plan dropped is never here."
+        ),
+    )
     assumptions: list[str] | None = Field(None)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ConsideredEngine(BaseModel):
+    """A candidate engine the plan analysed and dropped (#949): never a saving."""
+
+    engine: str = Field(..., description="Engine id")
+    absorbed_by: str | None = Field(
+        None, description="The engine that took most of its queries, if any"
+    )
 
     model_config = ConfigDict(extra="allow")
 
@@ -1097,7 +1131,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.24",
+        default="1.25",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )
@@ -1150,6 +1184,15 @@ class SynthesisOutputContract(BaseModel):
             "Cache layer view (#296): engine, query_count, calls_per_second, "
             "call_share_percent, owners, patterns, dropped_query_ids and notes. The cache "
             "owns no query, so it is never part of the owner workload share."
+        ),
+    )
+    considered_not_recommended: list[ConsideredEngine] | None = Field(
+        None,
+        description=(
+            "Candidate engines the plan analysed and then dropped (#949), each with the "
+            "engine that absorbed its queries. The source does not run them, so dropping "
+            "one saves nothing; no dollar figure is attached. None for a report "
+            "synthesized before this field existed."
         ),
     )
     migration_waves: list[MigrationWave] | None = Field(

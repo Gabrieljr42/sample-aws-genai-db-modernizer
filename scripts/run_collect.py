@@ -256,6 +256,8 @@ def main() -> None:
                 views=views,
                 procedures=procedures,
                 triggers=triggers,
+                # #949: AWS engines the application already runs next to the source.
+                engines_in_use=offline_meta.get("engines_in_use"),
             ).model_dump_json()
         )
 

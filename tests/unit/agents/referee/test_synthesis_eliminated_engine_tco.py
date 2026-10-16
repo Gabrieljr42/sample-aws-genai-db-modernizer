@@ -7,7 +7,8 @@ so a saving the reality check's own recommendation names for it (e.g.
 a judge reading ``report.json``'s ``tco_analysis`` could not trace the
 figure at all. ``run_synthesis_deterministic`` now reads that engine's own
 ``analysis-<engine>/analysis.json`` directly and carries its cost into
-``tco_analysis.eliminated_engine_costs``.
+``tco_analysis.retired_engine_savings`` (#949: only when the source runs that
+engine today -- here the collection records OpenSearch in use).
 """
 
 from __future__ import annotations
@@ -32,7 +33,11 @@ def store(tmp_path):
     )
     s.write_json(
         f"{DB}/{JOB}/collector/output.json",
-        {"database_schema": {"tables": [{"table_id": "shop.orders"}]}, "queries": {}},
+        {
+            "metadata": {"source_database": {"engine": "mysql"}, "engines_in_use": ["opensearch"]},
+            "database_schema": {"tables": [{"table_id": "shop.orders"}]},
+            "queries": {},
+        },
     )
     s.write_json(
         f"{DB}/{JOB}/analysis-dynamodb/analysis.json",
@@ -85,9 +90,8 @@ def store(tmp_path):
 def test_eliminated_engines_own_cost_is_traceable_in_tco_facts(store):
     result = run_synthesis_deterministic(JOB, DB, store, assignment_version=2)
     tco = result["tco_analysis"]
-    assert tco["eliminated_engine_costs"] == [
-        {"database": "opensearch", "monthly_cost_usd": 240.96}
-    ]
+    assert tco["retired_engine_savings"] == [{"database": "opensearch", "monthly_cost_usd": 240.96}]
+    assert "eliminated_engine_costs" not in tco
     # The eliminated engine's own cost never counts toward the projected total --
     # only engines still in the effective architecture do.
     assert tco["projected_monthly_cost"] == pytest.approx(15.2 + 121.06, abs=0.01)
@@ -97,7 +101,7 @@ def test_never_justified_engine_cost_is_excluded_from_tco_facts(store):
     """#475 review, finding 3: an engine none of whose first-assignment
     queries ever cleared the #326 floor was never justified by the
     workload, so its removal is not a saving to carry into the TCO facts --
-    ``eliminated_engine_costs`` must not list it, even though its own cost
+    ``retired_engine_savings`` must not list it, even though its own cost
     estimate exists and is traceable (as the test above shows for a
     justified removal).
     """
@@ -120,6 +124,7 @@ def test_never_justified_engine_cost_is_excluded_from_tco_facts(store):
     )
     result = run_synthesis_deterministic(JOB, DB, store, assignment_version=2)
     tco = result["tco_analysis"]
+    assert "retired_engine_savings" not in tco
     assert "eliminated_engine_costs" not in tco
     assert tco["projected_monthly_cost"] == pytest.approx(15.2 + 121.06, abs=0.01)
 

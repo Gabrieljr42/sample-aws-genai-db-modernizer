@@ -1,10 +1,11 @@
 """``build_tco_analysis`` must show a source baseline, or say it is unknown,
 instead of a bare 0.0 / 0% that reads as "the source costs nothing" (#380).
 
-Also: an eliminated engine's own analysed cost, when the caller has it, is
-carried into the TCO facts (``eliminated_engine_costs``) so a saving a
-recommendation names for it (e.g. "$271.80/mo") is traceable there too, not
-only in prose.
+Also: a retired engine's own analysed cost, when the caller has it, is
+carried into the TCO facts (``retired_engine_savings``, #949: only an engine the
+source runs today) so a saving a recommendation names for it (e.g. "$271.80/mo")
+is traceable there too, not only in prose. ``eliminated_engine_costs`` is no
+longer written.
 """
 
 from __future__ import annotations
@@ -48,20 +49,23 @@ class TestCurrentCostKnown:
         assert tco["current_monthly_cost"] == 65
 
 
-class TestEliminatedEngineCosts:
-    def test_no_eliminated_costs_omits_the_field(self) -> None:
-        tco = build_tco_analysis(_data(), eliminated_costs=None)
+class TestRetiredEngineSavings:
+    def test_no_retired_costs_omits_the_field(self) -> None:
+        tco = build_tco_analysis(_data(), retired_costs=None)
+        assert "retired_engine_savings" not in tco
         assert "eliminated_engine_costs" not in tco
 
-    def test_empty_eliminated_costs_omits_the_field(self) -> None:
-        tco = build_tco_analysis(_data(), eliminated_costs={})
+    def test_empty_retired_costs_omits_the_field(self) -> None:
+        tco = build_tco_analysis(_data(), retired_costs={})
+        assert "retired_engine_savings" not in tco
         assert "eliminated_engine_costs" not in tco
 
-    def test_eliminated_costs_are_carried_into_the_tco_facts(self) -> None:
+    def test_retired_costs_are_carried_into_the_tco_facts(self) -> None:
         tco = build_tco_analysis(
-            _data(), eliminated_costs={"documentdb": 271.80, "opensearch": 240.96}
+            _data(), retired_costs={"documentdb": 271.80, "opensearch": 240.96}
         )
-        assert tco["eliminated_engine_costs"] == [
+        assert tco["retired_engine_savings"] == [
             {"database": "documentdb", "monthly_cost_usd": 271.80},
             {"database": "opensearch", "monthly_cost_usd": 240.96},
         ]
+        assert "eliminated_engine_costs" not in tco

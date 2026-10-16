@@ -231,10 +231,13 @@ class TestSavingsAreClaimedOnlyForAJustifiedEngine:
             after,
             [_record("opensearch", "aurora_postgresql", justified=True)],
             engine_costs={"opensearch": 240.96},
+            engines_in_use={"opensearch"},  # #949: a saving only for an engine run today
         )
         # The engine's analysed cost, not the 450 placeholder on the input record (#793).
         assert records[0]["saved_cost_estimate"] == 240.96
-        text = _build_recommendations([], records, [], {}, {"opensearch": 240.96})[0]
+        text = _build_recommendations(
+            [], records, [], {}, {"opensearch": 240.96}, engines_in_use={"opensearch"}
+        )[0]
         assert "$240.96" in text
 
     def test_a_partial_move_claims_no_saving_either(self) -> None:
