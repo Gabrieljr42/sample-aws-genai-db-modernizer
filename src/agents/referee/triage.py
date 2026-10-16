@@ -367,9 +367,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
             large_scans.append(qid)
 
         # Group 8: Time-series / event log
-        if facts.event_timestamp_word and (
-            qtype == "INSERT" or (qtype == "SELECT" and facts.order_by_substring)
-        ):
+        if facts.timestamp_column and (qtype == "INSERT" or (qtype == "SELECT" and facts.order_by)):
             timeseries.append(qid)
 
         # Group 9: Session store. Matched on the original text, not the
@@ -392,11 +390,11 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
 
         # Cross-cutting: Leaderboard / top-N (ORDER BY + LIMIT, or T-SQL's
         # TOP (n) ... ORDER BY / FETCH FIRST|NEXT, #663; one pattern shared with
-        # the cache overlay, the ``top_n_shape`` query fact). Only a hot SELECT
+        # the cache overlay, the ``top_n`` query fact). Only a hot SELECT
         # counts: a Rails ``.first`` / ``find_by`` at 0.01 calls/s has the same
         # shape and is not cache material (#296). The signal is a cache-overlay
         # hint, never an ownership override.
-        if qtype == "SELECT" and cps >= HOT_READ_MIN_CALLS_PER_SECOND and facts.top_n_shape:
+        if qtype == "SELECT" and cps >= HOT_READ_MIN_CALLS_PER_SECOND and facts.top_n:
             leaderboards.append(qid)
 
         # Cross-cutting: Subqueries (the collector's facade fact)

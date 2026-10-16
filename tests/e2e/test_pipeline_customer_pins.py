@@ -1,9 +1,10 @@
 """A customer pin keeps its engine, but never pulls a query onto it for the pin's sake (#860).
 
 The first reality check leaves OpenSearch out of the plan on discourse and
-trailgear; since #893 the first assignment can already put some of OpenSearch's
-search queries on another engine (trailgear's prefix ``LIKE`` is a range, not a
-wildcard search). The customer then pins one of OpenSearch's search queries --
+trailgear; since #893 the first assignment can already put OpenSearch's search
+queries on another engine (on trailgear, all of them: its prefix ``LIKE`` is a
+range, not a wildcard search, and T-SQL's ``TOP (n)`` is a row limit, which lifts
+Aurora PostgreSQL's fit on the search tables). The customer then pins one of OpenSearch's search queries --
 one the first assignment put there, or one OpenSearch's analysis reports a search
 pattern for -- on OpenSearch, and the check runs again on that version. Discourse
 covers a query the first check moved off OpenSearch being pinned back; on trailgear

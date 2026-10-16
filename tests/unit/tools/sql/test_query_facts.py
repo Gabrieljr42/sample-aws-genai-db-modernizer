@@ -208,53 +208,52 @@ class TestFacts:
             ("INSERT INTO t SELECT * FROM u", "write_with_subquery"),
             ("SELECT * FROM t WHERE NOT EXISTS (SELECT 1 FROM u)", "exists_or_in_subquery"),
             ("SELECT * FROM t WHERE a IN ( SELECT b FROM u)", "exists_or_in_subquery"),
-            ("SELECT * FROM t LIMIT 10", "pagination_keyword"),
-            ("SELECT * FROM t FETCH FIRST 5 ROWS ONLY", "pagination_keyword"),
+            ("SELECT * FROM t LIMIT 10", "row_limit"),
+            ("SELECT * FROM t FETCH FIRST 5 ROWS ONLY", "row_limit"),
+            ("SELECT TOP 5 * FROM t", "row_limit"),
             ("SELECT * FROM t WHERE id IN (1, 2)", "in_list"),
-            ("SELECT JSON_EXTRACT(doc, '$.a') FROM t", "json_function_keyword"),
-            ("SELECT doc->'a' FROM t", "json_function_keyword"),
+            ("SELECT JSON_EXTRACT(doc, '$.a') FROM t", "json_access"),
+            ("SELECT doc->'a' FROM t", "json_access"),
             ("INSERT INTO t VALUES (1) ON DUPLICATE KEY UPDATE a = 1", "duplicate_key_upsert"),
             ("REPLACE INTO t VALUES (1)", "duplicate_key_upsert"),
             ("SELECT GROUP_CONCAT(a) FROM t", "group_concat_call"),
             ("CALL refresh_stats()", "stored_routine_keyword"),
-            ("SELECT doc->>'a' FROM t", "jsonb_operation"),
-            ("SELECT * FROM t WHERE doc @> '{\"a\": 1}'", "jsonb_operation"),
+            ("SELECT doc->>'a' FROM t", "json_access"),
+            ("SELECT * FROM t WHERE doc @> '{\"a\": 1}'", "json_access"),
+            ("SELECT CAST(doc AS JSON) FROM t", "json_access"),
             ("SELECT * FROM t WHERE id = ANY(ARRAY[1, 2])", "array_operation"),
             ("SELECT unnest(tags) FROM t", "array_operation"),
             ("SELECT * FROM t JOIN LATERAL (SELECT 1) x ON true", "lateral_join"),
             ("INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING", "on_conflict_or_returning"),
             ("INSERT INTO t VALUES (1) RETURNING id", "on_conflict_or_returning"),
-            ("SELECT * FROM t WHERE created_at > ?", "timestamp_column_word"),
-            ("SELECT * FROM t WHERE last_seen_at > ?", "timestamp_column_word"),
-            ("SELECT * FROM sessions WHERE token = ?", "session_word"),
+            ("SELECT * FROM t WHERE created_at > ?", "timestamp_column"),
+            ("SELECT * FROM t WHERE last_seen_at > ?", "timestamp_column"),
+            ("INSERT INTO t (id, event_date) VALUES (?, ?)", "timestamp_column"),
             ("SELECT * FROM t WHERE a BETWEEN 1 AND 2 ORDER BY a", "range_with_order_by"),
             ("SELECT * FROM t WHERE a>=1 ORDER BY a", "range_with_order_by"),
-            ("SELECT * FROM t LIMIT 5", "limit_word"),
             ("SELECT * FROM t WHERE a NOT IN (1)", "negation_word"),
             ("SELECT * FROM t WHERE a!=b", "negation_word"),
             ("SELECT (SELECT 1 FROM u WHERE u.id = t.uid) FROM t", "correlated_subquery_shape"),
-            ("SELECT JSON_EXTRACT(doc, '$.a') FROM t", "json_extract_word"),
-            ("SELECT * FROM t WHERE event_time >= ?", "timestamp_keyword"),
+            ("SELECT * FROM t WHERE event_time >= ?", "timestamp_column"),
             ("SELECT * FROM t WHERE event_time >= ?", "time_range_operator"),
             ("SELECT date_trunc('day', ts) FROM t", "time_function_keyword"),
-            ("SELECT * FROM t WHERE user_id = ?", "session_or_user_keyword"),
-            ("SELECT * FROM t ORDER BY a", "order_by_substring"),
-            ("SELECT * FROM t WHERE updated_at > ?", "timestamp_or_date_keyword"),
+            ("SELECT * FROM t ORDER BY a", "order_by"),
+            ("UPDATE a JOIN b ON b.id = a.id SET a.x = ?", "update_target_join"),
             ("SELECT ST_Distance(a, b) FROM t", "geospatial_keyword"),
             ("SELECT MAX(id) FROM t", "min_max_call"),
             ("SELECT * FROM t WHERE status = ?", "status_equals_value"),
             ("SELECT * FROM t WHERE a IS NULL", "is_null"),
             ("SELECT COUNT(*) FROM t", "count_star_or_one"),
-            ("SELECT * FROM t WHERE event_date > ?", "event_timestamp_word"),
-            ("SELECT * FROM t ORDER BY score DESC LIMIT 10", "top_n_shape"),
-            ("SELECT TOP (5) * FROM t ORDER BY a", "top_n_shape"),
+            ("SELECT * FROM t ORDER BY score DESC LIMIT 10", "top_n"),
+            ("SELECT TOP (5) * FROM t ORDER BY a", "top_n"),
             ("SELECT * FROM sessions WHERE token = ?", "session_key"),
             ("SELECT * FROM [UserSession] WHERE [SessionToken] = @t", "session_key"),
+            ("SELECT * FROM user_sessions WHERE session_token = ?", "session_key"),
+            ("SELECT * FROM user_auth_tokens WHERE auth_token = $1", "session_key"),
             ("SELECT * FROM t WHERE v @@ plainto_tsquery($1)", "search_depth"),
             ("SELECT a, count(*) FROM t WHERE a LIKE $1 GROUP BY a", "search_depth"),
             ("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", "merge_statement"),
-            ("SELECT JSON_VALUE(doc, '$.a') FROM t", "json_function_call"),
-            ("SELECT * FROM t FOR JSON PATH", "json_function_call"),
+            ("SELECT JSON_VALUE(doc, '$.a') FROM t", "json_access"),
             ("SELECT * FROM t WHERE id = ?", "where_word"),
             ("SELECT * FROM t WHERE id IN (1, 2)", "keyed_after_where"),
             (
@@ -289,7 +288,8 @@ class TestFacts:
         "sql,fact",
         [
             ("SELECT a AS returning FROM t", "on_conflict_or_returning"),
-            ("SELECT * FROM t WHERE a @> ARRAY[1]", "jsonb_operation"),
+            ("SELECT * FROM t WHERE a @> ARRAY[1]", "json_access"),  # an array
+            ("SELECT * FROM t WHERE note = 'a->b'", "json_access"),  # a literal
             ("SELECT * FROM t WHERE a LIKE 'x%'", "leading_wildcard_like"),  # a prefix
             ("SELECT * FROM t WHERE a LIKE 'x%'", "text_search"),  # a prefix is a range
             ("SELECT * FROM t -- a LIKE '%x'", "leading_wildcard_like"),  # a comment
@@ -307,16 +307,27 @@ class TestFacts:
             ("SELECT fooWITH RECURSIVE", "recursive_cte"),
             ("SELECT * FROM t WHERE a >= 1 ORDER BY a", "range_with_order_by"),  # space
             ("SELECT * FROM t WHERE a BETWEEN 1 AND 2", "range_with_order_by"),  # no ORDER BY
-            ("SELECT * FROM t WHERE mydate_x = ?", "timestamp_column_word"),
-            ("SELECT * FROM t WHERE a != 1", "negation_word"),  # space before !=
             ("SELECT * FROM t WHERE a > ?", "time_range_operator"),
+            ("SELECT * FROM t WHERE mydate_x = ?", "timestamp_column"),
+            ("UPDATE t SET a = 1 WHERE id = ?", "timestamp_column"),  # "update" holds "date"
+            ("SELECT CAST(a AS DATE) FROM t", "timestamp_column"),  # a type, not a column
+            ("SELECT * FROM t WHERE credit_limit > 5", "row_limit"),
+            ("SELECT ROW_NUMBER() OVER (ORDER BY a) FROM t", "order_by"),  # a window's
+            ("SELECT * FROM t WHERE a != 1", "negation_word"),  # space before !=
             ("SELECT * FROM t WHERE status = 1", "status_equals_value"),  # a bare number
             ("SELECT COUNT(id) FROM t", "count_star_or_one"),
-            ("SELECT * FROM t LIMIT 10", "top_n_shape"),  # no ORDER BY
+            ("SELECT * FROM t LIMIT 10", "top_n"),  # no ORDER BY
+            ("SELECT TOP (5) * FROM t", "top_n"),
             ("SELECT * FROM t WHERE [SessionTimeout] > 5", "session_key"),
+            ("SELECT * FROM t WHERE session_timeout > 5", "session_key"),
+            ("SELECT * FROM t WHERE payment_token = ?", "session_key"),
+            ("SELECT * FROM t WHERE purpose = 'reset_token'", "session_key"),  # a literal
+            ("SELECT * FROM t WHERE event_type = 'login_token'", "session_key"),
+            ("SELECT * FROM t WHERE user_id = ?", "session_key"),  # a user, not a session
+            ("SELECT login FROM users WHERE id = ?", "session_key"),  # a user name
             ("SELECT * FROM t WHERE a LIKE $1", "search_depth"),  # a plain LIKE filter
             ("SELECT * FROM t WHERE a = 'x' -- MERGE INTO t USING s", "merge_statement"),
-            ("SELECT json_value FROM t", "json_function_call"),  # a column, not a call
+            ("SELECT json_value FROM t", "json_access"),  # a column, not a call
             ("WITH a AS (SELECT 1 UNION SELECT 2) SELECT * FROM a", "recursive_cte"),
             ("SELECT * FROM t WHERE a > ?", "keyed_after_where"),  # a range
             ("SELECT * FROM t WHERE a >= ?", "keyed_after_where"),
@@ -328,13 +339,13 @@ class TestFacts:
 
     def test_parsed_facts_are_read_in_the_source_engines_dialect(self, monkeypatch):
         calls = []
-        real = query_facts_module.sql_facts
+        real = query_facts_module.query_readings
 
         def recording(text, engine):
             calls.append(engine)
             return real(text, engine)
 
-        monkeypatch.setattr(query_facts_module, "sql_facts", recording)
+        monkeypatch.setattr(query_facts_module, "query_readings", recording)
         sql = "SELECT * FROM t WHERE a LIKE :1 -- dialect"
         assert query_facts(sql, "Oracle").like_parameter
         assert query_facts(sql, "oracle") is query_facts(sql, "Oracle")
@@ -423,7 +434,6 @@ _DOCUMENTDB_ONLY_FACTS = frozenset(
         "windowed_aggregate",
         "negation_word",
         "correlated_subquery_shape",
-        "json_extract_word",
         "comma_count",
     }
 )

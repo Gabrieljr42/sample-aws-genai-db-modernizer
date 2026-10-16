@@ -68,16 +68,16 @@ def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
         ):
             caching_queries.append(q)
 
-        # Session store: session or user_id references
-        if facts.session_or_user_keyword:
+        # Session store: a session or token key (the session_key fact, #893)
+        if facts.session_key:
             session_queries.append(q)
 
-        # Leaderboard: ORDER BY + LIMIT
-        if facts.order_by_substring and facts.limit_word:
+        # Leaderboard: ORDER BY + LIMIT (the top_n fact triage reads too)
+        if facts.top_n:
             leaderboard_queries.append(q)
 
         # Time series: timestamp/date keywords + GROUP BY
-        if facts.timestamp_or_date_keyword and facts.group_by:
+        if facts.timestamp_column and facts.group_by:
             timeseries_queries.append(q)
 
         # Time series: time binning functions (DATE_TRUNC()). The check this

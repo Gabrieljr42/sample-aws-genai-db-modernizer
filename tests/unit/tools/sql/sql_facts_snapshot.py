@@ -46,6 +46,12 @@ _REGEX = {
     "offset_window_function": regex_facts.regex_offset_window_function,
     "windowed_aggregate": regex_facts.regex_windowed_aggregate,
     "recursive_cte": regex_facts.regex_recursive_cte,
+    "order_by": regex_facts.regex_order_by,
+    "row_limit": regex_facts.regex_row_limit,
+    "top_n": regex_facts.regex_top_n,
+    "timestamp_column": regex_facts.regex_timestamp_column,
+    "json_access": regex_facts.regex_json_access,
+    "update_target_join": regex_facts.regex_update_target_join,
 }
 
 

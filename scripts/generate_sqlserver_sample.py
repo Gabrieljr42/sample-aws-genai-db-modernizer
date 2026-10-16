@@ -9,9 +9,11 @@ the routing paths only a heterogeneous source can reach:
 
 - the Aurora MySQL vs Aurora PostgreSQL pick-one choice for a source with no
   Aurora dialect of its own (``aurora_choice.choose_heterogeneous_engine``,
-  #381): Aurora MySQL scores the higher total, within the 5% margin, and the
-  workload's own features (two schemas, ``MERGE``, ``NEXT VALUE FOR``, a
-  recursive CTE, ``JSON_VALUE``/``OPENJSON``) tip it to Aurora PostgreSQL;
+  #381): the two totals are within the 5% margin, so the workload's own features
+  (two schemas, ``MERGE``, ``NEXT VALUE FOR``, a recursive CTE,
+  ``JSON_VALUE``/``OPENJSON``) decide, for Aurora PostgreSQL. Aurora PostgreSQL
+  has the higher total since #893 read ``JSON_VALUE`` as JSON for both engines;
+  no T-SQL statement favours a MySQL-only pattern;
 - a co-dependency group tie (``CATEGORY_GROUP``: Aurora PostgreSQL and
   DocumentDB score the group the same, and SQL Server has no
   source-compatible engine to break it, so it is ``tie_unresolved``);

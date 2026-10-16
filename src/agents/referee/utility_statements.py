@@ -1,5 +1,8 @@
 """Utility and metadata statements are excluded from engine routing (#327).
 
+A declared fact module (ADR-031 Decision 8, #893): the utility-statement fact is
+defined here once, held to ``tests/unit/tools/sql/test_one_definition_per_fact.py``.
+
 ``SHOW``, ``SET``, ``DESCRIBE``/``DESC``, ``EXPLAIN``, DDL (``CREATE``/``ALTER``/
 ``DROP`` — including ``CREATE EXTENSION``), transaction control (``BEGIN``/
 ``START TRANSACTION``/``COMMIT``/``END``/``ROLLBACK``/``ABORT``/``SAVEPOINT``/

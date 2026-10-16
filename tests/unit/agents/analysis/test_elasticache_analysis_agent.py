@@ -142,7 +142,8 @@ def test_redis_session_store_detection():
             "query_patterns": [
                 {
                     "query_id": "q1",
-                    "query_text": "SELECT * FROM sessions WHERE user_id = ?",
+                    # A session key (the session_key fact, #893); a user_id alone is not one.
+                    "query_text": "SELECT * FROM sessions WHERE session_id = ?",
                     "query_type": "SELECT",
                     "calls_per_second": 2.0,
                     "tables_accessed": ["sessions"],
