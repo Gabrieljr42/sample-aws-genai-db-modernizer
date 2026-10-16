@@ -26,6 +26,13 @@ from src.graph.store import READ_QUERY_TIMEOUT_MS, GraphStore
 # queries. A long grace keeps the engine timeout the only clock under test.
 TEST_GRACE_SECONDS = 60.0
 SLOT_WAIT_S = 30.0
+# The live-server test below waits for the engine timeout to fire on every slow
+# query. It runs with this shorter limit instead of the production
+# READ_QUERY_TIMEOUT_MS (10s): what it checks (a 504 no earlier than the
+# limit, the server answering and refusing extra raw queries meanwhile, the
+# slots coming back) does not depend on the limit's value, and the cartesian
+# query never finishes within either (#956).
+LIVE_TEST_TIMEOUT_MS = 3_000
 
 
 @pytest.fixture(autouse=True)
@@ -288,7 +295,9 @@ def _request(
 def test_expensive_read_times_out_while_server_stays_responsive(tmp_path, monkeypatch):
     path = str(tmp_path / "slow.lbug")
     _make_graph(path, rows=2_000)
-    store = GraphStore(path, read_only=True, query_timeout_ms=READ_QUERY_TIMEOUT_MS)
+    assert LIVE_TEST_TIMEOUT_MS < READ_QUERY_TIMEOUT_MS
+    monkeypatch.setattr(graph_routes, "READ_QUERY_TIMEOUT_MS", LIVE_TEST_TIMEOUT_MS)
+    store = GraphStore(path, read_only=True, query_timeout_ms=LIVE_TEST_TIMEOUT_MS)
     monkeypatch.setenv(graph_routes.RAW_QUERY_ENV_FLAG, "1")
 
     app = FastAPI()
@@ -346,7 +355,7 @@ def test_expensive_read_times_out_while_server_stays_responsive(tmp_path, monkey
 
         for worker in workers:
             worker.join(60)
-        timeout_s = READ_QUERY_TIMEOUT_MS / 1000
+        timeout_s = LIVE_TEST_TIMEOUT_MS / 1000
         assert len(results) == len(workers)
         for (status, body), elapsed in results:
             assert (status, body.get("detail")) == (504, graph_routes.TIMEOUT_DETAIL), body

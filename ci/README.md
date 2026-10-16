@@ -62,6 +62,10 @@ anyone running this script with the `e2e` extra already installed. Plus
 credentials. Accepts extra pytest args, e.g. `./ci/test.sh --cov=src
 --cov-report=term --cov-fail-under=65` for the coverage gate CI runs with.
 
+Hypothesis profiles: `tests/conftest.py` loads the profile named by `HYPOTHESIS_PROFILE`, so it applies to every entry point, including a plain `uv run pytest tests/`. `default` (100 examples per property) is what runs when the variable is unset: locally, on main and nightly. `ci` (20 examples, and `tests/hypothesis_examples.scaled(n)` shrinks a test's own `max_examples` by the same share) is for pull requests: this script sets `HYPOTHESIS_PROFILE=ci` when `GITHUB_EVENT_NAME` is `pull_request`, unless the variable is already set. Any other CI system that calls pytest directly can set `HYPOTHESIS_PROFILE=ci` on its pull request runs the same way. To run a pull request's budget locally: `HYPOTHESIS_PROFILE=ci ./ci/test.sh`.
+
+Expensive sample runs are shared: `tests/shared_runs.py` builds each one (the deterministic wordpress pipeline, the `run_assessment.py` runs on discourse and wordpress) at most once per pytest session, across every xdist worker, under a file lock in the session's temporary directory. The cache never outlives the session. A test that writes to a shared job copies it first with `copy_run`.
+
 The raw-query large-server memory regression runs without a platform skip on
 Linux, macOS and Windows wherever this test command is run. The GitHub CI
 workflow currently gates on Ubuntu only. The worker measures current RSS with

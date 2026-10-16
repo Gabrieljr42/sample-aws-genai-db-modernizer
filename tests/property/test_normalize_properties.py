@@ -26,6 +26,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from src.tools.sql.normalize import normalize_digest_text
+from tests.hypothesis_examples import scaled
 
 # ---------------------------------------------------------------------------
 # Strategy: raw character soup over everything normalize.py's scanner and
@@ -44,7 +45,7 @@ _dialect = st.sampled_from(["mysql", "mariadb", "postgresql", "sqlserver"])
 
 
 @given(query_text=_query_text, dialect=_dialect)
-@settings(max_examples=300, deadline=None)
+@settings(max_examples=scaled(300), deadline=None)
 @example(query_text="SELECT `id` FROM `t` WHERE `status` IN (...) LIMIT ?, ...", dialect="mysql")
 @example(query_text="SELECT * FROM t WHERE name = 'what?' AND id = ?", dialect="mysql")
 @example(query_text="SELECT * FROM t /* it's ? */ WHERE a = ?", dialect="mysql")

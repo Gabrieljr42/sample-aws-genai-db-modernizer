@@ -14,10 +14,10 @@ import json
 import re
 import stat
 import sys
-import time
 from pathlib import Path
 
 from ci.llm import judge
+from tests.unit.tools.sql._timing import assert_cost_ratio, assert_fast
 
 DB, JOB = "acme", "job-1"
 
@@ -261,29 +261,52 @@ def test_garbage_with_braces_is_still_a_parse_error(tmp_path: Path) -> None:
     assert "could not parse judge response as JSON" in result["error"]
 
 
+# An oversized reply costs this process about 5x a normal one (writing and
+# reading 3.5 MB, then the length check); scanning it instead would cost
+# hundreds of times more.
+OVERSIZED_REPLY_MAX_COST_RATIO = 20.0
+
+
 def test_oversized_adversarial_reply_errors_fast(tmp_path: Path) -> None:
     reply = _inner(PASSING_SCORES) + '{"a": "' * 500_000  # ~3.5 MB
-    start = time.monotonic()
     result, code = _run_with_reply(tmp_path, reply)
-    elapsed = time.monotonic() - start
 
     assert code == 2, result
     assert "too long to parse" in result["error"]
-    assert elapsed < 2, elapsed
+
+    # "Fast" is relative to a normal judge run in this same process, in CPU
+    # time, so neither the stub's process start nor a loaded machine counts
+    # (#887). An absolute wall-clock bound measured the machine as much as
+    # the code.
+    runs = iter(range(1_000))
+
+    def run(text: str) -> None:
+        _run_with_reply(tmp_path / f"run-{next(runs)}", text)
+
+    assert_cost_ratio(
+        lambda: run(reply),
+        lambda: run(_inner(PASSING_SCORES)),
+        max_ratio=OVERSIZED_REPLY_MAX_COST_RATIO,
+    )
 
 
 def test_brace_flood_within_length_limit_hits_the_decode_attempt_cap() -> None:
     # Unterminated, deeply nested candidates: each "{" fails to decode.
     reply = '{"a": [' * 20_000
     assert len(reply) <= judge.MAX_REPLY_CHARS
-    start = time.monotonic()
-    try:
-        judge.parse_judge_reply(reply)
-    except judge.JudgeError as exc:
-        assert "too many '{' candidates" in str(exc)
-    else:
-        raise AssertionError("expected JudgeError")
-    assert time.monotonic() - start < 2
+
+    def parse() -> None:
+        try:
+            judge.parse_judge_reply(reply)
+        except judge.JudgeError as exc:
+            assert "too many '{' candidates" in str(exc)
+        else:
+            raise AssertionError("expected JudgeError")
+
+    # CPU time of the parse alone (#887): a loaded machine slows wall-clock
+    # time, not CPU time. The capped scan takes about 60 ms; without the cap
+    # it takes minutes.
+    assert_fast(parse, budget_s=2.0)
 
 
 def test_front_matter_thresholds_are_honoured(tmp_path: Path) -> None:

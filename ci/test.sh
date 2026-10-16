@@ -10,5 +10,11 @@
 # stays as a second, belt-and-suspenders guard for anyone who *does* have the
 # e2e extra installed and runs this script directly.
 source "$(dirname "$0")/lib.sh"
-log "pytest (not integration, not e2e)"
+# Pull requests run the Hypothesis `ci` profile (fewer examples, see
+# tests/conftest.py); main, nightly and local runs keep the full `default`
+# profile. An explicit HYPOTHESIS_PROFILE always wins.
+if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
+  export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci}"
+fi
+log "pytest (not integration, not e2e; Hypothesis profile: ${HYPOTHESIS_PROFILE:-default})"
 uv run pytest tests/ --ignore=tests/e2e -m "not integration and not e2e" --fail-on-skip -n auto "$@"
