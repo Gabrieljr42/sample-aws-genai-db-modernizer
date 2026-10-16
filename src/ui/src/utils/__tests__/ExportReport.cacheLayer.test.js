@@ -2,7 +2,7 @@
  * #358: generateHTMLReport's "Target Engines" badges, "Projected Cost" stat and
  * the embedded script's own cost cards (buildCostBreakdown) left the
  * cache_overlay engine out entirely -- the same bug the live Results page had
- * (src/ui/src/pages/AnalysisResults-02.js, fixed via utils/cacheLayer.js's
+ * (src/ui/src/pages/AnalysisResults.js, fixed via utils/cacheLayer.js's
  * targetEngineEntries/resolveCostBreakdown). This file is shaped like the real
  * wordpress job e6a0127b's report.json.
  *

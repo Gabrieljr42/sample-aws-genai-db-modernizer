@@ -21,10 +21,6 @@ export function buildDashboardActionItems(t, selectedItems) {
       text: t('dashboard.actions.view-results'),
       id: 'view-results',
     },
-    {
-      text: t('dashboard.actions.view-analysis'),
-      id: 'view-analysis',
-    },
   ];
 
   if (!selectedItems[0] || !isTerminalStatus(selectedItems[0].status)) {

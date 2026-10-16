@@ -9,7 +9,7 @@ import {
 } from '../engineCatalog.generated';
 import { ENGINE_LABELS as NAMES_LABELS } from '../engineNames';
 import { CACHE_ENGINES } from '../cacheLayer';
-import { NODE_COLORS } from '../../components/ChartSankey-01';
+import { NODE_COLORS } from '../../components/ChartSankey';
 import { ENGINE_STYLES } from '../engineColors';
 
 const ENGINE_LABELS_BEFORE = {

@@ -6,7 +6,7 @@ of the engine and pattern facts every consumer must agree on. Python reads them 
 ``src.shared.catalog``. This script writes the two files that cannot:
 
 - ``src/ui/src/utils/engineCatalog.generated.js``: the engine facts the UI uses
-  (``engineNames.js``, ``cacheLayer.js``, ``ChartSankey-01.js`` and ``AssignmentGate.js``
+  (``engineNames.js``, ``cacheLayer.js``, ``ChartSankey.js`` and ``AssignmentGate.js``
   import it), since the UI cannot read TOML at run time;
 - ``docs/architecture/rule-catalog.md``: the pattern x engine matrix (support, score,
   penalty, why) next to the engine properties, for review.

@@ -300,7 +300,7 @@ const generateReportScript = (data, ENGINE_LABELS) => {
   script += '\n';
   // English-only (this file is i18n-exempt, see header): mirrors the Results
   // page explorer header's "{{total}} ({{owned}} owned + {{cache}} cache
-  // layer)" text (locales/en.json's analysis-results-v2.explorer.header-count).
+  // layer)" text (locales/en.json's analysis-results.explorer.header-count).
   script += '    function formatExplorerCount(ownerCount, cacheCount) {\n';
   script += '      return cacheCount > 0\n';
   script += '        ? (ownerCount + cacheCount) + \' (\' + ownerCount + \' owned + \' + cacheCount + \' cache layer)\'\n';
@@ -1720,7 +1720,7 @@ export const generateHTMLReport = (data) => {
   // gate, covered/dropped and why, remaining). Without this, the exported
   // HTML would state only the final count and silently disagree with the
   // number shown at the assignment gate, same gap as the live Results page
-  // (fixed alongside this in AnalysisResults-02.js). #459: cacheOverlayNotes
+  // (fixed alongside this in AnalysisResults.js). #459: cacheOverlayNotes
   // reads safety_net_notes only -- never the full notes field, which also
   // carries customer-edit notes (full query hashes) and the legacy-migration
   // note, neither customer-facing.
@@ -1751,7 +1751,7 @@ export const generateHTMLReport = (data) => {
   // narrative was withheld because it {reason}; this summary is built from
   // the effective assignment."). This file is i18n-exempt (English-only, see
   // header), so the wording is a fixed literal, matching
-  // AnalysisResults-02.js's analysis-results-v2.executive-summary.fallback-notice
+  // AnalysisResults.js's analysis-results.executive-summary.fallback-notice
   // key and src/report/analysis_report.py's _summary_fallback_note (kept in
   // sync by hand, same reason as CACHE_LAYER_SUFFIX above). fallbackWithheldReason
   // ports formatting.fallback_withheld_reason's own reason mapping.
@@ -1787,7 +1787,7 @@ export const generateHTMLReport = (data) => {
   // #334: a report with no current-cost baseline left current_monthly_cost/
   // savings_percent at a bare 0 -- indistinguishable from a real zero-savings
   // outcome. Mirrors utils/tcoAnalysis.js's costBaselineStats (also used by
-  // AnalysisResults-02.js), which matches the decision/engineering reports'
+  // AnalysisResults.js), which matches the decision/engineering reports'
   // formatting._cost_baseline_text exactly (#334 review), including for an
   // older report with no current_cost_known field at all whose
   // current_monthly_cost is still a literal 0 (see tcoAnalysis.js for why).
@@ -1815,7 +1815,7 @@ export const generateHTMLReport = (data) => {
   const totalPatterns = escapeHtml(totalPatternsNum);
   // #405: shown as its own note under the "Access Patterns" stat, worded like
   // the Results page's "+N cache-layer pattern(s)" caption
-  // (analysis-results-v2.executive-summary.cache-patterns-note in
+  // (analysis-results.executive-summary.cache-patterns-note in
   // locales/en.json). This export is i18n-exempt (standalone, English-only --
   // see file header), so the English singular/plural text is inlined directly
   // instead of going through i18next's t().
@@ -1827,7 +1827,7 @@ export const generateHTMLReport = (data) => {
   // #429 part 2: the explorer's own header count, by contrast, now includes
   // the cache layer's rows (it stays browsable there, just not owned
   // workload) -- "64 (54 owned + 10 cache layer)", mirroring the Results
-  // page explorer header (analysis-results-v2.explorer.header-count) and the
+  // page explorer header (analysis-results.explorer.header-count) and the
   // embedded script's own formatExplorerCount (generated above).
   const explorerHeaderCount = escapeHtml(
     cachePatternCount > 0

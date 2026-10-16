@@ -7,7 +7,7 @@ import ExpandableSection from "@cloudscape-design/components/expandable-section"
  * Notice shown when a generated executive summary was replaced by its
  * deterministic fallback (#269). Shared by the Assignment review page
  * (AssignmentGate.js, the reality-check summary) and the Results page
- * (AnalysisResults-02.js, the synthesis summary) -- the two differ only in
+ * (AnalysisResults.js, the synthesis summary) -- the two differ only in
  * their notice text and in whether there is a warnings list to expand:
  *
  * - The synthesis summary's `text` already names the check-specific reason

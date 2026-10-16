@@ -98,29 +98,28 @@ const PINNED_EXEMPTIONS = new Set([]);
 // reads report.json, plus the interactive report's generated client script.
 // Files not listed here must not read an owned key (checked below).
 const GUARDED_UI_FILES = [
-  'pages/AnalysisResults-02.js',
-  'pages/JobMonitoring.js',
+  'pages/AnalysisResults.js',
   'pages/JobMonitoringSummary.js',
   'utils/ExportReport.js',
-  'utils/ReportHtmlExport.js',
   'utils/reportFacts.js',
   'utils/riskAssessment.js',
   'utils/tcoAnalysis.js',
   'utils/cacheLayer.js',
   'utils/assignmentSummary.js',
   'utils/postSchemaReroutes.js',
-  'utils/rankingConfidence.js',
   'utils/workloadFitLabels.js',
   'utils/optimizationLabels.js',
   'utils/auroraDesign.js',
   'utils/summaryFallback.js',
-  'components/ChartSankey-01.js',
+  'components/ChartSankey.js',
   'components/SummaryFallbackNotice.js',
   'components/QueryDecisionTrace.js',
   'components/QueryRoutingTable.js',
   'components/CloseCallCallout.js',
   'components/UnservableQueriesCallout.js',
   'utils/queryRouting.js',
+  'utils/migrationWaves.js',
+  'components/MigrationWavePlan.js',
 ];
 
 function figureFields(schema, out) {
@@ -571,8 +570,8 @@ describe('renderers only format (#748, ADR-032)', () => {
   });
 
   test('the wave-headline rule is not in any UI code: waves read facts.waves only', () => {
-    // #581 came back for old reports because ExportReport.js and
-    // ReportHtmlExport.js each subtracted table_owners from table_count. The
+    // #581 came back for old reports because ExportReport.js and the static
+    // HTML export (since removed) each subtracted table_owners from table_count. The
     // inputs of that rule are read nowhere on the UI side now; the phrasing
     // (waveTableStats) is reportFacts.js's, mirrored as text by the exporter.
     const withRule = guardedSources().filter(([, file]) => /table_owners|owned_counts_by_engine/.test(fs.readFileSync(file, 'utf8')));
@@ -684,10 +683,8 @@ function render(synthesis, facts) {
     // Each real file passes as shipped; putting back the count the facts layer
     // owns makes the guard fail, so the passing run above is not vacuous.
     test.each([
-      ['src/ui/src/utils/ReportHtmlExport.js', 'const openRiskCount = openRiskCountOf(synthesis, risks);', 'const openRiskCount = risks.length;'],
-      ['src/ui/src/utils/ReportHtmlExport.js', '(${tableMappingCount})', '(${tableMappings.length})'],
-      ['src/ui/src/pages/AnalysisResults-02.js', 'count: severityCount }', 'count: risksAtSeverity.length }'],
-      ['src/ui/src/pages/AnalysisResults-02.js', 'count: resolvedRiskCountOf(synthesis, resolvedRisksList)', 'count: resolvedRisksList.length'],
+      ['src/ui/src/pages/AnalysisResults.js', 'count: severityCount }', 'count: risksAtSeverity.length }'],
+      ['src/ui/src/pages/AnalysisResults.js', 'count: resolvedRiskCountOf(synthesis, resolvedRisksList)', 'count: resolvedRisksList.length'],
       ['src/report/templates/analysis_report.js', "' (' + openRiskCountAt(sev, risks) + ')", "' (' + risks.length + ')"],
       ['src/report/templates/analysis_report.js', "resolvedRiskCount(resolvedRisks) + ' resolved", "resolvedRisks.length + ' resolved"],
       ['src/ui/src/utils/cacheLayer.js', 'finite(facts?.projected_monthly_cost_usd);', 'finite(facts?.projected_monthly_cost_usd) ?? items.reduce((s, cb) => s + cb.monthly_cost_usd, 0);'],

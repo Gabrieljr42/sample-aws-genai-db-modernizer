@@ -42,14 +42,14 @@ function CandidateTable({ candidates, t }) {
   return (
     <table
       className="query-trace-candidates"
-      aria-label={t('analysis-results-v2.query-trace.candidates-label')}
+      aria-label={t('analysis-results.query-trace.candidates-label')}
       style={{ borderCollapse: 'collapse', width: '100%' }}
     >
       <thead>
         <tr>
-          <th scope="col" style={{ textAlign: 'left', padding: '4px 8px' }}>{t('analysis-results-v2.query-trace.col-engine')}</th>
-          <th scope="col" style={{ textAlign: 'right', padding: '4px 8px' }}>{t('analysis-results-v2.query-trace.col-score')}</th>
-          <th scope="col" style={{ textAlign: 'left', padding: '4px 8px' }}>{t('analysis-results-v2.query-trace.col-gate')}</th>
+          <th scope="col" style={{ textAlign: 'left', padding: '4px 8px' }}>{t('analysis-results.query-trace.col-engine')}</th>
+          <th scope="col" style={{ textAlign: 'right', padding: '4px 8px' }}>{t('analysis-results.query-trace.col-score')}</th>
+          <th scope="col" style={{ textAlign: 'left', padding: '4px 8px' }}>{t('analysis-results.query-trace.col-gate')}</th>
         </tr>
       </thead>
       <tbody>
@@ -68,7 +68,7 @@ function CandidateTable({ candidates, t }) {
 function StepLabel({ step, t }) {
   return (
     <Box variant="awsui-key-label">
-      {t('analysis-results-v2.query-trace.step-label', { step: step.step, version: step.version, rule: step.rule })}
+      {t('analysis-results.query-trace.step-label', { step: step.step, version: step.version, rule: step.rule })}
     </Box>
   );
 }
@@ -85,25 +85,25 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
   if (loading) {
     return (
       <Box textAlign="center" padding="l">
-        <StatusIndicator type="loading">{t('analysis-results-v2.query-trace.loading')}</StatusIndicator>
+        <StatusIndicator type="loading">{t('analysis-results.query-trace.loading')}</StatusIndicator>
       </Box>
     );
   }
   if (error) {
     return (
       <Box padding="s" data-testid="query-trace-error">
-        <StatusIndicator type="error">{t('analysis-results-v2.query-trace.error', { message: error })}</StatusIndicator>
+        <StatusIndicator type="error">{t('analysis-results.query-trace.error', { message: error })}</StatusIndicator>
       </Box>
     );
   }
   if (!trace) {
     return (
-      <Box padding="s" color="text-body-secondary">{t('analysis-results-v2.query-trace.empty')}</Box>
+      <Box padding="s" color="text-body-secondary">{t('analysis-results.query-trace.empty')}</Box>
     );
   }
 
   const finalLine = trace.final_engine_name
-    ? t('analysis-results-v2.query-trace.final-value', {
+    ? t('analysis-results.query-trace.final-value', {
         engine: trace.final_engine_name,
         score: formatTraceScore(trace.final_score),
       })
@@ -113,10 +113,10 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
     return (
       <SpaceBetween size="s">
         <Box data-testid="query-trace-no-ledger" color="text-body-secondary">
-          {t('analysis-results-v2.query-trace.no-ledger')}
+          {t('analysis-results.query-trace.no-ledger')}
         </Box>
         <div>
-          <Box variant="awsui-key-label">{t('analysis-results-v2.query-trace.final')}</Box>
+          <Box variant="awsui-key-label">{t('analysis-results.query-trace.final')}</Box>
           <Box data-testid="query-trace-final">{trace.final_engine_name || '—'}</Box>
         </div>
       </SpaceBetween>
@@ -135,7 +135,7 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
 
       {first && (
         <section data-testid="query-trace-first">
-          <Box variant="h3">{t('analysis-results-v2.query-trace.first-assignment', { version: first.version })}</Box>
+          <Box variant="h3">{t('analysis-results.query-trace.first-assignment', { version: first.version })}</Box>
           <StepLabel step={first} t={t} />
           <Box>{first.explanation}</Box>
           <CandidateTable candidates={first.candidates} t={t} />
@@ -143,7 +143,7 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
       )}
 
       <section data-testid="query-trace-moves">
-        <Box variant="h3">{t('analysis-results-v2.query-trace.later-steps')}</Box>
+        <Box variant="h3">{t('analysis-results.query-trace.later-steps')}</Box>
         {moves.length > 0 ? (
           <ol style={{ margin: 0, paddingLeft: '20px' }}>
             {moves.map((step) => (
@@ -154,22 +154,22 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
             ))}
           </ol>
         ) : (
-          <Box color="text-body-secondary">{t('analysis-results-v2.query-trace.no-later-steps')}</Box>
+          <Box color="text-body-secondary">{t('analysis-results.query-trace.no-later-steps')}</Box>
         )}
       </section>
 
       <section data-testid="query-trace-final">
-        <Box variant="h3">{t('analysis-results-v2.query-trace.final')}</Box>
+        <Box variant="h3">{t('analysis-results.query-trace.final')}</Box>
         <Box>
           {finalLine}{' '}
           {trace.final_version != null && (
-            <Badge>{t('analysis-results-v2.query-trace.as-of-version', { version: trace.final_version })}</Badge>
+            <Badge>{t('analysis-results.query-trace.as-of-version', { version: trace.final_version })}</Badge>
           )}
           {trace.effective_version != null && trace.effective_version !== trace.final_version && (
             <>
               {' '}
               <Badge color="grey">
-                {t('analysis-results-v2.query-trace.effective-version', { version: trace.effective_version })}
+                {t('analysis-results.query-trace.effective-version', { version: trace.effective_version })}
               </Badge>
             </>
           )}
@@ -178,18 +178,18 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
 
       {runner && (
         <section data-testid="query-trace-runner-up">
-          <Box variant="h3">{t('analysis-results-v2.query-trace.runner-up')}</Box>
+          <Box variant="h3">{t('analysis-results.query-trace.runner-up')}</Box>
           <Box>
             {runner.explanation}{' '}
             {typeof runner.gap === 'number' && runner.gap > 0 && (
               <Badge color="blue">
-                {t('analysis-results-v2.query-trace.gap', { count: runner.gap, gap: formatTraceScore(runner.gap) })}
+                {t('analysis-results.query-trace.gap', { count: runner.gap, gap: formatTraceScore(runner.gap) })}
               </Badge>
             )}
           </Box>
           {runner.basis === 'group_mean' && (
             <Box fontSize="body-s" color="text-body-secondary">
-              {t('analysis-results-v2.query-trace.group-basis', {
+              {t('analysis-results.query-trace.group-basis', {
                 final: formatTraceScore(trace.final_group_mean ?? runner.final_score),
               })}
             </Box>
@@ -199,13 +199,13 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
 
       {outscored.length > 0 && (
         <section data-testid="query-trace-outscored">
-          <Box variant="h3">{t('analysis-results-v2.query-trace.outscored')}</Box>
+          <Box variant="h3">{t('analysis-results.query-trace.outscored')}</Box>
           <ul style={{ margin: 0, paddingLeft: '20px' }}>
             {outscored.map((o) => (
               <li key={o.engine} data-engine={o.engine}>
                 <Box>{o.explanation}</Box>
                 <Box fontSize="body-s" color="text-body-secondary">
-                  {t('analysis-results-v2.query-trace.decided-by', {
+                  {t('analysis-results.query-trace.decided-by', {
                     version: o.decided_by_version,
                     step: o.decided_by_step,
                     rule: ruleOfStep(trace, o.decided_by_step),
@@ -219,9 +219,9 @@ const QueryDecisionTrace = memo(({ trace, loading, error, t }) => {
 
       {tied.length > 0 && (
         <section data-testid="query-trace-tie">
-          <Box variant="h3">{t('analysis-results-v2.query-trace.open-tie')}</Box>
+          <Box variant="h3">{t('analysis-results.query-trace.open-tie')}</Box>
           <Box>
-            {t('analysis-results-v2.query-trace.open-tie-text', {
+            {t('analysis-results.query-trace.open-tie-text', {
               engines: tied.join(', '),
               engine: trace.final_engine_name,
             })}

@@ -116,7 +116,7 @@ export function tradeOffsByTab(designTradeOffs, synthesis) {
 
 export function tradeOffTabLabel(tab, count, t, engineLabels) {
   const name = tab === REALITY_CHECK_TAB
-    ? t('analysis-results-v2.tradeoffs.reality-check')
+    ? t('analysis-results.tradeoffs.reality-check')
     : (engineLabels[tab] || tab);
   return `${name} (${count})`;
 }

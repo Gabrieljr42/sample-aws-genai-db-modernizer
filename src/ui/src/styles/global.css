@@ -52,7 +52,7 @@ code {
   --dbm-signal-badge-bg: rgba(9, 114, 211, 0.1);
   --dbm-signal-badge-muted-color: #5f6b7a;
   --dbm-signal-badge-muted-bg: rgba(0, 0, 0, 0.06);
-  /* ProgressState-02 pipeline arrows */
+  /* ProgressState pipeline arrows */
   --ps02-arrow-bg: #d5dbdb;
   --ps02-label-inactive: #5f6b7a;
   --ps02-label-active: #ffffff;
@@ -80,7 +80,7 @@ code {
   --dbm-signal-badge-bg: rgba(9, 114, 211, 0.12);
   --dbm-signal-badge-muted-color: #879596;
   --dbm-signal-badge-muted-bg: rgba(255, 255, 255, 0.06);
-  /* ProgressState-02 pipeline arrows */
+  /* ProgressState pipeline arrows */
   --ps02-arrow-bg: #414d5c;
   --ps02-label-inactive: #9ba7b6;
   --ps02-label-active: #ffffff;

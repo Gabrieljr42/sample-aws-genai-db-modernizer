@@ -1,20 +1,14 @@
 """The local UI lists the jobs and renders their results against the local API.
 
 Route selection: the live app only ever links to these pages for a completed job
-(see src/ui/src/index.js and the pages that `href`/`navigate` to them). The legacy
-`/analysis/results/:jobId` page (superseded by `/analysis/results-v2/:jobId`, which
-every in-app link now points to) was removed (see #185 — it crashed with React error
-#31 because it rendered `synthesis.trade_offs` entries, which are objects per the
-current contract, directly as JSX children). `/analysis/results/:jobId` is now a
-redirect to `/analysis/results-v2/:jobId`, covered by
-`test_legacy_results_route_redirects_to_results_v2` below, so old bookmarks still
-work. The legacy `/analysis/report/:jobId` page (the earlier, orange-styled report)
-was removed the same way (see #356); `/analysis/report/:jobId` is now a redirect to
-`/analysis/results-v2/:jobId` too, covered by
-`test_legacy_report_route_redirects_to_results_v2` below. `/analysis/monitor/*` is
-excluded for the same reason as before (it is for in-flight jobs, not completed
-ones). `/analysis/patterns/:jobId` is exercised only with its required `?target=`
-query param, since every real link to that route supplies one
+(see src/ui/src/AppRoutes.js and the pages that `href`/`navigate` to them). The
+results page lives at `/analysis/results/:jobId`. Two older URLs redirect to it so
+bookmarks keep working, each covered below: `/analysis/results-v2/:jobId` (the
+page's name until its version suffix was dropped, #957) and `/analysis/report/:jobId`
+(the earlier, orange-styled report, removed in #356). The job-monitoring page
+(`/analysis/monitor/:jobId`) and the engine-analysis page were removed (#957); their
+URLs fall through to the dashboard. `/analysis/patterns/:jobId` is exercised only with
+its required `?target=` query param, since every real link to that route supplies one
 (src/ui/src/pages/PatternAnalysis.js reads `target` from `useSearchParams` with no
 default; a bare visit fetches `.../analysis/null` and 404s).
 """
@@ -23,10 +17,12 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page
 
+from src.report.deliverables import DELIVERABLES_DIR, FOLDER_FILENAMES
 from tests.e2e.pipeline import PipelineResult
 
 # The product UI is a developer helper; the customer deliverables are the HTML/PDF
@@ -39,8 +35,8 @@ from tests.e2e.pipeline import PipelineResult
 # `--fail-on-skip` run.
 pytestmark = pytest.mark.only_browser("chromium")
 
-# Mirrors the ENGINE_LABELS map used by the UI's results-v2 and engine-analysis pages
-# (src/ui/src/pages/AnalysisResults-02.js, src/ui/src/pages/EngineAnalysis.js) so this
+# Mirrors the ENGINE_LABELS map used by the UI's results page
+# (src/ui/src/pages/AnalysisResults.js) so this
 # test can assert the real, human-readable engine name rather than the raw contract id.
 ENGINE_LABELS = {
     "dynamodb": "DynamoDB",
@@ -104,7 +100,7 @@ def test_results_page_shows_the_ranked_engines(
 ) -> None:
     for r in all_runs:
         ev = _watch(page)
-        page.goto(f"{ui}/analysis/results-v2/{r.job_id}")
+        page.goto(f"{ui}/analysis/results/{r.job_id}")
         page.wait_for_load_state("networkidle")
         text = page.inner_text("body")
         assert "undefined" not in text and "NaN" not in text, r.db
@@ -118,17 +114,16 @@ def test_results_page_shows_the_ranked_engines(
         assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
 
 
-def test_legacy_results_route_redirects_to_results_v2(
+def test_old_results_v2_route_redirects_to_results(
     page: Page, ui: str, all_runs: list[PipelineResult]
 ) -> None:
-    """Old bookmarks/links to the retired `/analysis/results/:jobId` page (#185)
-    must land on the `/analysis/results-v2/:jobId` content instead of the blank,
-    crashed page it used to render."""
+    """Old bookmarks/links to `/analysis/results-v2/:jobId` (#957 dropped the
+    version suffix) must land on the `/analysis/results/:jobId` content."""
     for r in all_runs:
         ev = _watch(page)
-        page.goto(f"{ui}/analysis/results/{r.job_id}")
+        page.goto(f"{ui}/analysis/results-v2/{r.job_id}")
         page.wait_for_load_state("networkidle")
-        assert page.url.rstrip("/").endswith(f"/analysis/results-v2/{r.job_id}"), (
+        assert page.url.rstrip("/").endswith(f"/analysis/results/{r.job_id}"), (
             r.db,
             page.url,
         )
@@ -161,17 +156,17 @@ def test_assignments_page_recommends_the_ranked_engines(
         assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
 
 
-def test_legacy_report_route_redirects_to_results_v2(
+def test_legacy_report_route_redirects_to_results(
     page: Page, ui: str, all_runs: list[PipelineResult]
 ) -> None:
     """Old bookmarks/links to the retired `/analysis/report/:jobId` page (#356,
-    the earlier, orange-styled report) must land on the `/analysis/results-v2/:jobId`
+    the earlier, orange-styled report) must land on the `/analysis/results/:jobId`
     content instead of the now-removed page."""
     for r in all_runs:
         ev = _watch(page)
         page.goto(f"{ui}/analysis/report/{r.job_id}")
         page.wait_for_load_state("networkidle")
-        assert page.url.rstrip("/").endswith(f"/analysis/results-v2/{r.job_id}"), (
+        assert page.url.rstrip("/").endswith(f"/analysis/results/{r.job_id}"), (
             r.db,
             page.url,
         )
@@ -186,23 +181,22 @@ def test_legacy_report_route_redirects_to_results_v2(
         assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
 
 
-def test_engine_analysis_page_shows_per_engine_metrics(
-    page: Page, ui: str, all_runs: list[PipelineResult]
+@pytest.mark.parametrize("route", ["analysis/monitor", "analysis/engine-analysis"])
+def test_removed_job_pages_fall_through_to_the_dashboard(
+    page: Page, ui: str, all_runs: list[PipelineResult], route: str
 ) -> None:
-    for r in all_runs:
-        ev = _watch(page)
-        page.goto(f"{ui}/analysis/engine-analysis/{r.job_id}")
-        page.wait_for_load_state("networkidle")
-        text = page.inner_text("body")
-        assert "undefined" not in text and "NaN" not in text, r.db
-        assert f"Engine analysis: {r.db}" in text, (r.db, "engine analysis header missing")
-        assert "queries analyzed" in text, (r.db, "cross-engine summary missing")
-        assert _top_engine_label(r) in text, (
-            r.db,
-            "top-ranked engine missing",
-            _top_engine_label(r),
-        )
-        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+    """#957: the job-monitoring page (dead download buttons) and the engine-analysis
+    page (pre-assignment figures that contradicted the results page) are gone; their
+    URLs land on the dashboard instead of rendering either page."""
+    r = all_runs[0]
+    ev = _watch(page)
+    page.goto(f"{ui}/{route}/{r.job_id}")
+    page.wait_for_load_state("networkidle")
+    assert page.url.rstrip("/").endswith("/dashboard"), (route, page.url)
+    text = page.inner_text("body")
+    assert "Engine analysis:" not in text, route
+    assert "Download artifact" not in text and "Download logs" not in text, route
+    assert ev == {"console": [], "pageerror": [], "failed": []}, (route, ev)
 
 
 def test_pattern_analysis_page_renders_for_a_selected_engine(
@@ -252,7 +246,7 @@ def test_a_querys_trace_opens_from_the_routing_table(
     trace = _moved_query_trace(r)
 
     ev = _watch(page)
-    page.goto(f"{ui}/analysis/results-v2/{r.job_id}")
+    page.goto(f"{ui}/analysis/results/{r.job_id}")
     page.wait_for_load_state("networkidle")
     section = page.locator("#query-routing-section")
     section.get_by_role("table", name="Query routing").wait_for()
@@ -289,3 +283,99 @@ def test_a_querys_trace_opens_from_the_routing_table(
         assert "No later routing step changed this query." not in text
     assert "undefined" not in text and "NaN" not in text
     assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+
+
+def _decision_wave_stats(page: Page, r: PipelineResult) -> dict[str, str]:
+    """Each wave's headline as the decision report prints it, by wave number."""
+    page.goto(r.html("decision-report").resolve().as_uri())
+    return {
+        str(w.get_attribute("data-wave")): " ".join(
+            w.locator("[data-figure=wave-stats]").inner_text().split()
+        )
+        for w in page.locator("[data-wave]").all()
+    }
+
+
+def test_results_page_shows_the_reports_wave_plan(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    """#957: the results page's migration roadmap shows the same waves as the
+    decision report (and so the PDF and the engineering report), with the same
+    headline for each wave, read from report.json."""
+    for r in all_runs:
+        expected = _decision_wave_stats(page, r)
+        assert expected, (r.db, "the decision report shows no waves")
+        report = json.loads((r.artifact_root / r.report["report"]).read_text())
+        gates = {str(w["wave"]): w.get("gate") or "" for w in report["migration_waves"]}
+        ev = _watch(page)
+        page.goto(f"{ui}/analysis/results/{r.job_id}")
+        page.wait_for_load_state("networkidle")
+        section = page.locator("#migration-roadmap-section")
+        section.wait_for()
+        cards = section.locator("[data-wave]").all()
+        shown = {
+            str(c.get_attribute("data-wave")): " ".join(
+                c.locator("[data-figure=wave-stats]").inner_text().split()
+            )
+            for c in cards
+        }
+        assert shown == expected, r.db
+        for c in cards:
+            n = str(c.get_attribute("data-wave"))
+            if gates[n]:
+                gate = c.locator("[data-figure=wave-gate]").inner_text()
+                assert gate == f"Gate before the next wave: {gates[n]}", (r.db, n)
+        count = report["facts"]["migration_wave_count"]
+        assert f"Migration roadmap ({count} waves)" in section.inner_text(), r.db
+        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+
+
+def test_results_page_downloads_the_deliverables_folder(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    """#957: the results page's download panel lists the job's deliverables/
+    folder in the folder definition's order and downloads each file as it is on
+    disk."""
+    for r in all_runs:
+        folder = r.job_dir() / DELIVERABLES_DIR
+        expected = [name for name in FOLDER_FILENAMES if (folder / name).is_file()]
+        assert "assessment.pdf" in expected and "index.md" in expected, (r.db, expected)
+        ev = _watch(page)
+        page.goto(f"{ui}/analysis/results/{r.job_id}")
+        page.wait_for_load_state("networkidle")
+        section = page.locator("#deliverables-section")
+        rows = section.locator("[data-deliverable]")
+        rows.first.wait_for()
+        assert [x.get_attribute("data-deliverable") for x in rows.all()] == expected, r.db
+        for name in ("assessment.pdf", "engineering-report.md", "index.md"):
+            with page.expect_download() as info:
+                section.get_by_role("link", name=f"Download {name}").click()
+            download = info.value
+            assert download.suggested_filename == name, (r.db, name)
+            assert Path(download.path()).read_bytes() == (folder / name).read_bytes(), (r.db, name)
+        # A download ends its navigation, which the browser reports as a failed
+        # request for exactly that file; anything else failing is a real error.
+        downloads = {f"{r.job_id}/deliverables/{n}" for n in expected}
+        ev["failed"] = [u for u in ev["failed"] if u.split("/assessments/", 1)[-1] not in downloads]
+        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+
+
+def test_ui_shows_only_the_product_name(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    """#957: no page names "ATX", "AWS Transform" or "transform"; the header says
+    "Database Modernizer Assessment Tool"."""
+    r = all_runs[0]
+    for path in (
+        "/dashboard",
+        "/analysis/create",
+        f"/analysis/monitor/summary/{r.job_id}",
+        f"/analysis/results/{r.job_id}",
+        "/settings",
+    ):
+        page.goto(f"{ui}{path}")
+        page.wait_for_load_state("networkidle")
+        text = page.inner_text("body")
+        assert not re.search(r"\bATX\b|AWS\s+Transform|transform", text, re.IGNORECASE), path
+        assert "Database Modernizer Assessment Tool" in text, path
+        assert page.title() == "Database Modernizer Assessment Tool", path

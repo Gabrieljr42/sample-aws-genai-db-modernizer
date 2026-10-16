@@ -1,7 +1,7 @@
 /**
  * #157 review, S1: Aurora's '__seq_scan__' sentinel is script-internal and
  * must never reach the reader as-is, in either the HTML export's
- * pattern-detail modal or the live Results page (AnalysisResults-02.js's
+ * pattern-detail modal or the live Results page (AnalysisResults.js's
  * auroraIndexUsedDisplay -- same rule, kept in parity by hand per this
  * file's usual note).
  *

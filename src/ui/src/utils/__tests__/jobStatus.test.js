@@ -14,7 +14,7 @@ import {
 // lower-case variants) must resolve to a real Cloudscape status type and a
 // translated label, never the generic "info" fallback or a raw/untranslated
 // key (#383, #518 round 1).
-describe('jobStatus (shared by Dashboard.js and JobMonitoring.js)', () => {
+describe('jobStatus (shared by the Dashboard and its action builder)', () => {
   let i18n;
 
   beforeAll(async () => {
@@ -97,7 +97,7 @@ describe('jobStatus (shared by Dashboard.js and JobMonitoring.js)', () => {
   // #526 round 1 review: cancel_assessment's response status field can't
   // distinguish a job this call just cancelled from one that was already
   // CANCELLED before the call -- both come back with status "CANCELLED".
-  // Dashboard.js and JobMonitoring.js read the message instead to decide
+  // Dashboard.js reads the message instead to decide
   // whether to show a false "has been cancelled" success message.
   describe('isAlreadyFinishedMessage (#526 round 1 review)', () => {
     it.each([

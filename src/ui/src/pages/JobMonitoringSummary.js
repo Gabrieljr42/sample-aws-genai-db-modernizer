@@ -14,16 +14,10 @@ import Box from "@cloudscape-design/components/box";
 import ColumnLayout from "@cloudscape-design/components/column-layout";
 import SideNavigation from "@cloudscape-design/components/side-navigation";
 import Flashbar from "@cloudscape-design/components/flashbar";
-import StatusIndicator from "@cloudscape-design/components/status-indicator";
 import Badge from "@cloudscape-design/components/badge";
 import ProgressBar from "@cloudscape-design/components/progress-bar";
 import Spinner from "@cloudscape-design/components/spinner";
 import Alert from "@cloudscape-design/components/alert";
-import ExpandableSection from "@cloudscape-design/components/expandable-section";
-import Select from "@cloudscape-design/components/select";
-import CodeEditor from "@cloudscape-design/components/code-editor";
-import { codeEditorI18nStrings } from "../utils/codeEditorI18n";
-import Modal from "@cloudscape-design/components/modal";
 
 
 
@@ -31,8 +25,8 @@ import Modal from "@cloudscape-design/components/modal";
 import { SideNavigationConfigurations, ApiConfigurations } from "../config/GlobalConfigurations";
 import AppHeader from "../components/AppHeader";
 import ApiManager from "../classes/ApiManager";
-import ProgressState02 from "../components/ProgressState-02";
-import ChartSankey from "../components/ChartSankey-01";
+import ProgressState from "../components/ProgressState";
+import ChartSankey from "../components/ChartSankey";
 import { getCacheOverlay, addCacheOverlayNode } from "../utils/cacheLayer";
 
 
@@ -102,20 +96,8 @@ const JobMonitoringSummaryPage = memo(() => {
   // show ElastiCache as a node fed by its owner engines' flows.
   const [cacheOverlay, setCacheOverlay] = useState(null);
 
-  //-- Agent filter for artifacts
-  const [selectedArtifact, setSelectedArtifact] = useState(null);
-  const [artifactContent, setArtifactContent] = useState('Loading artifact...');
-  const [artifactLoading, setArtifactLoading] = useState(false);
-
-  //-- Expanded artifact modal state
-  const [showExpandedArtifact, setShowExpandedArtifact] = useState(false);
-
   //-- Auto-dismiss complete alert
   const [completeDismissed, setCompleteDismissed] = useState(false);
-
-  //-- Ace editor state
-  const [ace, setAce] = useState(null);
-  const [aceLoading, setAceLoading] = useState(true);
 
   //-- Use ref for last update timestamp (doesn't need re-render)
   const lastUpdateTimestamp = useRef(null);
@@ -137,73 +119,7 @@ const JobMonitoringSummaryPage = memo(() => {
   }, []);
 
 
-  //##-- Artifact handlers
-  const handleArtifactChange = useCallback(({ detail }) => {
-    setSelectedArtifact(detail.selectedOption);
-  }, []);
-
-  const handleDownloadLogs = useCallback(() => {
-    console.log('Downloading artifact for job:', jobId);
-    // TODO: Implement download artifact functionality
-  }, [jobId]);
-
-  const handleCopyLogs = useCallback(() => {
-    console.log('Copying artifact to clipboard');
-    if (artifactContent) {
-      navigator.clipboard.writeText(artifactContent);
-    }
-  }, [artifactContent]);
-
-  const handleExpandArtifact = useCallback(() => {
-    setShowExpandedArtifact(true);
-  }, []);
-
-  const handleCloseExpandedArtifact = useCallback(() => {
-    setShowExpandedArtifact(false);
-  }, []);
-
-
-
-
   //--|#######################| Gather Information Section  |#######################
-
-  //##-- Fetch artifact content
-  const fetchArtifactContent = useCallback(async (artifactPath) => {
-    if (!artifactPath) return;
-
-    setArtifactLoading(true);
-    setArtifactContent('Loading artifact...');
-
-    try {
-      const apiManager = new ApiManager();
-      const apiCalls = [
-        {
-          id: 'get-artifact',
-          path: artifactPath,
-          method: 'GET',
-          params: {}
-        }
-      ];
-
-      const results = await apiManager.execute(apiCalls);
-      console.log('Artifact data:', results);
-
-      if (results['get-artifact']?.error) {
-        setArtifactContent('No artifacts found.');
-      } else if (results['get-artifact']?.success) {
-        // Format the artifact content as JSON
-        const content = JSON.stringify(results['get-artifact'], null, 2); // nosemgrep: no-stringify-keys - display only, not a React key prop
-        setArtifactContent(content);
-      } else {
-        setArtifactContent('No artifacts found.');
-      }
-    } catch (error) {
-      console.error('Error fetching artifact:', error);
-      setArtifactContent('No artifacts found.');
-    } finally {
-      setArtifactLoading(false);
-    }
-  }, []);
 
   //##-- Gather job information
   const gatherJobInformation = useCallback(async () => {
@@ -449,29 +365,6 @@ const JobMonitoringSummaryPage = memo(() => {
   }, [refreshInterval, gatherJobInformation]);
 
 
-  //##-- Fetch artifact when selection changes
-  useEffect(() => {
-    if (selectedArtifact?.path) {
-      fetchArtifactContent(selectedArtifact.path);
-    }
-  }, [selectedArtifact, fetchArtifactContent]);
-
-
-  //##-- Load Ace editor
-  useEffect(() => {
-    const loadAce = async () => {
-      try {
-        const ace = await import('ace-builds');
-        await import('ace-builds/webpack-resolver');
-        setAce(ace);
-      } catch (error) {
-        console.error('Error loading Ace editor:', error);
-      } finally {
-        setAceLoading(false);
-      }
-    };
-    loadAce();
-  }, []);
 
 
 
@@ -677,37 +570,6 @@ const JobMonitoringSummaryPage = memo(() => {
   }, [assignmentDistribution]);
 
 
-  //--## Artifact options for combobox
-  const artifactOptions = useMemo(() => {
-    const staticArtifacts = [
-      { label: "Collector", value: "collector", path: `assessments/${jobId}/collector` },
-      { label: "Referee Triage", value: "triage", path: `assessments/${jobId}/triage` },
-      { label: "Schema Design", value: "schema-design", path: `assessments/${jobId}/schema-designs` }
-    ];
-
-    const dynamicArtifacts = [];
-    if (jobData?.synthesis?.ranking) {
-      jobData.synthesis.ranking.forEach(item => {
-        dynamicArtifacts.push({
-          label: `Analysis (${item.target})`,
-          value: `analysis-${item.target}`,
-          path: `assessments/${jobId}/analysis/${item.target}`
-        });
-      });
-    }
-
-    return [...staticArtifacts, ...dynamicArtifacts];
-  }, [jobId, jobData]);
-
-
-  //##-- Set default artifact selection
-  useEffect(() => {
-    if (artifactOptions.length > 0 && !selectedArtifact) {
-      setSelectedArtifact(artifactOptions[0]); // Select "Collector" by default
-    }
-  }, [artifactOptions, selectedArtifact]);
-
-
   //--## Generate Sankey chart data from ranking
   const sankeyData = useMemo(() => {
     if (ranking.length === 0) {
@@ -841,7 +703,7 @@ const JobMonitoringSummaryPage = memo(() => {
                 <SpaceBetween direction="horizontal" size="xs">
                   <Button iconName="refresh" variant="normal" onClick={handleRefresh} loading={loading} />
                   {isJobComplete && (
-                    <Button variant="primary" href={`/analysis/results-v2/${jobId}`}>
+                    <Button variant="primary" href={`/analysis/results/${jobId}`}>
                       {t("job-summary.actions.view-results")}
                     </Button>
                   )}
@@ -853,7 +715,7 @@ const JobMonitoringSummaryPage = memo(() => {
 
             <Container>
               {jobData && (
-                <ProgressState02
+                <ProgressState
                   stepsList={pipelineStepsList}
                   stepCurrent={currentPipelineStep}
                   humanStages={humanStages}
@@ -967,85 +829,6 @@ const JobMonitoringSummaryPage = memo(() => {
               </div>
             )}
 
-            {/* Developer tools - raw artifacts (hidden for now, kept in code) */}
-            {false && <Container
-              header={
-                <Header
-                  actions={
-                    <SpaceBetween direction="horizontal" size="xs">
-                      <Select
-                        selectedOption={selectedArtifact}
-                        onChange={handleArtifactChange}
-                        options={artifactOptions}
-                        placeholder={t('job-monitoring.artifacts.select-placeholder')}
-                        filteringType="auto"
-                      />
-                      <Button
-                        iconName="download"
-                        variant="normal"
-                        onClick={handleDownloadLogs}
-                      >
-                        {t('job-monitoring.artifacts.download-button')}
-                      </Button>
-                    </SpaceBetween>
-                  }
-                  description={t('job-monitoring.artifacts.description')}
-                  variant="h2"
-                >
-                  {t('job-monitoring-summary.artifacts.title')}
-                </Header>
-              }
-
-            >
-              <ExpandableSection
-                headerText={t('job-monitoring.artifacts.view-section')}
-                variant="footer"
-                defaultExpanded={false}
-
-              >
-                <SpaceBetween size="xs">
-                  <SpaceBetween direction="horizontal" size="xs">
-                    <Button
-                      iconName="expand"
-                      variant="normal"
-                      onClick={handleExpandArtifact}
-                    >
-                      {t('job-monitoring.artifacts.expand-button')}
-                    </Button>
-                    <Button
-                      iconName="copy"
-                      variant="normal"
-                      onClick={handleCopyLogs}
-                    >
-                      {t('job-monitoring.artifacts.copy-button')}
-                    </Button>
-                  </SpaceBetween>
-                  {aceLoading ? (
-                    <Box textAlign="center" padding="l">
-                      <StatusIndicator type="loading">{t('job-monitoring.artifacts.loading-editor')}</StatusIndicator>
-                    </Box>
-                  ) : (
-                    <CodeEditor
-                      ace={ace}
-                      language="json"
-                      value={artifactContent}
-                      preferences={{
-                        wrapLines: false,
-                        theme: 'cloud_editor_dark'
-                      }}
-                      editorContentHeight={800}
-                      i18nStrings={codeEditorI18nStrings(t, {
-                        loadingState: t('job-monitoring.artifacts.code-editor.loading'),
-                        errorState: t('job-monitoring.artifacts.code-editor.error'),
-                        errorStateRecovery: t('job-monitoring.artifacts.code-editor.error-recovery')
-                      })}
-                      loading={artifactLoading}
-                      readOnly
-                    />
-                  )}
-                </SpaceBetween>
-              </ExpandableSection>
-            </Container>}
 
           </SpaceBetween>
         }
@@ -1053,37 +836,6 @@ const JobMonitoringSummaryPage = memo(() => {
         toolsHide
       />
 
-      <Modal
-        visible={showExpandedArtifact}
-        onDismiss={handleCloseExpandedArtifact}
-        header={`Artifact: ${selectedArtifact?.label || 'Unknown'}`}
-        closeAriaLabel="Close modal"
-        size="max"
-      >
-        {aceLoading ? (
-          <Box textAlign="center" padding="xxl">
-            <StatusIndicator type="loading">{t('job-monitoring.artifacts.loading-editor')}</StatusIndicator>
-          </Box>
-        ) : (
-          <CodeEditor
-            ace={ace}
-            language="json"
-            value={artifactContent}
-            preferences={{
-              wrapLines: false,
-              theme: 'cloud_editor_dark'
-            }}
-            editorContentHeight={600}
-            i18nStrings={codeEditorI18nStrings(t, {
-              loadingState: t('job-monitoring.artifacts.code-editor.loading'),
-              errorState: t('job-monitoring.artifacts.code-editor.error'),
-              errorStateRecovery: t('job-monitoring.artifacts.code-editor.error-recovery')
-            })}
-            loading={artifactLoading}
-            readOnly
-          />
-        )}
-      </Modal>
     </>
   );
 });

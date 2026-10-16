@@ -2,14 +2,14 @@ import Box from "@cloudscape-design/components/box";
 
 export const LayoutConfigurations =
 {
-      "application-title": "Database Modernizer"
+      "application-title": "Database Modernizer Assessment Tool"
 
 };
 
 export const SideNavigationConfigurations = {
   header: {
     href: "/",
-    text: "Database Modernizer",
+    text: "Database Modernizer Assessment Tool",
   },
   items: [
     {
@@ -28,7 +28,7 @@ export const SideNavigationConfigurations = {
       type: "link",
     },
     {
-      href: "/settings/s",
+      href: "/settings",
       text: "Settings",
       type: "link",
     },

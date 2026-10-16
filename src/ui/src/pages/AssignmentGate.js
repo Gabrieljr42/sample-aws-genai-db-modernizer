@@ -31,7 +31,7 @@ import { SideNavigationConfigurations } from "../config/GlobalConfigurations";
 import AppHeader from "../components/AppHeader";
 import SummaryFallbackNotice from "../components/SummaryFallbackNotice";
 import ApiManager from "../classes/ApiManager";
-import ChartSankey from "../components/ChartSankey-01";
+import ChartSankey from "../components/ChartSankey";
 import {
   buildAssignmentSummary,
   countTieUnresolvedQueries,

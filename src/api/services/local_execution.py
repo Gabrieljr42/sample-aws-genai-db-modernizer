@@ -11,6 +11,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from src.report.deliverables import DELIVERABLES_DIR, FOLDER_FILENAMES
+
 logger = logging.getLogger(__name__)
 
 # How long after a file under a job folder (or its .meta marker) was last
@@ -418,6 +420,51 @@ class LocalExecutionService:
         if os.path.realpath(meta_file) != expected:
             raise ValueError(f"path escapes the artifact root: {job_id!r}")
         return expected
+
+    def deliverables_dir(self, database_name: str, job_id: str) -> str | None:
+        """The real path of ``{database_name}/{job_id}/deliverables/`` (#957), or
+        ``None`` when the job has none.
+
+        The job folder resolves through ``_resolve_job_dir`` (no symlinks, the
+        exact literal path under the artifact root). Raises ``ValueError`` like
+        ``_resolve_job_dir`` when the job path escapes the root. A symlinked
+        deliverables folder is caught per file by ``deliverable_file``: no file
+        under it resolves inside ``<job dir>/deliverables``.
+        """
+        root = self._root_realpath() + os.sep
+        job_dir = self._resolve_job_dir(database_name, job_id)
+        folder = os.path.join(job_dir, DELIVERABLES_DIR)
+        # An absolute or traversing database name makes os.path.join drop or
+        # leave the root on both sides of _resolve_job_dir's comparison; the
+        # folder must still sit under the artifact root itself.
+        if not os.path.realpath(folder).startswith(root):
+            return None
+        return folder if os.path.isdir(folder) else None
+
+    def deliverable_file(self, database_name: str, job_id: str, filename: str) -> str | None:
+        """The real path of one deliverables-folder file the UI may download
+        (#957), or ``None``.
+
+        Only a name in ``FOLDER_FILENAMES`` (the folder's own definition,
+        src/report/deliverables.py) is served, and the path is built from that
+        constant, never from the request. The file must be a regular file, not
+        a symlink, whose real path stays inside the job's deliverables folder
+        and inside the artifact root.
+        """
+        name = next((f for f in FOLDER_FILENAMES if f == filename), None)
+        if name is None:
+            return None
+        folder = self.deliverables_dir(database_name, job_id)
+        if folder is None:
+            return None
+        root = self._root_realpath() + os.sep
+        candidate = os.path.join(folder, name)
+        full_path = os.path.realpath(candidate)
+        if not full_path.startswith(root) or not full_path.startswith(folder + os.sep):
+            return None
+        if os.path.islink(candidate) or not os.path.isfile(full_path):
+            return None
+        return full_path
 
     def job_status(self, database_name: str, job_id: str) -> str | None:
         """Status of exactly the job at ``{database_name}/{job_id}``.

@@ -301,7 +301,7 @@ const PatternAnalysisPage = memo(() => {
   const engineMetrics = useMemo(() => {
     if (!target || !analysisData) return null;
 
-    // Calculate stats from analysis data (similar to useEngineAnalysis hook)
+    // Calculate stats from analysis data
     const recs = analysisData.table_recommendations || [];
     const scores = recs.map(r => r.confidence_score);
     const avgConfidence = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;

@@ -445,15 +445,15 @@ describe('resolveCostBreakdown (#358 Results page "Cost breakdown" + "Projected 
 
 describe('Results page access-patterns captions pluralization (#361 review: _one/_other, not a bare key)', () => {
   test('"of N queries" is singular for count 1, plural otherwise', () => {
-    expect(t('analysis-results-v2.executive-summary.access-patterns-of-queries', { count: 1 })).toBe('of 1 query');
-    expect(t('analysis-results-v2.executive-summary.access-patterns-of-queries', { count: 3 })).toBe('of 3 queries');
+    expect(t('analysis-results.executive-summary.access-patterns-of-queries', { count: 1 })).toBe('of 1 query');
+    expect(t('analysis-results.executive-summary.access-patterns-of-queries', { count: 3 })).toBe('of 3 queries');
   });
 
   test('"+N cache-layer pattern(s)" is singular for count 1, plural otherwise', () => {
-    expect(t('analysis-results-v2.executive-summary.cache-patterns-note', { count: 1 })).toBe(
+    expect(t('analysis-results.executive-summary.cache-patterns-note', { count: 1 })).toBe(
       '+1 cache-layer pattern (not counted above)',
     );
-    expect(t('analysis-results-v2.executive-summary.cache-patterns-note', { count: 13 })).toBe(
+    expect(t('analysis-results.executive-summary.cache-patterns-note', { count: 13 })).toBe(
       '+13 cache-layer patterns (not counted above)',
     );
   });

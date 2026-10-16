@@ -10,16 +10,8 @@
  * `src/report/templates/analysis_report.js` and shipped with every job as
  * `*_analysis-report_*.html` -- also the UI's "Download Report" button), the
  * approval gate (`AssignmentGate.js`, via its i18n description), and the live
- * React results page's query-journey detail (`AnalysisResults-02.js`), which
+ * React results page's query-journey detail (`AnalysisResults.js`), which
  * imports and renders the shared constant directly.
- *
- * `ReportHtmlExport.js`'s `buildReportHtml` is NOT exercised here: verified it
- * has had no live caller since #363 ("chore(ui): remove the legacy report
- * page", which deleted `ReportResults.js`, its only importer -- only its own
- * test files and `escapeHtml.js`'s unrelated re-export name it now). It is
- * dead code, left alone rather than fixed, since fixing a document nothing
- * renders would not close the actual gap (the live `ExportReport.js` export
- * never stating the definition).
  */
 import { generateHTMLReport } from '../ExportReport';
 import { WORKLOAD_FIT_DEFINITION } from '../workloadFitLabels';
@@ -96,12 +88,12 @@ describe('Approval gate states the definition (AssignmentGate.js, via i18n)', ()
   });
 });
 
-describe('React results page states the definition (AnalysisResults-02.js)', () => {
+describe('React results page states the definition (AnalysisResults.js)', () => {
   it('imports and renders the shared workload-fit definition', async () => {
     const fs = require('fs');
     const path = require('path');
     const source = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'pages', 'AnalysisResults-02.js'),
+      path.join(__dirname, '..', '..', 'pages', 'AnalysisResults.js'),
       'utf8',
     );
     expect(source).toMatch(/import\s*{\s*WORKLOAD_FIT_DEFINITION\s*}\s*from\s*"\.\.\/utils\/workloadFitLabels"/);

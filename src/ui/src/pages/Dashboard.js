@@ -268,21 +268,7 @@ const ComponentPage = memo(() => {
 
       // Open results page in new tab
       const jobId = selectedItems[0].jobId;
-      window.open(`/analysis/results-v2/${jobId}`, '_blank');
-    } else if (detail.id === 'view-analysis') {
-      if (selectedItems.length === 0) {
-        addFlashbarMessage({
-          type: 'warning',
-          header: 'No Selection',
-          content: 'Please select an analysis to view engine analysis',
-          dismissible: true,
-          id: `warning-${Date.now()}`
-        });
-        return;
-      }
-
-      const jobId = selectedItems[0].jobId;
-      window.open(`/analysis/engine-analysis/${jobId}`, '_blank');
+      window.open(`/analysis/results/${jobId}`, '_blank');
     } else if (detail.id === 'cancel') {
       if (selectedItems.length === 0) {
         addFlashbarMessage({
