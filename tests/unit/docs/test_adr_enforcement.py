@@ -394,6 +394,19 @@ def test_adr_031_is_checked() -> None:
     ]
 
 
+def test_adr_008_is_checked() -> None:
+    """Contract versioning (#970) numbers its decisions, so the rule covers it."""
+    assert "ADR-008-contract-versioning.md" in [p.name for p in _checked_adrs()]
+
+
+def test_adr_008_describes_no_code_that_does_not_exist() -> None:
+    """The ADR once described adapters and a version detector nobody built (#970)."""
+    text = (ADR_DIR / "ADR-008-contract-versioning.md").read_text()
+    assert "```python\n# src/contracts/adapters/" not in text
+    assert "def detect_contract_version" not in text
+    assert "def load_checkpoint" not in text
+
+
 @pytest.mark.parametrize("adr", _checked_adrs(), ids=lambda p: p.name)
 def test_every_numbered_decision_names_an_existing_guard(adr: Path) -> None:
     text = adr.read_text()
