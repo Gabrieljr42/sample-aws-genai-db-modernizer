@@ -220,6 +220,21 @@ This section is a pointer, not a restatement.
 - Explain drift with the [routing snapshot](tests/e2e/routing_snapshot.py),
   and regenerate it on rebase. Never hand-merge it.
 
+## Before asking for review
+
+Self-review checklist, from findings that recur in review. Each item says what to do, then why.
+
+1. Every new test fails on main. Run it against `origin/main`'s code; the reviewer will, and a test that passes there guards nothing.
+2. Revert each part of the fix and check that some test fails. If none fails, that part is untested.
+3. Cover the negative and edge cases: what must not change, ties, empty input, ambiguity. Bugs hide where the happy path does not look.
+4. The PR body states only what this branch shows: its own test counts, timings and drift. "Covered by existing tests" names the tests. Numbers from another branch mislead the reviewer.
+5. Never bend a sample, fixture or expectation to keep a result. Fix the cause, or change the expectation with a per-query explanation (see [Routing changes](#routing-changes)).
+6. After renaming an id, field or capability, old saved artifacts must still load (map the legacy value), with a test that loads an old file. Saved jobs outlive the code that wrote them.
+7. Check the change against every ADR decision it touches, not just the one in the issue. ADR text must never claim more than a guard enforces.
+8. Make timing and resource checks relative (a ratio against a same-process reference), so local runs match CI.
+9. Run `./ci/pre_merge.sh` before pushing: it checks conflicts, contract versions, lint, tests and the `needs_llm_run` verdict in one pass (see [ci/README.md](ci/README.md)).
+10. Pass the source dialect or engine wherever SQL is parsed. A default dialect silently misparses other engines' syntax.
+
 ## Conventions
 
 - Issues use the templates in `.github/ISSUE_TEMPLATE/`: `[Bug] ...`
