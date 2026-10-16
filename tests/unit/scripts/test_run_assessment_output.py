@@ -360,9 +360,13 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # ``SELECT FOUND_ROWS()`` loses the 15-point Aurora penalty and its first
     # assignment moves from DocumentDB back to Aurora MySQL -- documentdb -1,
     # aurora_mysql +1.
+    # #893: with one range definition, DynamoDB's range-query pattern reads three
+    # WooCommerce report queries (SUM/COUNT over a post_date range, ORDER BY),
+    # which lifts its table fit, and wp_woocommerce_order_itemmeta's other 5
+    # queries leave a three-way tie for DynamoDB -- dynamodb +5, aurora_mysql -5.
     assert rc["before_distribution"] == {
-        "dynamodb": 37,
-        "aurora_mysql": 63,
+        "dynamodb": 42,
+        "aurora_mysql": 58,
         "documentdb": 7,
     }
     assert sum(rc["before_distribution"].values()) == sum(rc["after_distribution"].values())

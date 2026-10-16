@@ -37,6 +37,7 @@ from src.tools.sql.regex_facts import (
     LITERAL_PREFIX_LIKE_RE,
     ORDER_BY_RE,
     PATTERN_PREDICATE_RE,
+    RANGE_PREDICATE_RE,
     SELECT_WORD_RE,
 )
 
@@ -96,10 +97,6 @@ _RIGHT_OPERAND_RE = re.compile(r"^\s*([A-Za-z_$@:?0-9(][\w$@:.?]*)")
 # parameter ($1, ?, @p, :name) or a number never matches.
 _COLUMN_RE = re.compile(r"^[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*$")
 _NOT_A_COLUMN = frozenset({"null", "true", "false", "not", "and", "or"})
-# <, >, <=, >= or BETWEEN -- but not <>, ->, ->>, @>, <@, <<, >>, <=>.
-_RANGE_PREDICATE_RE = re.compile(
-    r"\bBETWEEN\b|(?<![<>=!@\-])(?:<=|>=|<|>)(?![<>=@])", re.IGNORECASE
-)
 
 # ---------------------------------------------------------------------------
 # Primary-key-ordered reads (maintainer decision on #692)
@@ -644,7 +641,7 @@ def single_table_access_shape(
     if pattern_match and not LITERAL_PREFIX_LIKE_RE.search(with_idents):
         return RELATIONAL
     keyed = _has_key_predicate(where)
-    ranged = pattern_match or bool(_RANGE_PREDICATE_RE.search(where))
+    ranged = pattern_match or bool(RANGE_PREDICATE_RE.search(where))
     if query_type in {"UPDATE", "DELETE"}:
         return CRUD if keyed and not ranged else RELATIONAL
     if query_type == "SELECT" and not keyed:

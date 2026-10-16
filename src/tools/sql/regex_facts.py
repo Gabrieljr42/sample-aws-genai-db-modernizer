@@ -53,7 +53,9 @@ count:
 - ``json_access``: a ``json_*``/``jsonb_*`` call, ``->``/``->>``, ``#>``,
   ``::json``/``::jsonb``, ``@> '``, ``OPENJSON(``, ``FOR JSON``, ``IS JSON``;
 - ``update_target_join``: ``UPDATE``, then ``JOIN`` before the first ``SET`` with no
-  ``FROM`` between them.
+  ``FROM`` between them;
+- ``range_predicate`` (the fallback of the access facts' ranges): ``BETWEEN``,
+  ``<``, ``<=``, ``>``, ``>=`` (not ``<>``, ``->``, ``@>`` or ``<@``).
 """
 
 from __future__ import annotations
@@ -120,6 +122,9 @@ TIMESTAMP_COLUMN_NAMES = (
 )
 TIMESTAMP_COLUMN_NAME_RE = re.compile(rf"(?:{TIMESTAMP_COLUMN_NAMES})", re.IGNORECASE)
 _TIMESTAMP_COLUMN_RE = re.compile(rf"\b(?:{TIMESTAMP_COLUMN_NAMES})\b", re.IGNORECASE)
+# <, >, <=, >= or BETWEEN -- but not <>, ->, ->>, @>, <@, <<, >>, <=> (the range
+# fallback, and ``query_shape``'s shape check on comment- and literal-stripped text).
+RANGE_PREDICATE_RE = re.compile(r"\bBETWEEN\b|(?<![<>=!@\-])(?:<=|>=|<|>)(?![<>=@])", re.IGNORECASE)
 _JSON_ACCESS_RE = re.compile(
     r"\bjsonb?_\w+\s*\(|->>?|#>|::jsonb?\b|@>\s*'|\bopenjson\s*\(|\bfor\s+json\b|\bis\s+json\b",
     re.IGNORECASE,
@@ -449,3 +454,8 @@ def regex_update_target_join(query_text: str) -> bool:
         return False
     head = text[update.end() : set_.start()]
     return bool(_JOIN_RE.search(head)) and not _FROM_RE.search(head)
+
+
+def regex_range_predicate(query_text: str) -> bool:
+    """``BETWEEN`` or a ``<``/``<=``/``>``/``>=`` comparison."""
+    return bool(RANGE_PREDICATE_RE.search(query_text or ""))
