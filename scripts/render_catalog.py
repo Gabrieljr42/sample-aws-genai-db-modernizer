@@ -197,6 +197,10 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
                 f"Scan threshold: {t.min_calls_per_second:g} calls per second and "
                 f"{t.min_table_rows:,} table rows, both reached. {md_text(t.why)}"
             )
+        if p.write_pattern:
+            out.append(
+                "Writes only: no parity anchor borrows from it and no access class lists it."
+            )
         out.append("")
         quiet: list[str] = []
         future: list[str] = []
@@ -205,13 +209,17 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
             if support is None:
                 out.append(f"- {md_text(e.display_name)}: missing")
                 continue
-            if support.kind == "unscored":
+            if support.kind == "unscored" and support.class_score is None:
                 quiet.append(e.display_name)
                 continue
             if support.kind == "future":
                 future.append(e.display_name)
                 continue
             ref = f" ({support.catalog_id})" if support.catalog_id else ""
+            if support.class_score is not None:
+                ref += f", class score {support.class_score}"
+                if support.parity_anchor:
+                    ref += f" (parity anchor, from `{support.parity_anchor}`)"
             line = (
                 f"- {md_text(e.display_name)}, {_cell(support).replace('**', '')}{ref}: "
                 f"{md_text(support.why)}"

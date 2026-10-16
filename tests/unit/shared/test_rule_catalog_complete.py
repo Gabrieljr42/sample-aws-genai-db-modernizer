@@ -180,6 +180,12 @@ ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({"AURORA_ENGINES", "EXACT_TIE_RULE_REASON"}),
         _ROUTING + ": the heterogeneous Aurora choice",
     ),
+    "src/tools/analysis/aurora_common_analysis_tools.py": (
+        frozenset({"AURORA_SHARED_FEATURES", "AURORA_SHARED_FEATURE_BONUSES"}),
+        _ROUTING + ": the bonus for a SQL feature both Aurora engines have, one table both apply "
+        "(#920, was one row per engine in each engine's code); into the catalog at the same "
+        "values with the other in-code bonuses (#921)",
+    ),
     "src/agents/referee/capability_registry.py": (
         frozenset({"ENGINE_CAPABILITIES", "SIGNAL_TO_CAPABILITY", "CAPABILITY_FACTS"}),
         _ROUTING + ": the hard capability gate (collapses into the pattern files' supported flags);"
@@ -468,8 +474,8 @@ _INLINE_DETECTION = (
 # constant or a docstring), counted per file. path: (count, why)
 INLINE_PATTERN_LITERALS: dict[str, tuple[int, str]] = {
     "src/tools/analysis/aurora_common_analysis_tools.py": (2, _INLINE_DETECTION),
-    "src/tools/analysis/aurora_mysql_analysis_tools.py": (14, _INLINE_DETECTION),
-    "src/tools/analysis/aurora_pg_analysis_tools.py": (13, _INLINE_DETECTION),
+    "src/tools/analysis/aurora_mysql_analysis_tools.py": (9, _INLINE_DETECTION),
+    "src/tools/analysis/aurora_pg_analysis_tools.py": (7, _INLINE_DETECTION),
     "src/tools/analysis/documentdb_analysis_tools.py": (9, _INLINE_DETECTION),
     "src/tools/analysis/dynamodb_analysis_tools.py": (14, _INLINE_DETECTION),
     "src/tools/analysis/opensearch_analysis_tools.py": (13, _INLINE_DETECTION),

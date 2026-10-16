@@ -9,6 +9,9 @@ penalty = 0
 # Detection (#920): a write at 0.5 calls/s or more whose access-pattern class is a key lookup
 # or a key-scoped write (an INSERT, or an UPDATE/DELETE pinning a key). A frequent write
 # alone is a call rate, not an access pattern.
+# Writes only: no parity anchor borrows from it and no access class lists it (#936).
+write_pattern = true
+
 [engines.dynamodb]
 kind = "fit"
 supported = true

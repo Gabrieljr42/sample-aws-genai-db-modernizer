@@ -442,6 +442,10 @@ class TestConstantsAreTheCatalogsView:
             ("aurora-pg-05", "full-text-native", 75),
             ("aurora-pg-06", "lateral-join", 85),
             ("aurora-pg-07", "upsert-conflict", 80),
+            # #920: the SQL features Aurora MySQL has too, each with its own fit.
+            ("aurora-pg-08", "stored-routine", 70),
+            ("aurora-pg-09", "multi-table-update", 75),
+            ("aurora-pg-10", "group-concat-pivot", 75),
         ]
         assert _ids(aurora_mysql_pattern_catalog.AURORA_MYSQL_PATTERNS, "base_score") == [
             ("aurora-mysql-01", "json-document-query", 85),
@@ -450,6 +454,10 @@ class TestConstantsAreTheCatalogsView:
             ("aurora-mysql-04", "group-concat-pivot", 75),
             ("aurora-mysql-05", "stored-routine", 70),
             ("aurora-mysql-06", "multi-table-update", 80),
+            # #920: MySQL 8.0's window functions, recursive CTEs and LATERAL.
+            ("aurora-mysql-07", "window-function", 85),
+            ("aurora-mysql-08", "cte-recursive", 90),
+            ("aurora-mysql-09", "lateral-join", 80),
         ]
 
     def test_aurora_hints_compose_the_anti_pattern_descriptions(self) -> None:

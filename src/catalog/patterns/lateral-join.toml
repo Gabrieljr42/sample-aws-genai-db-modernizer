@@ -2,6 +2,7 @@
 id = "lateral-join"
 detectors = [
     "src.tools.analysis.aurora_pg_analysis_tools:detect_pg_specific_features",
+    "src.tools.analysis.aurora_mysql_analysis_tools:detect_mysql_specific_features",
 ]
 penalty = 0
 
@@ -32,15 +33,21 @@ supported = true
 catalog = "aurora_pg"
 catalog_id = "aurora-pg-06"
 score = 85
-why = "LATERAL joins for correlated subqueries in the FROM clause. Aurora PG executes these efficiently — each row from the left side feeds the lateral subquery, enabling top-N-per-group patterns."
+why = "LATERAL joins for correlated subqueries in the FROM clause, each row from the left side feeding the lateral subquery (top-N per group); LATERAL also precedes a set-returning function call (PostgreSQL documentation, Table Expressions, LATERAL Subqueries)."
 concerns = [
     "Large outer tables with expensive lateral subqueries may need index support.",
 ]
 
 [engines.aurora_mysql]
-kind = "unscored"
+kind = "fit"
 supported = true
-why = "Aurora MySQL's analysis does not report this pattern; it adds no cross-engine penalty."
+catalog = "aurora_mysql"
+catalog_id = "aurora-mysql-09"
+score = 80
+why = "LATERAL derived tables for correlated subqueries in the FROM clause (top-N per group) on MySQL 8.0.14 and later, which Aurora MySQL version 3 includes; a lateral derived table is a subquery only, with join-type restrictions (MySQL Reference Manual, Lateral Derived Tables)."
+concerns = [
+    "Large outer tables with expensive lateral subqueries may need index support.",
+]
 
 [engines.neptune]
 kind = "future"

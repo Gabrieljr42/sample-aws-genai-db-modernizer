@@ -2,6 +2,7 @@
 id = "stored-routine"
 detectors = [
     "src.tools.analysis.aurora_mysql_analysis_tools:detect_mysql_specific_features",
+    "src.tools.analysis.aurora_pg_analysis_tools:detect_pg_specific_features",
 ]
 penalty = 0
 
@@ -26,9 +27,16 @@ supported = true
 why = "ElastiCache's analysis does not report this pattern; it adds no cross-engine penalty."
 
 [engines.aurora_postgresql]
-kind = "unscored"
+kind = "fit"
 supported = true
-why = "Aurora PostgreSQL's analysis does not report this pattern; it adds no cross-engine penalty."
+catalog = "aurora_pg"
+catalog_id = "aurora-pg-08"
+score = 70
+why = "Functions and procedures in PL/pgSQL (CALL, CREATE PROCEDURE, CREATE FUNCTION; a SQL Server EXEC of a procedure) encapsulate business logic server-side, reducing network round trips for multi-step operations (PostgreSQL documentation, User-Defined Procedures)."
+concerns = [
+    "Stored routines increase operational complexity and are harder to version-control.",
+    "Consider migrating complex logic to application layer for testability.",
+]
 
 # Detection signals: CALL procedure, DELIMITER patterns
 [engines.aurora_mysql]
@@ -37,7 +45,7 @@ supported = true
 catalog = "aurora_mysql"
 catalog_id = "aurora-mysql-05"
 score = 70
-why = "Stored procedures and functions (CALL, CREATE PROCEDURE). Aurora MySQL supports stored routines for encapsulating business logic server-side — reducing network round-trips for multi-step operations."
+why = "Stored procedures and functions (CALL, CREATE PROCEDURE; a SQL Server EXEC of a procedure) encapsulate business logic server-side, reducing network round trips for multi-step operations (MySQL Reference Manual, Using Stored Routines)."
 concerns = [
     "Stored routines increase operational complexity and are harder to version-control.",
     "Consider migrating complex logic to application layer for testability.",

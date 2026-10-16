@@ -23,15 +23,44 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.shared.catalog.engines import ACTIVE, CatalogError, engine_ids
-from src.shared.catalog.patterns import EngineSupport, pattern, patterns
+from src.shared.catalog.patterns import PARITY_ANCHOR_NOTE, EngineSupport, pattern, patterns
+
+__all__ = [
+    "ACCESS_CLASSES_FILE",
+    "PARITY_ANCHOR_NOTE",
+    "QUERY_FACTS",
+    "AccessClass",
+    "access_classes",
+    "class_engine_scores",
+    "class_parity_anchors",
+    "class_score",
+    "load_access_classes",
+    "unrated_native_entries",
+]
 
 ACCESS_CLASSES_FILE = Path(__file__).resolve().parents[2] / "catalog" / "access_classes.toml"
 
 _ONE_LINE = r"^[^\n]+$"
 
-# The query facts a class may make a pattern depend on (``only_when``), each read from
-# the SQL facade by the classifier (``AccessClassification.facts``).
-QUERY_FACTS = frozenset({"time_bucket"})
+# The query facts a class score may depend on, each read from the SQL facade by the
+# classifier (``AccessClassification.facts``): a pattern listed in ``only_when`` counts
+# only for a query showing its fact (a date/time bucket, each text-search kind, a
+# window function), and ``write`` (an INSERT, UPDATE, DELETE or MERGE) is credited only
+# to a system of record (``class_score``).
+QUERY_FACTS = frozenset(
+    {
+        "time_bucket",
+        "full_text",
+        "leading_wildcard",
+        "pattern_match",
+        "similarity_match",
+        "window_function",
+        "write",
+    }
+)
+# The fact that marks a write (ADR-031 Decision 2 step 3: an engine that is not a
+# system of record never owns one, so no class credits it for one).
+WRITE_FACT = "write"
 
 
 class AccessClass(BaseModel):
@@ -99,23 +128,51 @@ def _entry_score(support: EngineSupport) -> int | None:
     return None
 
 
-def class_score(access_class: AccessClass, engine: str, facts: frozenset[str] = frozenset()) -> int:
-    """The highest rating the class's patterns give ``engine`` for a query showing
-    ``facts``, else 0. A pattern in ``only_when`` counts only when its fact is in
-    ``facts``.
-
-    A ``fit`` entry counts at its ``score``; a ``native`` or ``unscored`` entry at its
-    ``class_score`` (the engine serves the pattern although its analysis does not report
-    it). An anti-pattern, a penalised entry or an entry with no rating counts nothing.
-    """
-    scores = [
-        score
+def _ratings(
+    access_class: AccessClass, engine: str, facts: frozenset[str]
+) -> list[tuple[int, EngineSupport]]:
+    """``(rating, entry)`` for each of the class's patterns that rates ``engine`` for a
+    query showing ``facts`` (see :func:`class_score`)."""
+    if WRITE_FACT in facts and engine not in engine_ids(system_of_record=True):
+        return []
+    return [
+        (score, support)
         for pattern_id in access_class.patterns
         if access_class.only_when.get(pattern_id, "") in facts | {""}
         and (support := pattern(pattern_id).engines.get(engine)) is not None
         and (score := _entry_score(support)) is not None
     ]
-    return max(scores, default=0)
+
+
+def class_score(access_class: AccessClass, engine: str, facts: frozenset[str] = frozenset()) -> int:
+    """The highest rating the class's patterns give ``engine`` for a query showing
+    ``facts``, else 0. A pattern in ``only_when`` counts only when its fact is in
+    ``facts``, and a write is rated only on a system of record.
+
+    A ``fit`` entry counts at its ``score``; a ``native`` or ``unscored`` entry at its
+    ``class_score`` (the engine serves the pattern although its analysis does not report
+    it). An anti-pattern, a penalised entry or an entry with no rating counts nothing.
+    """
+    return max((score for score, _ in _ratings(access_class, engine, facts)), default=0)
+
+
+@cache
+def class_parity_anchors(class_id: str, facts: frozenset[str] = frozenset()) -> dict[str, str]:
+    """``active engine -> trace note`` for each engine whose class score, for a query of
+    class ``class_id`` showing ``facts``, is a parity anchor (#936): no entry with its own
+    evidence rates the engine as high. The note is :data:`PARITY_ANCHOR_NOTE` and the
+    borrowed source, ``(<pattern>, <score>)``."""
+    access_class = next(c for c in access_classes() if c.id == class_id)
+    notes: dict[str, str] = {}
+    for engine in sorted(engine_ids(status=ACTIVE)):
+        ratings = _ratings(access_class, engine, facts)
+        if not ratings:
+            continue
+        best = max(score for score, _ in ratings)
+        winners = [support for score, support in ratings if score == best]
+        if best and all(support.parity_anchor for support in winners):
+            notes[engine] = f"{PARITY_ANCHOR_NOTE} ({winners[0].parity_anchor}, {best})"
+    return notes
 
 
 def unrated_native_entries() -> list[str]:

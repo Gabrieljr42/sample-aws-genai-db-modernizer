@@ -74,16 +74,18 @@ EXACT_TIE_RULE_REASON = (
 )
 
 # Source features that tip a close Aurora MySQL vs Aurora PostgreSQL call (#381 design):
-# recursive CTEs, sequences, MERGE and JSON all have more direct PostgreSQL equivalents
-# than MySQL ones, and multiple schemas per database map onto PostgreSQL schemas (MySQL
-# has none). These are workload-based: they come from the collected schema/queries
-# themselves, so a close call for *any* heterogeneous source (SQL Server, Oracle, DB2)
-# can be tipped by them. Every one of them favours aurora_postgresql today; a future
-# engine added to the pool would need its own column in ``choose_heterogeneous_engine``,
-# not just a new entry here.
+# sequences, MERGE and JSON all have more direct PostgreSQL equivalents than MySQL ones,
+# and multiple schemas per database map onto PostgreSQL schemas (MySQL has none). These
+# are workload-based: they come from the collected schema/queries themselves, so a close
+# call for *any* heterogeneous source (SQL Server, Oracle, DB2) can be tipped by them.
+# Every one of them favours aurora_postgresql today; a future engine added to the pool
+# would need its own column in ``choose_heterogeneous_engine``, not just a new entry here.
+# Recursive CTEs are not one (#920, catalog PR C): MySQL 8.0, which Aurora MySQL version 3
+# is compatible with, has WITH RECURSIVE, so both engines' analyses credit a recursive CTE
+# in their scores (the cte-recursive pattern) and it no longer tips the call. An older
+# trace may still name it (``FEATURE_LABELS`` keeps its label).
 PRIMARY_FEATURE_SIGNALS: tuple[str, ...] = (
     "sequences",
-    "recursive_ctes",
     "merge_statements",
     "json_usage",
     "multiple_schemas",
@@ -105,6 +107,7 @@ FEATURE_SIGNALS: tuple[str, ...] = (*PRIMARY_FEATURE_SIGNALS, "babelfish_compati
 # feature this way, never the bare internal identifier.
 FEATURE_LABELS: dict[str, str] = {
     "sequences": "sequences",
+    # Not a signal since #920; kept so an older assignment's trace still reads.
     "recursive_ctes": "recursive CTEs",
     "merge_statements": "MERGE statements",
     "json_usage": "JSON usage",
@@ -130,7 +133,7 @@ def detect_heterogeneous_features(
     """Source features the collector actually reports, for the #381 feature tie-break.
 
     Every key is a reported signal, never an inference from missing data: query-text
-    patterns (sequences, recursive CTEs, ``MERGE``, JSON functions -- each query's text
+    patterns (sequences, ``MERGE``, JSON functions -- each query's text
     is scanned by :func:`~src.tools.sql.query_facts.scan_sql` first, #381 review, and
     each feature is an engine-neutral query fact, #491, so a keyword mentioned only in
     a comment or string literal is never counted, and a bracketed or double-quoted
@@ -154,7 +157,6 @@ def detect_heterogeneous_features(
     return {
         # shared, #654
         "sequences": any(has_sequence_reference(scan_sql(t)) for t in query_texts),
-        "recursive_ctes": any(f.recursive_cte for f in facts),
         "merge_statements": any(f.merge_statement for f in facts),
         "json_usage": json_columns or any(f.json_access for f in facts),
         "multiple_schemas": len(schema_names) > 1,

@@ -39,6 +39,9 @@ Pattern fields:
 - ``scan_threshold``: for a pattern with ``scan`` entries, when the scan matters
   (``min_calls_per_second`` and ``min_table_rows``, both reached) and the sourced ``why``
   for those values. Only then does a ``scan`` engine lose ``penalty`` (#493).
+- ``write_pattern``: the pattern describes writes only (an UPDATE, DELETE, INSERT or
+  upsert shape). No parity anchor may borrow from one, and no access class lists one
+  (#936: OpenSearch is not a system of record and is never credited for a write).
 
 Engine entry fields (``[engines.<engine_id>]``, one per engine):
 
@@ -66,7 +69,14 @@ Engine entry fields (``[engines.<engine_id>]``, one per engine):
 - ``class_score``: on a ``native`` or ``unscored`` entry, how well the engine serves the
   pattern although its analysis does not report it, 0-100, with the source of the number
   in ``why``. Only the per-query access-pattern class scores read it
-  (``src/catalog/access_classes.toml``, #728), so it changes no current score.
+  (``src/catalog/access_classes.toml``, #728), so it changes no current score. The source
+  is either the engine's own public documentation for the access path, or a parity
+  anchor (next field).
+- ``parity_anchor``: on an entry whose ``class_score`` is borrowed because the catalog has
+  no engine-specific evidence yet (#936), the pattern whose rating it borrows. Its ``why``
+  says :data:`PARITY_ANCHOR_NOTE` and cites ``(<pattern>, <score>)``; the loader checks
+  that the source is not a ``write_pattern`` and rates another engine at that score from
+  its own evidence (a fit score, or a class score that is not itself an anchor).
 - ``severity``: 0.0-1.0 (``anti_pattern``); ``guidance``: what to do about it (on a
   ``native`` or ``scan`` entry: the redesign a word search takes on that engine, #493);
   ``engine_hint``: the sentence of the description that names another engine (kept apart
@@ -90,6 +100,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.shared.catalog.engines import CatalogError, engine_ids
 
 PATTERNS_DIR = Path(__file__).resolve().parents[2] / "catalog" / "patterns"
+
+# What a borrowed class score says in the catalog and the decision trace (#936).
+PARITY_ANCHOR_NOTE = "parity anchor: no engine-specific evidence yet"
 
 PatternKind = Literal[
     "fit", "anti_pattern", "native", "redesign", "scan", "penalized", "unscored", "future"
@@ -165,9 +178,9 @@ _KIND_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     ),
     "redesign": (frozenset({"penalty"}), frozenset({"penalty"})),
     "scan": (frozenset(), frozenset({"guidance"})),
-    "native": (frozenset(), frozenset({"class_score", "guidance"})),
+    "native": (frozenset(), frozenset({"class_score", "guidance", "parity_anchor"})),
     "penalized": (frozenset(), frozenset()),
-    "unscored": (frozenset(), frozenset({"class_score"})),
+    "unscored": (frozenset(), frozenset({"class_score", "parity_anchor"})),
     "future": (frozenset(), frozenset()),
 }
 
@@ -184,6 +197,7 @@ class EngineSupport(BaseModel):
     catalog_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9-]*$")
     score: int | None = Field(default=None, ge=0, le=100)
     class_score: int | None = Field(default=None, ge=0, le=100)
+    parity_anchor: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]*$")
     confidence: ConfidenceLevel | None = None
     severity: float | None = Field(default=None, ge=0.0, le=1.0)
     penalty: int | None = Field(default=None, ge=0)
@@ -213,6 +227,11 @@ class EngineSupport(BaseModel):
             raise ValueError("profile is required on an OpenSearch fit and allowed nowhere else")
         if self.guidance_names_engine and not self.guidance:
             raise ValueError("guidance_names_engine needs a guidance")
+        if self.parity_anchor is not None:
+            if self.class_score is None:
+                raise ValueError("a parity_anchor entry needs the class_score it borrows")
+            if PARITY_ANCHOR_NOTE not in self.why:
+                raise ValueError(f"a parity_anchor entry's why says {PARITY_ANCHOR_NOTE!r}")
         return self
 
 
@@ -221,6 +240,7 @@ _ALL_OPTIONAL = (
     "catalog_id",
     "score",
     "class_score",
+    "parity_anchor",
     "confidence",
     "severity",
     "penalty",
@@ -257,6 +277,7 @@ class PatternEntry(BaseModel):
     exempt_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     redesign_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     scan_threshold: ScanThreshold | None = None
+    write_pattern: bool = False
     engines: dict[str, EngineSupport]
 
     @model_validator(mode="after")
@@ -334,8 +355,39 @@ def load_pattern_catalog(directory: Path = PATTERNS_DIR) -> tuple[PatternEntry, 
     return tuple(entries)
 
 
+def _check_parity_anchors(entries: tuple[PatternEntry, ...]) -> None:
+    """Each parity anchor borrows a read pattern's own evidence (#936)."""
+    by_id = {entry.id: entry for entry in entries}
+    for entry in entries:
+        for engine, support in entry.engines.items():
+            if support.parity_anchor is None:
+                continue
+            where = f"{entry.id}.toml [engines.{engine}]"
+            source = by_id.get(support.parity_anchor)
+            if source is None:
+                raise CatalogError(f"{where}: parity_anchor {support.parity_anchor!r} has no file")
+            if source.write_pattern:
+                raise CatalogError(
+                    f"{where}: parity_anchor {source.id!r} is a write pattern; an anchor "
+                    "borrows a read pattern's rating"
+                )
+            rated = {
+                other.score if other.kind == "fit" else other.class_score
+                for name, other in source.engines.items()
+                if name != engine and other.parity_anchor is None
+            }
+            if support.class_score not in rated:
+                raise CatalogError(
+                    f"{where}: {source.id}.toml rates no other engine {support.class_score} "
+                    "from its own evidence"
+                )
+            if f"({source.id}, {support.class_score})" not in support.why:
+                raise CatalogError(f"{where}: why cites ({source.id}, {support.class_score})")
+
+
 def _check_across_files(entries: Iterable[PatternEntry]) -> None:
     entries = tuple(entries)
+    _check_parity_anchors(entries)
     # Every engine except a legacy id may (and, by the completeness test, must) have an
     # entry; stated by exclusion so a status added later is covered.
     decided = engine_ids() - engine_ids(status="legacy")

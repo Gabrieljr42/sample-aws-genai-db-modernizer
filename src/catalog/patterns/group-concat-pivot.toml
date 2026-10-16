@@ -2,6 +2,7 @@
 id = "group-concat-pivot"
 detectors = [
     "src.tools.analysis.aurora_mysql_analysis_tools:detect_mysql_specific_features",
+    "src.tools.analysis.aurora_pg_analysis_tools:detect_pg_specific_features",
 ]
 penalty = 0
 
@@ -26,9 +27,15 @@ supported = true
 why = "ElastiCache's analysis does not report this pattern; it adds no cross-engine penalty."
 
 [engines.aurora_postgresql]
-kind = "unscored"
+kind = "fit"
 supported = true
-why = "Aurora PostgreSQL's analysis does not report this pattern; it adds no cross-engine penalty."
+catalog = "aurora_pg"
+catalog_id = "aurora-pg-10"
+score = 75
+why = "String aggregation with string_agg (a source's GROUP_CONCAT, STRING_AGG or LISTAGG) for pivoting and denormalized output, server-side (PostgreSQL documentation, Aggregate Functions)."
+concerns = [
+    "An ORDER BY inside the aggregate is needed for a stable order.",
+]
 
 # Detection signals: GROUP_CONCAT, string aggregation patterns
 [engines.aurora_mysql]
@@ -37,7 +44,7 @@ supported = true
 catalog = "aurora_mysql"
 catalog_id = "aurora-mysql-04"
 score = 75
-why = "String aggregation using GROUP_CONCAT for pivoting and denormalized output. Aurora MySQL executes this server-side, avoiding multiple round-trips for client-side aggregation."
+why = "String aggregation with GROUP_CONCAT (a source's STRING_AGG or LISTAGG) for pivoting and denormalized output, server-side (MySQL Reference Manual, Aggregate Function Descriptions)."
 concerns = [
     "Default group_concat_max_len (1024) may truncate results; increase as needed.",
 ]

@@ -42,8 +42,8 @@ why = "ElastiCache cannot run this pattern: a query another engine reports it fo
 [engines.aurora_postgresql]
 kind = "native"
 supported = true
-why = "pg_trgm's similarity() is a native fuzzy-match operator. Class score (#728): 75, Aurora PostgreSQL's own native full-text rating (full-text-native, 75)."
-class_score = 75
+why = "pg_trgm's similarity(), the % operator and the <-> distance are native once the extension is created, and a GIN or GiST trigram index serves them (PostgreSQL documentation, pg_trgm, Index Support). Class score (#728): 80, an index serves the match."
+class_score = 80
 
 [engines.aurora_mysql]
 kind = "penalized"

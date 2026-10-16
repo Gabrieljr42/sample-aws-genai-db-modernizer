@@ -28,6 +28,7 @@ from src.tools.analysis.aurora_common_analysis_tools import (
     _apply_aurora_common_adjustments,
     _count_inbound_fks,
     analyze_aurora_common_use_cases,
+    apply_aurora_feature_adjustments,
     assess_migration_complexity,
     build_concerns,
     build_rationale,
@@ -68,7 +69,7 @@ def detect_mysql_specific_features(query_text: str, source_engine: str = "") -> 
     if facts.duplicate_key_upsert:
         matched.append("aurora-mysql-03")
 
-    if facts.group_concat_call:
+    if facts.string_aggregate_call:
         matched.append("aurora-mysql-04")
 
     if facts.stored_routine_keyword:
@@ -76,6 +77,17 @@ def detect_mysql_specific_features(query_text: str, source_engine: str = "") -> 
 
     # aurora-mysql-06: multi-table-update (UPDATE + join detected)
     # This requires both UPDATE type and join presence — handled in use_cases
+
+    # Features both Aurora engines have (#920): MySQL 8.0's window functions,
+    # recursive CTEs and LATERAL derived tables.
+    if facts.window_function:
+        matched.append("aurora-mysql-07")
+
+    if facts.recursive_cte:
+        matched.append("aurora-mysql-08")
+
+    if facts.lateral_join:
+        matched.append("aurora-mysql-09")
 
     return matched
 
@@ -100,7 +112,7 @@ def analyze_aurora_mysql_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
     # Accumulators per MySQL pattern
     mysql_accum: dict[str, dict] = {
-        f"aurora-mysql-0{i}": {"query_ids": [], "table_ids": []} for i in range(1, 7)
+        pid: {"query_ids": [], "table_ids": []} for pid in MYSQL_PATTERN_BY_ID
     }
 
     for q in queries:
@@ -115,9 +127,9 @@ def analyze_aurora_mysql_use_cases(collector_output: dict) -> WorkloadAnalysis:
                 mysql_accum[pid]["query_ids"].append(qid)
                 mysql_accum[pid]["table_ids"].extend(tables)
 
-        # aurora-mysql-06: multi-table UPDATE with JOIN (MySQL-specific syntax,
-        # ``UPDATE a JOIN b ... SET``; not ``UPDATE ... FROM``, #893 review)
-        if qt == "UPDATE" and query_facts(text, source_engine).update_target_join:
+        # aurora-mysql-06: a write whose rows come from a join (``UPDATE a JOIN b ...
+        # SET``, ``DELETE a FROM a JOIN b``, or a source's ``UPDATE ... FROM``, #920)
+        if qt in ("UPDATE", "DELETE") and query_facts(text, source_engine).multi_table_write:
             mysql_accum["aurora-mysql-06"]["query_ids"].append(qid)
             mysql_accum["aurora-mysql-06"]["table_ids"].extend(tables)
 
@@ -171,36 +183,16 @@ def _apply_aurora_mysql_adjustments(
 
     pattern_types = set(profile.pattern_types)
 
-    # MySQL-specific pattern bonuses
-    if "json-document-query" in pattern_types:
-        pattern += 10
-    if "fulltext-search" in pattern_types:
-        pattern += 10
-    if "upsert-duplicate-key" in pattern_types:
-        pattern += 5
-    if "multi-table-update" in pattern_types:
-        pattern += 10
-    if "group-concat-pivot" in pattern_types:
-        pattern += 5
-
-    # MySQL-specific features increase complexity fit
-    mysql_feature_count = sum(
-        1
-        for pt in pattern_types
-        if pt
-        in {
-            "json-document-query",
-            "fulltext-search",
-            "upsert-duplicate-key",
-            "multi-table-update",
-            "group-concat-pivot",
-            "stored-routine",
-        }
+    # The Aurora SQL features both engines have, plus MySQL's own (JSON functions,
+    # FULLTEXT, ON DUPLICATE KEY): pattern bonuses, and more features increase the
+    # complexity fit.
+    pattern, complexity = apply_aurora_feature_adjustments(
+        pattern,
+        complexity,
+        pattern_types,
+        own_bonuses={"json-document-query": 10, "fulltext-search": 10, "upsert-duplicate-key": 5},
+        own_features=frozenset({"json-document-query", "fulltext-search", "upsert-duplicate-key"}),
     )
-    if mysql_feature_count >= 2:
-        complexity += 15
-    elif mysql_feature_count >= 1:
-        complexity += 10
 
     return ScoreBreakdown(
         pattern_match_score=max(0, min(pattern, 100)),

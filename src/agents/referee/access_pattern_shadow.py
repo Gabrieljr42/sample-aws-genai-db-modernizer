@@ -11,7 +11,9 @@ shadow of #557). A failure here is logged and never fails the assignment.
 
 Per query the artifact records the class and why, the current engine and per-engine
 scores, and the engine and scores the class model would give, with the rule that
-placed the query in the shadow run (its last Move, ``pass:reason_code``). The summary
+placed the query in the shadow run (its last Move, ``pass:reason_code``), and, per
+engine whose class score is a parity anchor (#936), "parity anchor: no engine-specific
+evidence yet" with the score's source (``parity_anchors``). The summary
 counts queries per class, engine changes, and changes per ``from -> to`` pair and per
 class. A third, control run keeps every query's tables' own pattern scores through the
 same path (``QueryPatternModel.identity``): a query that moves there too moves because of
@@ -37,7 +39,7 @@ from src.agents.referee.access_pattern import (
 from src.agents.referee.aurora_choice import source_database_engine
 from src.agents.referee.query_scoring import QueryPatternModel
 from src.agents.referee.routing_trace import RoutingTrace
-from src.shared.catalog.access_classes import class_engine_scores
+from src.shared.catalog.access_classes import class_engine_scores, class_parity_anchors
 from src.tools.analysis.score_weights import table_weights
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,13 @@ def build_shadow(
                 "class": result.name,
                 "reason": result.reason,
                 "facts": sorted(result.facts),
+                # #936: per engine, when its class score is a parity anchor (borrowed,
+                # no engine-specific evidence yet), the trace says so and names the source.
+                "parity_anchors": (
+                    dict(class_parity_anchors(result.name, result.facts))
+                    if result.name in SCORED_CLASSES
+                    else {}
+                ),
                 "tables": list(query.get("tables_accessed") or []),
                 "current": {
                     "engine": before,

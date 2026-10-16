@@ -13,6 +13,9 @@ penalty = 10
 penalty_basis = "bounded_limit"
 
 # Detection signal: transaction_shape(...).shape == "unbounded" on a write
+# Writes only: no parity anchor borrows from it and no access class lists it (#936).
+write_pattern = true
+
 [engines.dynamodb]
 kind = "anti_pattern"
 supported = true

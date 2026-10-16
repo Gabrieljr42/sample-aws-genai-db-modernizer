@@ -5,6 +5,9 @@ detectors = [
 ]
 penalty = 0
 
+# Writes only: no parity anchor borrows from it and no access class lists it (#936).
+write_pattern = true
+
 [engines.dynamodb]
 kind = "unscored"
 supported = true

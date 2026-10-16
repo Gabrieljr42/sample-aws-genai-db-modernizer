@@ -185,7 +185,12 @@ class TestClearWinner:
 
 
 class TestNearTieDecidedByFeature:
-    def test_close_scores_tipped_by_a_recursive_cte(self):
+    """#920 (catalog PR C): MySQL 8.0 has WITH RECURSIVE too, so a recursive CTE no
+    longer tips a close call (both Aurora analyses credit it in their scores instead).
+    A SQL Server source's close call then falls to Babelfish (ADR-031 Decision 6); an
+    Oracle source's goes to the higher total."""
+
+    def _close_call(self, engine):
         resolver = AssignmentResolver()
         query_ids = ["q1", "q2", "q3", "q4", "q5"]
         recursive_cte_query = {
@@ -204,23 +209,29 @@ class TestNearTieDecidedByFeature:
             "calls_per_second": 1.0,
             "rows_returned_avg": 10,
         }
-        collector = _collector(query_ids, engine="sqlserver", extra_queries=[recursive_cte_query])
+        collector = _collector(query_ids, engine=engine, extra_queries=[recursive_cte_query])
         triage = _triage(["aurora_mysql", "aurora_postgresql"])
         # Close but not equal: mysql scores slightly higher on raw confidence,
-        # within the margin, so the recursive-CTE feature should still tip it
-        # to aurora_postgresql.
+        # within the margin.
         analysis = {
             "aurora_mysql": _analysis(["db.t1"], confidence=71),
             "aurora_postgresql": _analysis(["db.t1"], confidence=70),
         }
+        return resolver.resolve(triage, analysis, collector)
 
-        result = resolver.resolve(triage, analysis, collector)
-
+    def test_a_sql_server_close_call_with_a_recursive_cte_falls_to_babelfish(self):
+        result = self._close_call("sqlserver")
         choice = result.aurora_engine_choice
         assert choice.engine == "aurora_postgresql"
-        assert "recursive_ctes" in choice.deciding_features
+        assert choice.deciding_features == ["babelfish_compatible"]
         assigned_engines = {qa.assigned_engine for qa in result.query_assignments}
         assert assigned_engines == {"aurora_postgresql"}
+
+    def test_an_oracle_close_call_with_a_recursive_cte_goes_to_the_higher_total(self):
+        result = self._close_call("oracle")
+        choice = result.aurora_engine_choice
+        assert choice.engine == "aurora_mysql"
+        assert choice.deciding_features == []
 
 
 class TestHomogeneousSourcesUnaffected:
@@ -270,7 +281,8 @@ class TestHomogeneousSourcesUnaffected:
 class TestAdventureWorksSqlServerFixture:
     """A small, trimmed AdventureWorks-like SQL Server fixture (no customer data):
     multiple schemas, a sequence, a MERGE statement, a recursive CTE and a JSON
-    function -- every #381 feature signal present at once."""
+    function -- every #381 feature signal present at once (a recursive CTE is no
+    longer one since #920: MySQL 8.0 has it too)."""
 
     def _load(self) -> dict:
         data: dict = json.loads((FIXTURES / "adventureworks_trimmed_collection.json").read_text())
@@ -316,7 +328,6 @@ class TestAdventureWorksSqlServerFixture:
         # *remaining* tie when no primary feature is present.
         assert set(choice.deciding_features) == {
             "sequences",
-            "recursive_ctes",
             "merge_statements",
             "json_usage",
             "multiple_schemas",
