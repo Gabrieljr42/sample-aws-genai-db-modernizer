@@ -86,6 +86,7 @@ def _rollback_run(store: LocalArtifactStore) -> None:
 
 
 class TestTheRerouteVersionHoldsItsOwnMoves:
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_one_post_schema_flag_move_per_moved_query(self, tmp_path) -> None:
         store = LocalArtifactStore(base_dir=str(tmp_path))
         _seed(store)
@@ -246,6 +247,7 @@ class TestTheRefreshSeesTheEngineTheRerouteEmptied:
 class TestTheRollbackVersionRecordsTheMovesBack:
     """#770 option (a): reverse Moves, so one replay rule covers every version."""
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_one_reverse_move_per_query_whose_engine_changes_back(self, tmp_path) -> None:
         store = LocalArtifactStore(base_dir=str(tmp_path))
         _seed(store)

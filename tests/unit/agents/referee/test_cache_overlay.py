@@ -746,6 +746,7 @@ class TestTieBreak:
         assert qa.assigned_engine == "aurora_postgresql"
         assert "source-compatible" in qa.assignment_reason
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_a_non_aurora_tie_is_not_decided_by_which_engine_has_more_table_traffic(self):
         """#503: before this fix, ``break_owner_tie`` gave a non-Aurora tie
         to whichever engine already served more of the tied query's
@@ -897,6 +898,7 @@ class TestFallbackOwner:
         assert (owner, tied) == ("aurora_mysql", [])
         assert fallback_reason is None
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_aurora_no_longer_wins_before_the_score_is_compared(self):
         """#549 review, Important 2 repro: a mysql source with aurora_mysql
         scoring far WORSE than dynamodb for this query must not still hand
@@ -910,6 +912,7 @@ class TestFallbackOwner:
         assert (owner, tied) == ("dynamodb", [])
         assert fallback_reason is None
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_a_non_source_compatible_aurora_engine_does_not_win_either(self):
         """#549 review, Important 2 repro: an Oracle source has no Aurora
         dialect of its own (``SOURCE_ENGINE_TO_AURORA`` has no "oracle"
@@ -972,6 +975,7 @@ class TestFallbackOwner:
         assert (owner, tied) == ("aurora_mysql", [])
         assert fallback_reason is None
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_real_score_difference_decides_a_non_aurora_tie_not_query_count(self):
         """#549: before this fix, ``fallback_owner`` picked whichever
         candidate already owned more queries, then by name -- it never
@@ -1040,6 +1044,7 @@ class TestFallbackOwner:
         assert (owner, tied) == ("dynamodb", [])
         assert fallback_reason is None
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_penalty_review_round2_repro(self):
         """#549 round-2 review, Important 1 repro: dynamodb's base confidence
         (90) alone beats documentdb's (70), but a ``multi-index-joins``
@@ -1111,6 +1116,7 @@ class TestNormalizeCacheOwnersTie:
         assert qa["assigned_engine"] in {"dynamodb", "documentdb"}
         assert qa["tied_engines"] == ["documentdb", "dynamodb"]
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_a_clear_score_winner_carries_no_tie(self):
         """dynamodb sorts AFTER documentdb alphabetically, so making it the
         clear winner (#549 review, Suggestion 2) means this can only pass on

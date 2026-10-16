@@ -11,22 +11,38 @@
 # step 3, #936). No class lists a write pattern (`write_pattern`). Classes are listed in
 # severity order: when one statement shows several shapes, the later class wins.
 #
-# Shadow only: the scores are computed next to today's per-table scores and written per job
-# (assignment/v<N>/access_pattern_shadow.json); routing does not read them yet.
+# Routing reads these scores: a query's pattern dimension on an engine is its own class's score
+# there (src/agents/referee/query_pattern.py, ADR-031 Decision 14 Amendment 5, #728).
 
 [[classes]]
 id = "key_lookup"
 label = "Key lookup"
 leaning = "key-value"
 why = "One row, or a batch of rows, by its full primary or unique key; also a single row in primary-key order at any offset (#857), and an INSERT of values."
-patterns = ["key-value-lookup", "standard-crud"]
+# batch-in-list rates the WHERE key IN (...) batch this class includes (#920); it raises no
+# score today, since every engine it rates rates key-value-lookup at least as high.
+patterns = ["key-value-lookup", "batch-in-list", "standard-crud"]
 
 [[classes]]
 id = "key_scoped"
 label = "Key-scoped 1:N read"
 leaning = "item collection"
 why = "Rows addressed by a non-unique key value, or an entity and its related rows reached by key from a key predicate: one item collection, not a relational need."
-patterns = ["bounded-parent-child", "co-accessed-tables", "nested-document", "extended-reference", "simple-join", "standard-crud"]
+patterns = ["bounded-parent-child", "co-accessed-tables", "nested-document", "extended-reference", "simple-join", "standard-crud", "range-query"]
+# range-query rates DynamoDB's Query shape, a partition-key equality plus a range on another
+# column of the same table (#933's shape, the maintainer's choice there): it counts only for a
+# query that shows it (the classifier's partition_range fact, read from the facade's ranges).
+only_when = { "range-query" = "partition_range" }
+
+[[classes]]
+id = "reference_read"
+label = "Small reference-table read"
+leaning = "neutral"
+why = "Every row of a small table (at most 10,000 collected rows, metadata-config-store's limit) with no predicate and no row limit: reference data such as feature flags, settings or a lookup list, which every engine serves from memory once read (MySQL Reference Manual, Buffer Pool; PostgreSQL documentation, Resource Consumption; Amazon DynamoDB Developer Guide, Best practices for querying and scanning data)."
+# Proposed default (#920), open to revision: the table's reference-data rating where the catalog
+# has one (DynamoDB's metadata-config-store), otherwise the same index or table read the range
+# class rates (pagination). Not frequent-full-scan: a read of every row returns every row it reads.
+patterns = ["metadata-config-store", "pagination"]
 
 [[classes]]
 id = "key_range"
@@ -70,3 +86,22 @@ patterns = ["full-text-search", "wildcard-search", "fuzzy-search", "regex-search
 # Each text pattern rates only the text search it describes (#920, catalog PR C): a LIKE '%x%'
 # is not rated by an engine's full-text index, which does not serve it.
 only_when = { "full-text-search" = "full_text", "full-text-native" = "full_text", "fulltext-search" = "full_text", "wildcard-search" = "leading_wildcard", "regex-search" = "pattern_match", "fuzzy-search" = "similarity_match" }
+
+# SQL features a query of any class can show (#985). Each feature's pattern rates the query,
+# alongside its class's own patterns, only when the query shows the feature's fact (read from
+# the SQL facts by the classifier), so the per-query score keeps each engine's documented
+# credit for the feature (recursive CTEs: Aurora PostgreSQL 95 against Aurora MySQL 90).
+[[features]]
+pattern = "cte-recursive"
+fact = "recursive_cte"
+why = "A recursive CTE (WITH RECURSIVE, or a CTE whose body reads itself) is served by the engines that run it natively, each at its own documented rating."
+
+[[features]]
+pattern = "lateral-join"
+fact = "lateral_join"
+why = "A LATERAL join (a derived table that reads the row before it) is served by the engines that run it natively, each at its own documented rating."
+
+[[features]]
+pattern = "stored-routine"
+fact = "stored_routine"
+why = "A call to a stored procedure or function runs only where the routine lives, on an engine that runs stored routines, each at its own documented rating."

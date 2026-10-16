@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from src.agents.referee.query_pattern import write_access_patterns
 from src.contracts.phase_models import (
     PHASE_PREREQUISITES,
     SCHEMA_DESIGN_SKIP_REASON_NO_LLM,
@@ -780,6 +781,7 @@ class LocalOrchestrator(Orchestrator):
             job_id, database_name, assignment, version, new_version, routings
         )
         self.store.write_json(assignment_artifact_path(database_name, job_id, new_version), revised)
+        write_access_patterns(self.store, database_name, job_id, new_version)
         diff = assignment_engine_diff(self.store, database_name, job_id, version, new_version)
         designed = self._schema_engines(job_id, database_name, version)
         print(
@@ -818,6 +820,7 @@ class LocalOrchestrator(Orchestrator):
             self.store.write_json(
                 assignment_artifact_path(database_name, job_id, rollback), restated
             )
+            write_access_patterns(self.store, database_name, job_id, rollback)
             for engine in designed:
                 self._copy_schema_artifacts(job_id, database_name, engine, version, rollback)
             logger.error(

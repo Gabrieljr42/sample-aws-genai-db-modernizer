@@ -698,3 +698,90 @@ class TestRecordedHintsAreAFixedVocabulary:
 
     def test_a_non_locking_hint_list_records_nothing(self):
         assert locking_clause("SELECT * FROM [t1] WITH (NOLOCK, INDEX(pk)) WHERE [ID] = @p") is None
+
+
+class TestTheAccessClassSupersedesTheTextCheck:
+    """ADR-031 Decision 14 Amendment 5 (#728): the step-1 answer of a read follows its
+    access-pattern class where the amendment says so, and nowhere else."""
+
+    from src.agents.referee.access_pattern import (
+        AD_HOC_FILTER,
+        AGGREGATION,
+        KEY_LOOKUP,
+        KEY_RANGE,
+        KEY_SCOPED,
+        REFERENCE_READ,
+        UNANCHORED_JOIN,
+    )
+
+    JOIN = {
+        "query_id": "q",
+        "query_type": "SELECT",
+        "tables_accessed": ["t1", "t2"],
+        "has_joins": True,
+        "query_text": "SELECT * FROM t1 JOIN t2 ON t2.id = t1.t2_id WHERE t1.id = $1",
+    }
+
+    def test_a_key_anchored_join_is_neutral(self):
+        assert single_table_access_shape(self.JOIN) == RELATIONAL
+        assert single_table_access_shape(self.JOIN, access_class=self.KEY_SCOPED) == (
+            ORDERED_ONE_TO_MANY
+        )
+        assert single_table_access_shape(self.JOIN, access_class=self.UNANCHORED_JOIN) == (
+            RELATIONAL
+        )
+
+    @pytest.mark.parametrize(
+        ("sql", "access_class"),
+        [
+            ("SELECT count(*) FROM t1 WHERE parent_id = $1", "KEY_SCOPED"),
+            ("SELECT * FROM t1 WHERE id > $1", "KEY_RANGE"),
+            ("SELECT * FROM t1 ORDER BY parent_id LIMIT 20", "KEY_RANGE"),
+            ("SELECT DISTINCT parent_id FROM t1 WHERE parent_id = $1", "KEY_SCOPED"),
+        ],
+    )
+    def test_a_relational_read_by_key_is_neutral(self, sql, access_class):
+        query = _q(sql)
+        assert single_table_access_shape(query) == RELATIONAL
+        assert single_table_access_shape(query, access_class=getattr(self, access_class)) == (
+            ORDERED_ONE_TO_MANY
+        )
+
+    def test_a_read_with_no_predicate_is_neutral_not_crud(self):
+        query = _q("SELECT * FROM t1")
+        assert single_table_access_shape(query) == CRUD
+        for access_class in (self.KEY_RANGE, self.REFERENCE_READ):
+            assert single_table_access_shape(query, access_class=access_class) == (
+                ORDERED_ONE_TO_MANY
+            )
+
+    def test_a_key_lookup_that_only_deduplicates_is_crud(self):
+        query = _q("SELECT DISTINCT name FROM t1 WHERE id = $1")
+        assert single_table_access_shape(query) == RELATIONAL
+        assert single_table_access_shape(query, access_class=self.KEY_LOOKUP) == CRUD
+
+    @pytest.mark.parametrize(
+        ("sql", "access_class"),
+        [
+            ("SELECT * FROM t1 WHERE id IN (SELECT id FROM t1)", "KEY_LOOKUP"),  # subquery
+            ("WITH x AS (SELECT 1) SELECT * FROM t1 WHERE id = $1", "KEY_LOOKUP"),  # CTE
+            ("SELECT * FROM t1 WHERE parent_id = $1 AND note LIKE '%a%'", "KEY_SCOPED"),
+            (
+                "SELECT row_number() OVER (ORDER BY id) FROM t1 WHERE parent_id = $1",
+                "KEY_SCOPED",
+            ),
+            ("SELECT * FROM t1 WHERE total > $1", "AD_HOC_FILTER"),
+            ("SELECT parent_id, count(*) FROM t1 GROUP BY parent_id", "AGGREGATION"),
+        ],
+    )
+    def test_every_other_relational_reason_stays_relational(self, sql, access_class):
+        query = _q(sql)
+        assert single_table_access_shape(query, access_class=getattr(self, access_class)) == (
+            RELATIONAL
+        )
+
+    def test_a_write_keeps_the_text_check(self):
+        write = _q("UPDATE t1 SET total = 0 WHERE parent_id = $1 AND id < $2")
+        assert single_table_access_shape(write, access_class=self.KEY_SCOPED) == RELATIONAL
+        point = _q("DELETE FROM t1 WHERE id = $1")
+        assert single_table_access_shape(point, access_class=self.KEY_LOOKUP) == CRUD

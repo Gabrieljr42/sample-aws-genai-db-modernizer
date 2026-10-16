@@ -44,9 +44,9 @@ from collections.abc import Mapping
 from functools import cached_property, lru_cache
 
 from src.shared.sql_comments import strip_leading_comments
-from src.shared.unsupported_pattern import is_dedup_only_group_by
+from src.shared.unsupported_pattern import is_dedup_only_group_by, strip_comments_and_literals
 from src.tools.sql.facade import AccessFacts, SqlFacts, query_readings
-from src.tools.sql.regex_facts import WildcardLike, scan_sql
+from src.tools.sql.regex_facts import WildcardLike, regex_range_predicate, scan_sql
 
 __all__ = ["QueryFacts", "WildcardLike", "query_facts", "scan_sql", "source_engine_of"]
 
@@ -87,6 +87,8 @@ _ROW_LIMIT_HINTS = ("limit", "fetch", "top")
 # The timestamp column names (``regex_facts.TIMESTAMP_COLUMN_NAMES``) each hold one.
 _TIMESTAMP_HINTS = ("_at", "time", "date", "ttl")
 _JSON_HINTS = ("json", "->", "#>", "@>")
+# A comparison, or a prefix LIKE (a range on the column).
+_RANGE_HINTS = ("between", "<", ">", "like")
 
 # ---------------------------------------------------------------------------
 # Aggregation (#338, #336)
@@ -269,10 +271,6 @@ _ON_CONFLICT_OR_RETURNING_RE = re.compile(
 # ``documentdb_analysis_tools``).
 # ---------------------------------------------------------------------------
 
-# BETWEEN, or < / <= / > / >= with a word character before them (``a>=1``,
-# not ``a >= 1``), read on the lower-cased text (DynamoDB's and triage's range
-# reading; one definition of a range predicate is #893's last group).
-_RANGE_OPERATOR_WORD_RE = re.compile(r"\b(between|>=?|<=?)\b")
 _NEGATION_WORD_RE = re.compile(r"\b(not\s+in|not\s+exists|<>|!=)\b", re.I)
 _CORRELATED_SUBQUERY_SHAPE_RE = re.compile(
     r"\(\s*select\b.*?\bwhere\b.*?\b\w+\.\w+\s*=\s*\w+\.\w+", re.I | re.S
@@ -283,12 +281,6 @@ _CORRELATED_SUBQUERY_SHAPE_RE = re.compile(
 # Search and time-series keywords (the OpenSearch analysis's detectors, moved
 # here from ``opensearch_pattern_catalog``): case-insensitive substring checks.
 # ---------------------------------------------------------------------------
-
-TIME_RANGE_KEYWORDS: tuple[str, ...] = (
-    "between",
-    ">=",
-    "<=",
-)
 
 TIME_AGG_KEYWORDS: tuple[str, ...] = (
     "date_trunc",
@@ -766,16 +758,17 @@ class QueryFacts:
         return self._has(*_JSON_HINTS) and self._parsed.json_access
 
     @cached_property
-    def range_with_order_by(self) -> bool:
-        """``BETWEEN`` or a word character followed by ``<``/``<=``/``>``/``>=``, and an
-        ``ORDER BY`` (the range predicates are #893's last group).
+    def range_predicate(self) -> bool:
+        """A range on a column: ``<``, ``<=``, ``>``, ``>=``, ``BETWEEN`` or a prefix
+        ``LIKE 'abc%'``, as a top-level ``AND`` term of a ``WHERE`` or ``JOIN`` condition
+        (the access facts' ``ranges``, in any scope); the regex fallback's comparison
+        when the statement can't be parsed (#933, #728).
         """
-        return bool(_RANGE_OPERATOR_WORD_RE.search(self._lower)) and self.order_by
-
-    @cached_property
-    def time_range_operator(self) -> bool:
-        """``between``, ``>=`` or ``<=``."""
-        return _contains_any(self._lower, TIME_RANGE_KEYWORDS)
+        if not self._has(*_RANGE_HINTS):
+            return False
+        if self._access.parsed_by == "sqlglot":
+            return any(scope.ranges for scope in self._access.scopes)
+        return regex_range_predicate(self._text)
 
     # -- Text facts ------------------------------------------------------------
 
@@ -848,8 +841,11 @@ class QueryFacts:
 
     @cached_property
     def lateral_join(self) -> bool:
-        """``JOIN LATERAL (``, ``, LATERAL (`` or ``LATERAL (``."""
-        return bool(_LATERAL_JOIN_RE.search(self._text))
+        """``JOIN LATERAL (``, ``, LATERAL (`` or ``LATERAL (``, outside comments and string
+        literals (the class score reads it too since #985, so a word in a value is not one)."""
+        if not self._has("lateral"):
+            return False
+        return bool(_LATERAL_JOIN_RE.search(strip_comments_and_literals(self._text)))
 
     @cached_property
     def on_conflict_or_returning(self) -> bool:

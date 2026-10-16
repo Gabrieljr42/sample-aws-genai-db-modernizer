@@ -229,13 +229,15 @@ class TestFacts:
             ("SELECT * FROM t WHERE created_at > ?", "timestamp_column"),
             ("SELECT * FROM t WHERE last_seen_at > ?", "timestamp_column"),
             ("INSERT INTO t (id, event_date) VALUES (?, ?)", "timestamp_column"),
-            ("SELECT * FROM t WHERE a BETWEEN 1 AND 2 ORDER BY a", "range_with_order_by"),
-            ("SELECT * FROM t WHERE a>=1 ORDER BY a", "range_with_order_by"),
+            ("SELECT * FROM t WHERE a BETWEEN 1 AND 2 ORDER BY a", "range_predicate"),
+            ("SELECT * FROM t WHERE a >= 1 ORDER BY a", "range_predicate"),  # spaced (#933)
+            ("SELECT * FROM t WHERE a < ?", "range_predicate"),
+            ("SELECT * FROM t WHERE name LIKE 'ab%'", "range_predicate"),  # a prefix
             ("SELECT * FROM t WHERE a NOT IN (1)", "negation_word"),
             ("SELECT * FROM t WHERE a!=b", "negation_word"),
             ("SELECT (SELECT 1 FROM u WHERE u.id = t.uid) FROM t", "correlated_subquery_shape"),
             ("SELECT * FROM t WHERE event_time >= ?", "timestamp_column"),
-            ("SELECT * FROM t WHERE event_time >= ?", "time_range_operator"),
+            ("SELECT * FROM t WHERE event_time > ?", "range_predicate"),  # #933: not only >=/<=
             ("SELECT date_trunc('day', ts) FROM t", "time_function_keyword"),
             ("SELECT * FROM t ORDER BY a", "order_by"),
             ("UPDATE a JOIN b ON b.id = a.id SET a.x = ?", "multi_table_write"),
@@ -305,9 +307,10 @@ class TestFacts:
             ("SELECT count FROM t", "aggregation"),  # a column named count
             ("SELECT * FROM t WHERE a = 'x'", "in_list"),
             ("SELECT fooWITH RECURSIVE", "recursive_cte"),
-            ("SELECT * FROM t WHERE a >= 1 ORDER BY a", "range_with_order_by"),  # space
-            ("SELECT * FROM t WHERE a BETWEEN 1 AND 2", "range_with_order_by"),  # no ORDER BY
-            ("SELECT * FROM t WHERE a > ?", "time_range_operator"),
+            ("SELECT * FROM t WHERE note = 'lateral (x)'", "lateral_join"),  # a value (#985)
+            ("SELECT * FROM t WHERE a <> 1", "range_predicate"),
+            ("SELECT CASE WHEN a > 1 THEN 1 END FROM t", "range_predicate"),  # not a filter
+            ("SELECT * FROM t WHERE doc->>'a' = ?", "range_predicate"),  # JSON, no range
             ("SELECT * FROM t WHERE mydate_x = ?", "timestamp_column"),
             ("UPDATE t SET a = 1 WHERE id = ?", "timestamp_column"),  # "update" holds "date"
             ("SELECT CAST(a AS DATE) FROM t", "timestamp_column"),  # a type, not a column

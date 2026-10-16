@@ -8,7 +8,7 @@ of its tables, its order, row limit and aggregates); the keys come from the
 collector's schema (:class:`SchemaKeys`). Like :mod:`query_shape`, this module
 reports a fact about one query, never a score and never an engine.
 
-The seven scored classes, in severity order (``SCORED_CLASSES``; when a statement
+The eight scored classes, in severity order (``SCORED_CLASSES``; when a statement
 shows several shapes, in different scopes or in one, the later class wins):
 
 1. ``key_lookup``: one row (or a batch) by a full primary or unique key, whatever its
@@ -21,21 +21,24 @@ shows several shapes, in different scopes or in one, the later class wins):
    stays here: only a primary-key read is a key lookup. An aggregate with no ``GROUP
    BY`` over such rows, on one table or over a key-anchored join (``COUNT(*) WHERE
    order_id = ?``), combines one item collection, so it stays here too.
-3. ``key_range``: a range or an order over a key with no anchoring value
-   (``BETWEEN``, ``ORDER BY id LIMIT n``), a read with no predicate at all (the
-   whole key range), and any read that skips locked rows (``SKIP LOCKED``,
-   ``READPAST``: an unknown row, Decision 14).
-4. ``ad_hoc_filter``: filters on non-key attributes with no anchoring key, an
+3. ``reference_read``: every row of a small table (a collected row count of at most
+   ``SMALL_TABLE_MAX_ROWS``), with no predicate and no row limit: reference data such
+   as feature flags, settings or a lookup list (#920).
+4. ``key_range``: a range or an order over a key with no anchoring value
+   (``BETWEEN``, ``ORDER BY id LIMIT n``), a read with no predicate at all of any
+   other table (the whole key range), and any read that skips locked rows (``SKIP
+   LOCKED``, ``READPAST``: an unknown row, Decision 14).
+5. ``ad_hoc_filter``: filters on non-key attributes with no anchoring key, an
    ``OR`` of predicates, a prefix ``LIKE`` on a non-key column, and an unkeyed
    bulk write.
-5. ``unanchored_join``: a join in which some table is not reached by key from a
+6. ``unanchored_join``: a join in which some table is not reached by key from a
    key predicate.
-6. ``aggregation``: ``GROUP BY`` with an aggregate function (a ``GROUP BY`` that
+7. ``aggregation``: ``GROUP BY`` with an aggregate function (a ``GROUP BY`` that
    combines nothing only de-duplicates, like ``DISTINCT``, and keeps the class of
    the rows it reads), an aggregate over rows no key anchors, or a
    windowed aggregate (``SUM(...) OVER``; a ranking or offset window function such
    as ``ROW_NUMBER`` combines nothing, the facade's ``SqlFacts`` definition).
-7. ``text_search``: in a scope no key anchors, a ``LIKE`` whose pattern starts with a
+8. ``text_search``: in a scope no key anchors, a ``LIKE`` whose pattern starts with a
    wildcard, a regular-expression match, a similarity function or a full-text match.
    On keyed rows the same predicate only filters one item collection, so it never
    outranks the key anchor; the reason says so. A ``LIKE`` whose whole pattern is a
@@ -68,13 +71,15 @@ are read.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from src.agents.referee.table_resolution import TableNameResolver
 from src.tools.sql.facade import AccessFacts, ColumnFact, ScopeFacts, ScopeSource, access_facts
+from src.tools.sql.query_facts import query_facts
 
 KEY_LOOKUP = "key_lookup"
 KEY_SCOPED = "key_scoped"
+REFERENCE_READ = "reference_read"
 KEY_RANGE = "key_range"
 AD_HOC_FILTER = "ad_hoc_filter"
 UNANCHORED_JOIN = "unanchored_join"
@@ -86,6 +91,7 @@ UNPARSED = "unparsed"
 SCORED_CLASSES: tuple[str, ...] = (
     KEY_LOOKUP,
     KEY_SCOPED,
+    REFERENCE_READ,
     KEY_RANGE,
     AD_HOC_FILTER,
     UNANCHORED_JOIN,
@@ -97,6 +103,7 @@ _SEVERITY = {name: rank for rank, name in enumerate(SCORED_CLASSES)}
 CLASS_LABELS: dict[str, str] = {
     KEY_LOOKUP: "key lookup",
     KEY_SCOPED: "key-scoped 1:N read",
+    REFERENCE_READ: "small reference-table read",
     KEY_RANGE: "range or ordered read by key",
     AD_HOC_FILTER: "ad hoc filter",
     UNANCHORED_JOIN: "unanchored join",
@@ -115,6 +122,10 @@ _TEMPORAL_TYPES = frozenset({"date", "datetime", "timestamp", "time"})
 # ``cardinality``) number at most this share of the table's rows addresses a large
 # slice of the table per value, not an item collection, so it is not a key.
 _LOW_CARDINALITY_SHARE = 0.01
+# A table with at most this many collected rows is small: read whole, it is reference
+# data (``reference_read``), and DynamoDB's metadata-config-store pattern reads the same
+# limit (``src.tools.analysis.dynamodb_analysis_tools``, #920).
+SMALL_TABLE_MAX_ROWS = 10_000
 
 
 @dataclass(frozen=True)
@@ -128,6 +139,8 @@ class TableKeys:
     # Keys that only a non-unique index's leading column makes keys, with no
     # cardinality statistics to confirm them (the reason text says so).
     unconfirmed_keys: frozenset[str] = frozenset()
+    # The collector's row count, when it reports one.
+    row_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +220,7 @@ def _table_keys(table: Mapping) -> TableKeys:
         key_columns=frozenset(key_columns | index_keys),
         columns=frozenset(n for n in by_name if n),
         unconfirmed_keys=frozenset(unconfirmed - key_columns),
+        row_count=rows if isinstance(rows := table.get("row_count"), int) else None,
     )
 
 
@@ -216,8 +230,10 @@ class AccessClassification:
     score may depend on (``src.shared.catalog.access_classes.QUERY_FACTS``):
     ``time_bucket`` (a GROUP BY over a date/time truncation), the text searches its
     scopes show (``full_text``, ``leading_wildcard``, ``pattern_match``,
-    ``similarity_match``), ``window_function`` and ``write`` (an INSERT, UPDATE,
-    DELETE or MERGE)."""
+    ``similarity_match``), ``window_function``, ``write`` (an INSERT, UPDATE, DELETE
+    or MERGE), ``partition_range`` (a scope that pins a key column of one table and
+    ranges another of its columns) and the SQL features ``recursive_cte``,
+    ``lateral_join`` and ``stored_routine`` (#985)."""
 
     name: str
     reason: str
@@ -359,6 +375,16 @@ def _scope_class(
         if all(o is not None and scope.is_key(alias, o) for o in order[:1]):
             return KEY_RANGE, f"ordered read over a key of {table}"
         return AD_HOC_FILTER, f"orders {table} by non-key attributes"
+    small = (
+        table_keys is not None
+        and table_keys.row_count is not None
+        and table_keys.row_count <= SMALL_TABLE_MAX_ROWS
+    )
+    if small and not facts.limit and not facts.skip_locked:
+        return REFERENCE_READ, (
+            f"reads all of {table}, a small table ({table_keys.row_count} rows), "  # type: ignore[union-attr]
+            "with no predicate"
+        )
     return KEY_RANGE, f"reads all of {table} (no predicate)"
 
 
@@ -444,7 +470,7 @@ def classify_facts(
     name, reason = max(found, key=lambda item: _SEVERITY[item[0]])
     if name == AD_HOC_FILTER and any(s.like_parameter and not s.text_search for s in facts.scopes):
         reason += " (its LIKE pattern is a bind parameter, so no text search is visible, #912)"
-    return AccessClassification(name, reason, _class_facts(facts))
+    return AccessClassification(name, reason, _class_facts(facts, keys))
 
 
 # The facade's text-search kinds, by the query-fact name a class score reads
@@ -457,7 +483,7 @@ _TEXT_FACTS = {
 }
 
 
-def _class_facts(facts: AccessFacts) -> frozenset[str]:
+def _class_facts(facts: AccessFacts, keys: SchemaKeys) -> frozenset[str]:
     """The query facts a class score may depend on (``AccessClassification.facts``)."""
     found = {_TEXT_FACTS[k] for s in facts.scopes for k in s.text_search_kinds if k in _TEXT_FACTS}
     if any(s.time_bucket for s in facts.scopes):
@@ -466,15 +492,54 @@ def _class_facts(facts: AccessFacts) -> frozenset[str]:
         found.add("window_function")
     if facts.kind in _WRITE_KINDS:
         found.add("write")
+    if any(_partition_range(_scope_columns(s, keys)) for s in facts.scopes):
+        found.add("partition_range")
     return frozenset(found)
+
+
+def _partition_range(scope: ScopeColumns) -> bool:
+    """A scope that reads one table, pins a key column of it to a value and bounds
+    another of its columns by a range (the facade's ``ranges``): the shape of a
+    partition-key equality plus a sort-key range, DynamoDB's ``Query`` on one table
+    (#933, #920). A join's range is not one: its other tables are an item collection
+    reached by key, which the join patterns rate."""
+    if len(scope.tables) != 1:
+        return False
+    (table,) = scope.tables
+    pinned = scope.pinned.get(table, frozenset()) & scope.key_columns.get(table, frozenset())
+    return bool(pinned) and bool(scope.ranged.get(table, frozenset()) - pinned)
 
 
 def classify_query(
     query: Mapping, keys: SchemaKeys, source_engine: str | None
 ) -> AccessClassification:
     """The access-pattern class of one collected query."""
-    facts = access_facts(str(query.get("query_text") or ""), source_engine or "")
-    return classify_facts(facts, keys, str(query.get("query_type") or ""))
+    text = str(query.get("query_text") or "")
+    facts = access_facts(text, source_engine or "")
+    result = classify_facts(facts, keys, str(query.get("query_type") or ""))
+    return _with_feature_facts(result, text, source_engine)
+
+
+def _with_feature_facts(
+    result: AccessClassification, text: str, source_engine: str | None
+) -> AccessClassification:
+    """``result`` with the SQL features its text shows (#985), read from the shared query
+    facts (:mod:`src.tools.sql.query_facts`, one definition each, read in the source's
+    dialect): ``recursive_cte``, ``lateral_join`` and ``stored_routine`` (a call to, or
+    the definition of, a stored procedure or function; a SQL Server ``EXEC``)."""
+    readings = query_facts(text, source_engine)
+    shown = {
+        name
+        for name, present in (
+            ("recursive_cte", readings.recursive_cte),
+            ("lateral_join", readings.lateral_join),
+            ("stored_routine", readings.stored_routine_keyword),
+        )
+        if present
+    }
+    if not shown:
+        return result
+    return replace(result, facts=result.facts | shown)
 
 
 @dataclass(frozen=True)
@@ -541,6 +606,8 @@ def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
 
 def query_access(query: Mapping, keys: SchemaKeys, source_engine: str | None) -> QueryAccess:
     """:func:`classify_query` plus each scope's resolved columns, from one parse."""
-    facts = access_facts(str(query.get("query_text") or ""), source_engine or "")
+    text = str(query.get("query_text") or "")
+    facts = access_facts(text, source_engine or "")
     classification = classify_facts(facts, keys, str(query.get("query_type") or ""))
+    classification = _with_feature_facts(classification, text, source_engine)
     return QueryAccess(classification, tuple(_scope_columns(s, keys) for s in facts.scopes))

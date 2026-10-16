@@ -29,15 +29,19 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 
+from src.agents.referee.access_pattern import KEY_LOOKUP, KEY_RANGE, KEY_SCOPED, REFERENCE_READ
 from src.agents.referee.capability_registry import detect_required_capabilities
 from src.agents.referee.table_resolution import SourceScope
 from src.shared.unsupported_pattern import non_scalar_function_names, strip_comments_and_literals
+from src.tools.sql.query_facts import query_facts
 from src.tools.sql.regex_facts import (
     GROUP_BY_RE,
     LITERAL_PREFIX_LIKE_RE,
     ORDER_BY_RE,
     PATTERN_PREDICATE_RE,
+    RANGE_PREDICATE_RE,
     SELECT_WORD_RE,
+    aggregate_function_names,
 )
 
 __all__ = [
@@ -96,10 +100,6 @@ _RIGHT_OPERAND_RE = re.compile(r"^\s*([A-Za-z_$@:?0-9(][\w$@:.?]*)")
 # parameter ($1, ?, @p, :name) or a number never matches.
 _COLUMN_RE = re.compile(r"^[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*$")
 _NOT_A_COLUMN = frozenset({"null", "true", "false", "not", "and", "or"})
-# <, >, <=, >= or BETWEEN -- but not <>, ->, ->>, @>, <@, <<, >>, <=>.
-_RANGE_PREDICATE_RE = re.compile(
-    r"\bBETWEEN\b|(?<![<>=!@\-])(?:<=|>=|<|>)(?![<>=@])", re.IGNORECASE
-)
 
 # ---------------------------------------------------------------------------
 # Primary-key-ordered reads (maintainer decision on #692)
@@ -564,6 +564,7 @@ def single_table_access_shape(
     primary_key: Sequence[str] | None = None,
     limit_value: int | None = None,
     source: SourceScope | None = None,
+    access_class: str | None = None,
 ) -> str:
     """``CRUD``, ``ORDERED_ONE_TO_MANY`` or ``RELATIONAL`` for ``query``.
 
@@ -616,17 +617,89 @@ def single_table_access_shape(
     :func:`locking_clause`. A read that skips locked rows (``SKIP LOCKED``,
     ``READPAST``, :func:`skips_locked_rows`) returns an unknown row, so it is
     at most ``ORDERED_ONE_TO_MANY``, never ``CRUD`` (review of #840).
+
+    ``access_class`` (the query's access-pattern class,
+    :func:`src.agents.referee.access_pattern.classify_query`) applies ADR-031
+    Decision 14 Amendment 5 to a read (#728): a key-anchored join, an aggregate with
+    no ``GROUP BY`` over keyed rows, a ``GROUP BY`` or ``DISTINCT`` that only
+    de-duplicates keyed rows, a range over a key with no pinned value and an order
+    over a non-primary key, each relational to the text check alone, are neutral when
+    the class is a key-scoped read, a range or ordered read by key or a small
+    reference-table read (:func:`_class_shape`); a read with no predicate is neutral,
+    not CRUD. Without it (and for every write) the answer is the text check's.
     """
+    reasons = _relational_reasons(query, primary_key, limit_value, source)
+    if isinstance(reasons, str):
+        shape = reasons
+    else:
+        shape = RELATIONAL if reasons else CRUD
+    if access_class is None or str(query.get("query_type") or "").upper() != "SELECT":
+        return shape
+    return _class_shape(shape, reasons, access_class, query)
+
+
+# The reasons a read is relational that a key-anchored access-pattern class supersedes
+# (ADR-031 Decision 14 Amendment 5, #728): a join every table of which is reached by
+# key, an aggregate with no GROUP BY over keyed rows, a GROUP BY or DISTINCT that only
+# de-duplicates, a range over a key with no pinned value, and an order over a key that
+# is not the primary key. Every other reason (a subquery, a CTE, an engine-specific
+# function, a pattern match, a window function, a non-CRUD statement) keeps the read
+# relational whatever its class.
+_CLASS_SUPERSEDES = frozenset({"join", "aggregate", "dedup", "range", "order"})
+_NEUTRAL_CLASSES = frozenset({KEY_SCOPED, KEY_RANGE, REFERENCE_READ})
+
+
+def _class_shape(shape: str, reasons: object, access_class: str, query: Mapping) -> str:
+    """Amendment 5's step-1 answers for a read, from its access-pattern class.
+
+    A key-scoped 1:N read, a range or ordered read by key and a small reference-table
+    read are neutral (an ordered 1:M read: neither CRUD nor relational evidence) where
+    the text check alone found them relational for a reason the class supersedes; a
+    key lookup that only de-duplicates its rows is CRUD. A read with no predicate is
+    neutral, not CRUD: it reads the whole key range.
+    """
+    if shape == RELATIONAL:
+        if not isinstance(reasons, frozenset) or not reasons or not reasons <= _CLASS_SUPERSEDES:
+            return shape
+        if access_class in _NEUTRAL_CLASSES:
+            return ORDERED_ONE_TO_MANY
+        if access_class == KEY_LOOKUP and reasons == {"dedup"}:
+            return CRUD
+        return shape
+    if shape == CRUD and access_class in (KEY_RANGE, REFERENCE_READ):
+        return ORDERED_ONE_TO_MANY
+    return shape
+
+
+def _relational_reasons(
+    query: Mapping,
+    primary_key: Sequence[str] | None,
+    limit_value: int | None,
+    source: SourceScope | None,
+) -> frozenset[str] | str:
+    """Every reason the text check finds ``query`` relational (empty: CRUD), or a final
+    answer (``RELATIONAL`` or ``ORDERED_ONE_TO_MANY``) no class can change."""
     query_type = str(query.get("query_type") or "").upper()
     if query_type not in _CRUD_QUERY_TYPES:
         return RELATIONAL
+    reasons: set[str] = set()
     tables = list(query.get("tables_accessed") or [])
     if len(tables) != 1 or query.get("has_joins"):
-        return RELATIONAL
+        reasons.add("join")
     text = str(query.get("query_text") or "")
-    if detect_required_capabilities(text, [], tables, source):
-        return RELATIONAL
-    if non_scalar_function_names(text):
+    capabilities = detect_required_capabilities(text, [], tables, source)
+    if capabilities:
+        facts = query_facts(text, source.engine if source else None)
+        plain_aggregate = not (facts.window_function or facts.group_by or facts.found_rows)
+        if capabilities == ["aggregation"] and plain_aggregate:
+            reasons.add("aggregate")
+        else:
+            return RELATIONAL
+    functions = non_scalar_function_names(text)
+    if "aggregate" in reasons:
+        # The aggregate's own function is the aggregate reason, not an engine feature.
+        functions -= aggregate_function_names(text)
+    if functions:
         return RELATIONAL
     with_idents = _QUOTED_IDENT_RE.sub(" ident ", text)
     sql = strip_comments_and_literals(with_idents)
@@ -635,7 +708,7 @@ def single_table_access_shape(
     if len(SELECT_WORD_RE.findall(sql)) > (1 if query_type == "SELECT" else 0):
         return RELATIONAL
     if _DISTINCT_RE.search(sql) or GROUP_BY_RE.search(sql):
-        return RELATIONAL
+        reasons.add("dedup")
     where_match = _WHERE_RE.search(sql)
     where = where_match.group("where") if where_match else ""
     # A pattern-match predicate (LIKE/ILIKE/SIMILAR TO/REGEXP/RLIKE) and a literal-prefix
@@ -644,19 +717,21 @@ def single_table_access_shape(
     if pattern_match and not LITERAL_PREFIX_LIKE_RE.search(with_idents):
         return RELATIONAL
     keyed = _has_key_predicate(where)
-    ranged = pattern_match or bool(_RANGE_PREDICATE_RE.search(where))
+    ranged = pattern_match or bool(RANGE_PREDICATE_RE.search(where))
     if query_type in {"UPDATE", "DELETE"}:
-        return CRUD if keyed and not ranged else RELATIONAL
+        return frozenset(reasons) if keyed and not ranged and not reasons else RELATIONAL
     if query_type == "SELECT" and not keyed:
         if ranged:
-            return RELATIONAL
-        if ORDER_BY_RE.search(sql):
+            reasons.add("range")
+        elif ORDER_BY_RE.search(sql):
             if is_primary_key_first_row_read(text, primary_key or [], limit_value):
-                return CRUD
-            if primary_key_ordered_limit(text, primary_key or []) is not None:
-                return ORDERED_ONE_TO_MANY
-            return RELATIONAL
-    if query_type == "SELECT" and skips_locked_rows(text):
+                if not reasons:
+                    return frozenset()
+            elif primary_key_ordered_limit(text, primary_key or []) is not None:
+                return RELATIONAL if reasons else ORDERED_ONE_TO_MANY
+            else:
+                reasons.add("order")
+    if not reasons and query_type == "SELECT" and skips_locked_rows(text):
         # SKIP LOCKED / READPAST returns an unknown row: at most neutral (#840).
         return ORDERED_ONE_TO_MANY
-    return CRUD
+    return frozenset(reasons)

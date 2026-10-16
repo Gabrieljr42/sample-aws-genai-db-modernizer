@@ -99,6 +99,25 @@ class TestTimeSeriesPatternDetection:
         pattern_types, _, _ = _run(get_high_ingest_fixture())
         assert "high-ingest" in pattern_types
 
+    def test_a_strict_comparison_on_a_timestamp_is_a_time_range(self):
+        """#933: the range is the access facts' ``ranges`` (one definition), so ``>`` and
+        ``<`` count, not only ``BETWEEN``, ``>=`` and ``<=`` written as substrings."""
+        fixture = get_time_range_fixture()
+        for q in fixture["queries"]["query_patterns"]:
+            q["query_text"] = "SELECT * FROM sensor_readings WHERE event_time > $1"
+        pattern_types, _, _ = _run(fixture)
+        assert "time-range-query" in pattern_types
+
+    def test_a_comparison_in_a_projection_is_not_a_time_range(self):
+        fixture = get_time_range_fixture()
+        for q in fixture["queries"]["query_patterns"]:
+            q["query_text"] = (
+                "SELECT CASE WHEN event_time >= $1 THEN 1 END FROM sensor_readings "
+                "WHERE sensor_id = $2"
+            )
+        pattern_types, _, _ = _run(fixture)
+        assert "time-range-query" not in pattern_types
+
     # --- No cross-contamination ---
 
     def test_time_range_no_search_patterns(self):

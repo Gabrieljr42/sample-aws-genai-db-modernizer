@@ -7,6 +7,7 @@ from src.agents.referee.assignment_resolver import (
     RoutingTrace,
     derive_table_assignments,
 )
+from src.agents.referee.query_pattern import QueryPatternModel
 from src.agents.referee.query_scoring import (
     ANTI_PATTERN_PENALTIES,
     CAPABILITY_SIGNAL_ENGINES,
@@ -78,6 +79,38 @@ def _make_analysis(engine: str, table_ids: list[str], confidence: int = 70) -> d
             "patterns_detected": [],
             "anti_patterns_detected": [],
         },
+    }
+
+
+def _make_scored_analysis(
+    engine: str,
+    table_ids: list[str],
+    complexity: int = 70,
+    performance: int = 70,
+    cost: int = 70,
+    patterns: list[dict] | None = None,
+) -> dict:
+    """An analysis whose table rows carry the four dimensions (``score_breakdown``):
+    a classified query's pattern dimension is its own class score (ADR-031 Decision 14
+    Amendment 5, #728), so a fixture that wants a class-based score needs the other
+    three dimensions."""
+    from src.contracts.analysis_output import ScoreBreakdown
+    from src.tools.analysis.score_weights import weight_profiles
+    from src.tools.analysis.scoring import compute_confidence
+
+    breakdown = {
+        "pattern_match_score": 50,
+        "complexity_score": complexity,
+        "performance_score": performance,
+        "cost_score": cost,
+    }
+    confidence = compute_confidence(ScoreBreakdown(**breakdown), dict(weight_profiles(engine)[0]))
+    return {
+        "table_recommendations": [
+            {"table_id": t, "confidence_score": confidence, "score_breakdown": dict(breakdown)}
+            for t in table_ids
+        ],
+        "workload_analysis": {"patterns_detected": patterns or [], "anti_patterns_detected": []},
     }
 
 
@@ -403,18 +436,28 @@ class TestUtilityStatementsExcludedFromRouting:
         assert q1.signal_override is None
 
     def test_ordinary_query_unaffected(self):
-        """A normal SELECT keeps the normal confidence-scoring outcome."""
+        """A normal SELECT keeps the normal confidence-scoring outcome.
+
+        #728: a classified query's pattern dimension is its own class score, so the
+        fixture is a key lookup on a table with a primary key (DynamoDB 100, Aurora 80)
+        and the same other dimensions on both engines; it is not pinned as a utility
+        statement, and the score sends it to DynamoDB.
+        """
         resolver = AssignmentResolver()
         triage = _make_triage(["dynamodb", "aurora_mysql"])
-        collector = self._collector_with_metadata({"q1": "SELECT * FROM wp_posts"}, "mysql")
+        collector = self._collector_with_metadata(
+            {"q1": "SELECT * FROM users WHERE id = ?"}, "mysql"
+        )
+        collector["database_schema"]["tables"][0]["primary_key"] = ["id"]
         analysis = {
-            "dynamodb": _make_analysis("dynamodb", ["db.users"], confidence=95),
-            "aurora_mysql": _make_analysis("aurora_mysql", ["db.users"], confidence=10),
+            "dynamodb": _make_scored_analysis("dynamodb", ["db.users"]),
+            "aurora_mysql": _make_scored_analysis("aurora_mysql", ["db.users"]),
         }
 
         result = resolver.resolve(triage, analysis, collector)
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         assert q1.assigned_engine == "dynamodb"
+        assert "utility/metadata statement" not in q1.assignment_reason
 
     def test_tableless_catalog_call_pinned_to_aurora_postgresql(self):
         """discourse shape: obj_description($1::regclass::oid, $2), no real source table."""
@@ -1131,15 +1174,35 @@ class TestTextSearchCapabilityScopedPenalty:
         collector["queries"]["query_patterns"][0][
             "query_text"
         ] = "SELECT * FROM users WHERE name LIKE '%term%'"
+        # #728: the query is a leading-wildcard text search (pattern dimension, catalog
+        # PR C: OpenSearch 80, DocumentDB 45); DocumentDB's other dimensions are 100 and
+        # OpenSearch's 0, so the unpenalised DocumentDB score (75) beats OpenSearch's
+        # (0.45 * 80 = 36).
         analysis = {
-            "opensearch": self._analysis_with_pattern(50, "wildcard-search", "q1"),
-            "documentdb": _make_analysis("documentdb", ["db.users"], confidence=90),
+            "opensearch": _make_scored_analysis(
+                "opensearch",
+                ["db.users"],
+                complexity=0,
+                performance=0,
+                cost=0,
+                patterns=[
+                    {
+                        "pattern_type": "wildcard-search",
+                        "query_ids": ["q1"],
+                        "table_ids": ["db.users"],
+                    }
+                ],
+            ),
+            "documentdb": _make_scored_analysis(
+                "documentdb", ["db.users"], complexity=100, performance=100, cost=100
+            ),
         }
 
         result = resolver.resolve(triage, analysis, collector)
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         assert q1.assigned_engine == "documentdb"
-        assert q1.confidence == 90  # unpenalized -- documentdb is exempt from wildcard-search
+        # unpenalized -- documentdb is exempt from wildcard-search: its base score, 75
+        assert q1.confidence == int(0.45 * 45 + 0.25 * 100 + 0.15 * 100 + 0.15 * 100)
         assert "documentdb lacks required capability" not in q1.assignment_reason
         # #493: the reason is the substring-match pattern's, the more specific one for a
         # literal leading wildcard -- here a word search, so not penalised, with the redesign.
@@ -1159,15 +1222,31 @@ class TestTextSearchCapabilityScopedPenalty:
         collector["queries"]["query_patterns"][0][
             "query_text"
         ] = "SELECT * FROM users WHERE name LIKE ?"
+        # #728: as above, the class decides the pattern dimension (text search).
         analysis = {
-            "opensearch": self._analysis_with_pattern(50, "wildcard-search", "q1"),
-            "documentdb": _make_analysis("documentdb", ["db.users"], confidence=77),
+            "opensearch": _make_scored_analysis(
+                "opensearch",
+                ["db.users"],
+                complexity=0,
+                performance=0,
+                cost=0,
+                patterns=[
+                    {
+                        "pattern_type": "wildcard-search",
+                        "query_ids": ["q1"],
+                        "table_ids": ["db.users"],
+                    }
+                ],
+            ),
+            "documentdb": _make_scored_analysis(
+                "documentdb", ["db.users"], complexity=100, performance=100, cost=100
+            ),
         }
 
         result = resolver.resolve(triage, analysis, collector)
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         assert q1.assigned_engine == "documentdb"
-        assert q1.confidence == 77  # unpenalized
+        assert q1.confidence == int(0.45 * 75 + 0.25 * 100 + 0.15 * 100 + 0.15 * 100)  # unpenalized
         assert "runs this search pattern natively" in q1.assignment_reason
 
 
@@ -1176,8 +1255,13 @@ class TestComputeQueryConfidence:
     decide the base score; a pattern match contributes nothing on top --
     maintainer decision, PR #500 review round 1: a flat bonus is not itself
     per-query evidence, and double-counts the pattern dimension the table
-    confidence already weighs in. Per-query pattern evidence is coming with
-    the engine-neutral detectors, #491.
+    confidence already weighs in).
+
+    Since the #728 switch this rule covers only a statement with no access-pattern
+    class (``utility`` or ``unparsed``, ADR-031 Decision 14 Amendment 5): this class's
+    fixtures (``SELECT ...``, or no text at all) are such statements. A classified
+    query's pattern dimension is its own class score; those cases are in
+    ``tests/unit/agents/referee/test_per_query_pattern_score.py``.
     """
 
     def test_pattern_match_no_longer_affects_the_score_at_all(self):
@@ -1289,7 +1373,9 @@ class TestComputeQueryConfidence:
             ],
         }
         query = {"query_id": "q1", "tables_accessed": []}
-        score = compute_query_confidence("q1", query, "dynamodb", analysis)
+        score = compute_query_confidence(
+            "q1", query, "dynamodb", analysis, pattern_model=QueryPatternModel()
+        )
         assert score == 60  # mean(80, 40)
 
     def test_opensearch_scores_zero_without_its_own_pattern_match(self):
@@ -1301,7 +1387,9 @@ class TestComputeQueryConfidence:
         """
         analysis = _make_analysis("opensearch", ["db.users"], confidence=90)
         query = {"query_id": "q1", "tables_accessed": ["db.users"]}
-        score = compute_query_confidence("q1", query, "opensearch", analysis)
+        score = compute_query_confidence(
+            "q1", query, "opensearch", analysis, pattern_model=QueryPatternModel()
+        )
         assert score == 0
 
     def test_non_pattern_only_engine_still_gets_the_table_average_fallback(self):
@@ -1311,7 +1399,9 @@ class TestComputeQueryConfidence:
         """
         analysis = _make_analysis("dynamodb", ["db.users"], confidence=90)
         query = {"query_id": "q1", "tables_accessed": ["db.users"]}
-        score = compute_query_confidence("q1", query, "dynamodb", analysis)
+        score = compute_query_confidence(
+            "q1", query, "dynamodb", analysis, pattern_model=QueryPatternModel()
+        )
         assert score == 90
 
     def test_pattern_only_engine_is_unaffected_by_the_302_fix(self):
@@ -1340,7 +1430,9 @@ class TestComputeQueryConfidence:
         # tables_accessed includes db.posts too, but opensearch must never
         # average over it, nor add a bonus on top of the pattern's own score.
         query = {"query_id": "q1", "tables_accessed": ["db.users", "db.posts"]}
-        score = compute_query_confidence("q1", query, "opensearch", analysis)
+        score = compute_query_confidence(
+            "q1", query, "opensearch", analysis, pattern_model=QueryPatternModel()
+        )
         assert score == 70
 
 
@@ -1427,11 +1519,15 @@ class TestTextSearchOverrideNeedsJustification:
             "opensearch": _make_analysis("opensearch", ["db.users"], confidence=50),
         }
 
-        result = resolver.resolve(triage, analysis, collector)
+        trace = RoutingTrace()
+        result = resolver.resolve(triage, analysis, collector, routing_trace=trace)
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
-        assert q1.assigned_engine != "opensearch"
+        # #728: the shallow ``LIKE ?`` is a text search by its own class, so OpenSearch
+        # may now win it on score; what the justification floor guards is the override.
+        # The query is placed by the shared scorer, not pinned by the signal.
         assert q1.signal_override is None
         assert "signal override" not in q1.assignment_reason
+        assert trace.by_query["q1"]["assigned_engine"] == q1.assigned_engine
 
     def test_tsvector_construction_with_no_match_operator_does_not_override(self):
         """A bare ``to_tsvector(...)`` with no ``@@`` is index/document
@@ -1571,8 +1667,10 @@ class TestTextSearchOverrideNeedsJustification:
         by_id = {qa.query_id: qa for qa in result.query_assignments}
         assert by_id["deep"].assigned_engine == "opensearch"
         assert by_id["deep"].signal_override == "text_search"
-        assert by_id["shallow"].assigned_engine != "opensearch"
+        # #728: the shallow query is scored, never pinned (it may still score highest on
+        # OpenSearch by its own text-search class; see the test above).
         assert by_id["shallow"].signal_override is None
+        assert "signal override" not in by_id["shallow"].assignment_reason
 
     def test_duplicate_query_id_in_signal_is_deduplicated(self):
         """A query_id repeated in a signal's own ``query_ids`` list (e.g. two

@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from src.agents.referee.assignment_resolver import (
     AssignmentResolver,
     RoutingTrace,
@@ -121,6 +123,7 @@ class TestExactTieMaintainerRuleThroughTheResolver:
             _collector(query_ids, engine=source_engine),
         )
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_oracle_exact_tie_goes_to_postgresql_with_the_rule_traced(self):
         result = self._resolve("oracle")
         choice = result.aurora_engine_choice
@@ -146,6 +149,7 @@ class TestExactTieMaintainerRuleThroughTheResolver:
 
 
 class TestClearWinner:
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_mysql_clearly_earns_more_wins(self):
         # Design: the choice follows the queries, not a hardcoded default --
         # Aurora MySQL can win when it clearly scores higher.
@@ -219,6 +223,7 @@ class TestNearTieDecidedByFeature:
         }
         return resolver.resolve(triage, analysis, collector)
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_a_sql_server_close_call_with_a_recursive_cte_falls_to_babelfish(self):
         result = self._close_call("sqlserver")
         choice = result.aurora_engine_choice
@@ -227,6 +232,7 @@ class TestNearTieDecidedByFeature:
         assigned_engines = {qa.assigned_engine for qa in result.query_assignments}
         assert assigned_engines == {"aurora_postgresql"}
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_an_oracle_close_call_with_a_recursive_cte_goes_to_the_higher_total(self):
         result = self._close_call("oracle")
         choice = result.aurora_engine_choice

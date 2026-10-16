@@ -21,6 +21,7 @@ from src.agents.referee.reality_check_handler import apply_reality_check_llm_out
 from src.agents.referee.tie_break import break_tie
 from src.contracts.model_flag import FlaggableEngine, FlagReason, ModelFlag
 from src.shared.engine_names import ENGINE_DISPLAY_NAMES
+from tests.unit.agents.referee.fixed_scores import fixed_model, flat_row
 
 # Engines a plain SELECT may land on with no specialty signal (OpenSearch only
 # absorbs search/aggregation queries, ElastiCache owns nothing).
@@ -42,8 +43,9 @@ def _context(scores: dict[str, dict[str, int]]) -> ScoringContext:
         for engine, score in per_engine.items():
             analysis.setdefault(engine, {"table_recommendations": []})[
                 "table_recommendations"
-            ].append({"table_id": f"t_{qid}", "confidence_score": score})
-    return ScoringContext(analysis_outputs=analysis)
+            ].append(flat_row(f"t_{qid}", score))
+    # Through the per-query scorer (#728): tests/unit/agents/referee/fixed_scores.py.
+    return ScoringContext(analysis_outputs=analysis, pattern_model=fixed_model(scores))
 
 
 def _flag(qid: str, engine: str, *, category: str = "other", explanation: str = "gap") -> dict:
@@ -236,6 +238,7 @@ class TestModelOutputCannotNameOrForceAnEngine:
         assert engine_of["q1"] == "aurora_mysql"
         assert result["model_flags_rejected"] == 1
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_a_flag_goes_to_the_scorers_engine_even_one_the_architecture_dropped(self) -> None:
         """DocumentDB scores q1 highest but is not in this check's architecture
         (neither before nor after): a flag cannot add it. DynamoDB is the best

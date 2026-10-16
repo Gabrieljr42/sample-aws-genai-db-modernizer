@@ -20,7 +20,9 @@ from src.agents.referee.access_pattern import (
     KEY_LOOKUP,
     KEY_RANGE,
     KEY_SCOPED,
+    REFERENCE_READ,
     SCORED_CLASSES,
+    SMALL_TABLE_MAX_ROWS,
     TEXT_SEARCH,
     UNANCHORED_JOIN,
     UNPARSED,
@@ -97,6 +99,8 @@ COLLECTOR = {
                 indexes=[(("category_id",), False)],
             ),
             _table("categories", ["id"], ["id", "name", "slug"]),
+            _table("flags", ["id"], ["id", "name", "enabled"], rows=40),
+            _table("events", ["id"], ["id", "kind"], rows=SMALL_TABLE_MAX_ROWS + 1),
         ]
     }
 }
@@ -118,10 +122,11 @@ def _assert_class(expected, sql, engine="postgresql"):
 
 
 class TestTheClassSet:
-    def test_seven_scored_classes_in_severity_order(self):
+    def test_eight_scored_classes_in_severity_order(self):
         assert SCORED_CLASSES == (
             KEY_LOOKUP,
             KEY_SCOPED,
+            REFERENCE_READ,
             KEY_RANGE,
             AD_HOC_FILTER,
             UNANCHORED_JOIN,
@@ -342,6 +347,135 @@ class TestRangeOrOrderedReadByKey:
     def test_an_order_with_no_row_limit_does_not_change_what_is_read(self):
         """Sorting every row is presentation; only a row limit makes the order pick rows."""
         _assert_class(KEY_RANGE, "SELECT * FROM settings ORDER BY value")
+
+
+class TestSmallReferenceRead:
+    """#920: every row of a small table, with no predicate and no row limit, is a
+    reference read (feature flags, settings, a lookup list), not a range read."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT id, name, enabled FROM flags",
+            "SELECT * FROM flags ORDER BY name",  # an order with no limit picks no rows
+            "SELECT DISTINCT name FROM flags",
+        ],
+    )
+    def test_a_small_table_read_whole_is_a_reference_read(self, sql):
+        _assert_class(REFERENCE_READ, sql)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT id, kind FROM events",  # one row over the limit
+            "SELECT name, value FROM settings",  # no collected row count: not known small
+            "SELECT * FROM flags ORDER BY id LIMIT $1",  # a row limit picks rows
+            "SELECT * FROM flags FOR UPDATE SKIP LOCKED",  # an unknown row
+        ],
+    )
+    def test_anything_else_is_not(self, sql):
+        assert _classify(sql) == KEY_RANGE, sql
+
+    def test_a_predicate_or_an_aggregate_is_not_a_reference_read(self):
+        _assert_class(KEY_LOOKUP, "SELECT * FROM flags WHERE id = $1")
+        _assert_class(AD_HOC_FILTER, "SELECT * FROM flags WHERE enabled = $1")
+        _assert_class(AGGREGATION, "SELECT count(*) FROM flags")
+
+
+class TestSqlFeatureFacts:
+    """#985: the SQL features a class score may credit, read from the shared query facts
+    in the source's dialect (one definition each), never from the classifier's own text."""
+
+    def _facts(self, sql, engine="postgresql", query_type="SELECT"):
+        query = {"query_id": "q", "query_text": sql, "query_type": query_type}
+        return classify_query(query, KEYS, engine).facts
+
+    @pytest.mark.parametrize(
+        ("sql", "engine", "fact"),
+        [
+            (
+                "WITH RECURSIVE t AS (SELECT id FROM categories WHERE id = $1 UNION ALL "
+                "SELECT c.id FROM categories c JOIN t ON c.id = t.id) SELECT * FROM t",
+                "postgresql",
+                "recursive_cte",
+            ),
+            (
+                "WITH [T] AS (SELECT [id] FROM [categories] WHERE [id] = @Id UNION ALL "
+                "SELECT c.[id] FROM [categories] c JOIN [T] t ON c.[id] = t.[id]) SELECT * FROM [T]",
+                "sqlserver",
+                "recursive_cte",
+            ),
+            (
+                "SELECT o.id, x.n FROM orders o CROSS JOIN LATERAL (SELECT count(*) n "
+                "FROM order_items i WHERE i.order_id = o.id) x",
+                "postgresql",
+                "lateral_join",
+            ),
+            ("CALL refresh_totals(?)", "mysql", "stored_routine"),
+        ],
+    )
+    def test_the_feature_is_read_from_the_query_facts(self, sql, engine, fact):
+        assert fact in self._facts(sql, engine)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "WITH t AS (SELECT id FROM categories WHERE id = $1) SELECT * FROM t",  # not recursive
+            "SELECT * FROM orders WHERE note = 'lateral (x)'",  # a word in a literal
+            "SELECT * FROM orders WHERE id = $1",
+        ],
+    )
+    def test_not_without_the_feature(self, sql):
+        assert not {"recursive_cte", "lateral_join", "stored_routine"} & self._facts(sql)
+
+
+class TestPartitionRangeFact:
+    """#933's shape, one definition (``AccessClassification.facts``): a scope that reads
+    one table, pins a key column of it and ranges another of its columns."""
+
+    def _facts(self, sql):
+        query = {"query_id": "q", "query_text": sql, "query_type": sql.split()[0].upper()}
+        return classify_query(query, KEYS, "postgresql").facts
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM orders WHERE customer_id = $1 AND created_at > $2",
+            "SELECT * FROM posts WHERE topic_id = $1 AND post_number BETWEEN $2 AND $3",
+            "SELECT * FROM topics WHERE category_id IN ($1, $2) AND id < $3",
+        ],
+    )
+    def test_a_key_equality_plus_a_range_on_one_table(self, sql):
+        assert "partition_range" in self._facts(sql)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM orders WHERE customer_id = $1",  # no range
+            "SELECT * FROM orders WHERE created_at > $1",  # no pinned key
+            "SELECT * FROM orders WHERE status = $1 AND created_at > $2",  # status is no key
+            "SELECT * FROM orders WHERE id = $1 AND id > $2",  # the same column
+            # a join: its other table is an item collection, rated by the join patterns
+            "SELECT o.id FROM orders o JOIN order_items i ON i.order_id = o.id "
+            "WHERE o.customer_id = $1 AND o.created_at > $2",
+        ],
+    )
+    def test_not_without_both_on_one_table(self, sql):
+        assert "partition_range" not in self._facts(sql)
+
+    def test_the_key_access_reader_reads_the_same_fact(self):
+        from src.tools.analysis.key_access import KeyAccessReader
+
+        collector = {**COLLECTOR, "metadata": {"source_database": {"engine": "postgresql"}}}
+        reader = KeyAccessReader.from_collector(collector, "postgresql")
+        for sql in (
+            "SELECT * FROM orders WHERE customer_id = $1 AND created_at > $2",
+            "SELECT * FROM orders WHERE customer_id = $1",
+            "SELECT o.id FROM orders o JOIN order_items i ON i.order_id = o.id "
+            "WHERE o.customer_id = $1 AND o.created_at > $2",
+        ):
+            query = {"query_id": "q", "query_text": sql, "query_type": "SELECT"}
+            assert reader.access(query).partition_range is ("partition_range" in self._facts(sql))
 
     @pytest.mark.parametrize(
         "sql",
@@ -595,10 +729,10 @@ def test_the_classifier_reads_facts_and_parses_no_sql_itself():
     from pathlib import Path
 
     import src.agents.referee.access_pattern as classifier
-    import src.agents.referee.access_pattern_shadow as shadow
+    import src.agents.referee.query_pattern as model
     import src.shared.catalog.access_classes as classes
 
-    for module in (classifier, shadow, classes):
+    for module in (classifier, model, classes):
         tree = ast.parse(Path(module.__file__).read_text())
         imported = {
             alias.name.split(".")[0]

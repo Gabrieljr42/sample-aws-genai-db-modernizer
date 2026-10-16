@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from src.agents.referee.access_pattern import UNPARSED, UTILITY
+from src.agents.referee.access_pattern import SMALL_TABLE_MAX_ROWS, UNPARSED, UTILITY
 from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.transaction_shape import transaction_shape
 from src.contracts.analysis_output import (
@@ -998,7 +998,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
             and cps >= 0.1
             and tables_accessed
             and all(
-                table_row_counts.get(t, 0) <= 10000 and reader.read_mostly(t)
+                table_row_counts.get(t, 0) <= SMALL_TABLE_MAX_ROWS and reader.read_mostly(t)
                 for t in tables_accessed
             )
         ):

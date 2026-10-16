@@ -362,6 +362,7 @@ def _query_map(*query_ids: str) -> dict[str, dict]:
 
 
 class TestAFlaggedGroup:
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_a_flagged_group_never_moves_onto_an_engine_gated_for_one_member(self) -> None:
         """g1 scores 99 on DocumentDB, but a second flag gates DocumentDB for g2:
         DocumentDB is not a candidate (not even at g1's score, or a mean with g2

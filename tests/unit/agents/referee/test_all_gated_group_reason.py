@@ -13,6 +13,8 @@ member and gate per engine in ``evidence.group_gates`` (rule
 
 from __future__ import annotations
 
+import pytest
+
 from src.agents.referee.assignment_resolver import AssignmentResolver
 from src.contracts.assignment_models import Assignment, QueryAssignment
 from src.contracts.move_ledger import GroupGate, MovePass, ReasonCode
@@ -96,6 +98,7 @@ class TestEveryEngineGatedByOneMember:
         )
         assert "DocumentDB lacks required capability" in qb.assignment_reason
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_the_move_records_the_gates_as_evidence(self):
         result = self._result()
 

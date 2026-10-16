@@ -27,8 +27,9 @@ from pathlib import Path
 import pytest
 
 from src.tools.database.offline_parser import detect_source_engine, parse_offline_collection
-from src.tools.sql.facade import SqlFacts, sql_facts
+from src.tools.sql.facade import SqlFacts, access_facts, sql_facts
 from src.tools.sql.query_facts import QueryFacts, query_facts
+from src.tools.sql.regex_facts import regex_range_predicate
 from tests.unit.tools.sql.table_refs_snapshot import SAMPLES, load_sample
 
 _REPO = Path(__file__).resolve().parents[4]
@@ -49,8 +50,9 @@ FACT_MODULES: dict[str, str] = {
     "src/agents/referee/query_shape.py": (
         "the query-shape facts: the locking clause (#838), skipped locked rows, the primary-key "
         "ordered row limit (#857) and the single-table access shape (ADR-031 Decision 14, which "
-        "the access-pattern switch replaces, #728). Only those: its GROUP BY, ORDER BY, LIKE and "
-        "SELECT readings come from regex_facts (QUERY_SHAPE_OWN_DETECTORS)"
+        "the access-pattern switch reads with each query's class, #728). Only those: its GROUP "
+        "BY, ORDER BY, LIKE, SELECT and range readings come from regex_facts "
+        "(QUERY_SHAPE_OWN_DETECTORS)"
     ),
     "src/agents/referee/utility_statements.py": (
         "the utility-statement fact (#327, #737): DDL, session and transaction control, "
@@ -195,8 +197,8 @@ def test_only_declared_modules_hold_sql_detectors():
 
 
 # The detectors query_shape.py defines itself, each for one of its documented facts.
-# GROUP BY, ORDER BY, a pattern-match predicate, a literal-prefix LIKE and the SELECT
-# word are not among them: it imports those from src.tools.sql.regex_facts (#893 review).
+# GROUP BY, ORDER BY, a pattern-match predicate, a literal-prefix LIKE, the SELECT word
+# and the range predicate are not among them: it imports those from regex_facts (#893, #933).
 QUERY_SHAPE_OWN_DETECTORS: dict[str, str] = {
     "_QUOTED_IDENT_RE": "quoted identifiers made bare before literals are stripped",
     "_DISTINCT_RE": "the shape check's DISTINCT",
@@ -208,7 +210,6 @@ QUERY_SHAPE_OWN_DETECTORS: dict[str, str] = {
     "_LEFT_OPERAND_RE": "the operand before an operator",
     "_RIGHT_OPERAND_RE": "the operand after an operator",
     "_COLUMN_RE": "a column operand",
-    "_RANGE_PREDICATE_RE": "the shape check's range (one range definition is #933)",
     "_ORDER_BY_ITEMS_RE": "the primary-key ordered row limit's sort items",
     "_SORT_ITEM_RE": "one sort item",
     "_TOP_RE": "the primary-key ordered row limit's TOP",
@@ -243,7 +244,13 @@ def test_query_shape_defines_only_its_documented_facts():
         if isinstance(node, ast.ImportFrom) and node.module == "src.tools.sql.regex_facts"
         for alias in node.names
     }
-    assert {"GROUP_BY_RE", "ORDER_BY_RE", "PATTERN_PREDICATE_RE", "SELECT_WORD_RE"} <= imported
+    assert {
+        "GROUP_BY_RE",
+        "ORDER_BY_RE",
+        "PATTERN_PREDICATE_RE",
+        "RANGE_PREDICATE_RE",
+        "SELECT_WORD_RE",
+    } <= imported
 
 
 @pytest.mark.parametrize(
@@ -457,14 +464,22 @@ def corpus() -> list[tuple[str, str]]:
 
 
 def test_the_hints_that_skip_a_parse_never_change_a_fact(corpus):
-    """Each parsed fact is the facade's field, whether or not its hint skipped the
-    parse (``QueryFacts._has`` and ``_may_aggregate``)."""
+    """Each parsed fact is the facade's field (and ``range_predicate`` the access facts'
+    ranges, #933), whether or not its hint skipped the parse (``QueryFacts._has`` and
+    ``_may_aggregate``)."""
     fields = _parsed_fact_fields()
     for text, engine in corpus:
         facts, parsed = query_facts(text, engine), sql_facts(text, engine)
         for fact, field_name in fields.items():
             assert getattr(facts, fact) == getattr(parsed, field_name), (fact, text[:80])
         assert facts.aggregation is parsed.has_aggregation, text[:80]
+        access = access_facts(text, engine)
+        ranges = (
+            any(scope.ranges for scope in access.scopes)
+            if access.parsed_by == "sqlglot"
+            else regex_range_predicate(text)
+        )
+        assert facts.range_predicate is ranges, text[:80]
 
 
 def _truths(corpus: list[tuple[str, str]]) -> dict[str, frozenset[int]]:

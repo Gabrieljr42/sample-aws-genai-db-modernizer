@@ -1,6 +1,6 @@
 """The access-pattern class table (ADR-031 Decision 14, Amendment 5, #728).
 
-``src/catalog/access_classes.toml`` lists the seven classes a query can fall into
+``src/catalog/access_classes.toml`` lists the eight classes a query can fall into
 (:mod:`src.agents.referee.access_pattern` assigns them) and, for each, the pattern files
 that describe that class. A class's pattern score on an engine is the highest rating
 those patterns give the engine -- a ``fit`` entry's ``score``, or a ``native``/``unscored``
@@ -9,9 +9,9 @@ the numbers stay in the pattern files (Decision 8), so a class score can never d
 with the catalog. Loaded into strict Pydantic models like the rest of the catalog: an
 unknown field, a missing one or a pattern id with no file fails at import time.
 
-Shadow only: the per-query scorer reads these through
-:class:`src.agents.referee.query_scoring.QueryPatternModel`, which routing does not
-build yet (:mod:`src.agents.referee.access_pattern_shadow`).
+The per-query scorer reads these through
+:class:`src.agents.referee.query_pattern.QueryPatternModel` (ADR-031 Decision 14,
+Amendment 5): a query's pattern dimension on an engine is its class's score there.
 """
 
 from __future__ import annotations
@@ -34,7 +34,8 @@ __all__ = [
     "class_engine_scores",
     "class_parity_anchors",
     "class_score",
-    "load_access_classes",
+    "feature_patterns",
+    "load_access_class_table",
     "unrated_native_entries",
 ]
 
@@ -45,8 +46,9 @@ _ONE_LINE = r"^[^\n]+$"
 # The query facts a class score may depend on, each read from the SQL facade by the
 # classifier (``AccessClassification.facts``): a pattern listed in ``only_when`` counts
 # only for a query showing its fact (a date/time bucket, each text-search kind, a
-# window function), and ``write`` (an INSERT, UPDATE, DELETE or MERGE) is credited only
-# to a system of record (``class_score``).
+# window function, a partition-key equality plus a range on one table), and ``write``
+# (an INSERT, UPDATE, DELETE or MERGE) is credited only to a system of record
+# (``class_score``).
 QUERY_FACTS = frozenset(
     {
         "time_bucket",
@@ -56,6 +58,10 @@ QUERY_FACTS = frozenset(
         "similarity_match",
         "window_function",
         "write",
+        "partition_range",
+        "recursive_cte",
+        "lateral_join",
+        "stored_routine",
     }
 )
 # The fact that marks a write (ADR-031 Decision 2 step 3: an engine that is not a
@@ -91,32 +97,66 @@ class AccessClass(BaseModel):
         return self
 
 
+class FeaturePattern(BaseModel):
+    """A SQL feature a query of any class can show (#985): its pattern rates the query,
+    alongside its class's own patterns, only when the query shows the feature's fact."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    pattern: str = Field(min_length=1)
+    fact: str = Field(min_length=1)
+    why: str = Field(min_length=1, pattern=_ONE_LINE)
+
+    @model_validator(mode="after")
+    def _known(self) -> FeaturePattern:
+        if self.fact not in QUERY_FACTS:
+            raise ValueError(f"feature {self.pattern!r} names an unknown fact {self.fact!r}")
+        if self.pattern not in {p.id for p in patterns()}:
+            raise ValueError(f"feature {self.pattern!r} has no pattern file")
+        return self
+
+
 class AccessClassTable(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     classes: tuple[AccessClass, ...] = Field(min_length=1)
+    features: tuple[FeaturePattern, ...] = ()
 
     @model_validator(mode="after")
     def _ids_are_unique(self) -> AccessClassTable:
         ids = [c.id for c in self.classes]
         if len(set(ids)) != len(ids):
             raise ValueError(f"duplicate class ids in {ids}")
+        features = [f.pattern for f in self.features]
+        if len(set(features)) != len(features):
+            raise ValueError(f"a feature pattern is listed twice: {features}")
+        if both := sorted({p for c in self.classes for p in c.patterns} & set(features)):
+            raise ValueError(f"a feature pattern is also a class pattern: {both}")
         return self
 
 
-def load_access_classes(path: Path = ACCESS_CLASSES_FILE) -> tuple[AccessClass, ...]:
-    """The classes in ``path``, in severity order."""
+def load_access_class_table(path: Path = ACCESS_CLASSES_FILE) -> AccessClassTable:
+    """The class table in ``path``: its classes, in severity order, and its features."""
     try:
         data = tomllib.loads(path.read_text())
-        return AccessClassTable.model_validate(data).classes
+        return AccessClassTable.model_validate(data)
     except (OSError, ValueError) as exc:
         raise CatalogError(f"{path}: {exc}") from exc
 
 
 @cache
+def _table() -> AccessClassTable:
+    return load_access_class_table()
+
+
 def access_classes() -> tuple[AccessClass, ...]:
     """The loaded class table (read once per process), in severity order."""
-    return load_access_classes()
+    return _table().classes
+
+
+def feature_patterns() -> tuple[FeaturePattern, ...]:
+    """The SQL features a query of any class can show, each with its pattern (#985)."""
+    return _table().features
 
 
 def _entry_score(support: EngineSupport) -> int | None:
@@ -135,10 +175,12 @@ def _ratings(
     query showing ``facts`` (see :func:`class_score`)."""
     if WRITE_FACT in facts and engine not in engine_ids(system_of_record=True):
         return []
+    listed = [(p, access_class.only_when.get(p, "")) for p in access_class.patterns]
+    listed += [(f.pattern, f.fact) for f in feature_patterns()]
     return [
         (score, support)
-        for pattern_id in access_class.patterns
-        if access_class.only_when.get(pattern_id, "") in facts | {""}
+        for pattern_id, needs in listed
+        if needs in facts | {""}
         and (support := pattern(pattern_id).engines.get(engine)) is not None
         and (score := _entry_score(support)) is not None
     ]
@@ -147,7 +189,8 @@ def _ratings(
 def class_score(access_class: AccessClass, engine: str, facts: frozenset[str] = frozenset()) -> int:
     """The highest rating the class's patterns give ``engine`` for a query showing
     ``facts``, else 0. A pattern in ``only_when`` counts only when its fact is in
-    ``facts``, and a write is rated only on a system of record.
+    ``facts``, a feature pattern (:func:`feature_patterns`, #985) counts in every class
+    for a query that shows its fact, and a write is rated only on a system of record.
 
     A ``fit`` entry counts at its ``score``; a ``native`` or ``unscored`` entry at its
     ``class_score`` (the engine serves the pattern although its analysis does not report

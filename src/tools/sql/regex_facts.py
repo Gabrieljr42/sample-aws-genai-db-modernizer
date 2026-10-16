@@ -56,7 +56,9 @@ count:
   ``::json``/``::jsonb``, ``@> '``, ``OPENJSON(``, ``FOR JSON``, ``IS JSON``;
 - ``multi_table_write``: outside parentheses, ``UPDATE`` with a ``JOIN`` or a comma
   before the first ``SET`` or a ``FROM`` after it that names another table than the
-  target, or ``DELETE`` followed by ``USING`` or ``JOIN``.
+  target, or ``DELETE`` followed by ``USING`` or ``JOIN``;
+- ``range_predicate`` (the fallback of the access facts' ranges): ``BETWEEN``,
+  ``<``, ``<=``, ``>``, ``>=`` (not ``<>``, ``->``, ``@>`` or ``<@``).
 """
 
 from __future__ import annotations
@@ -145,6 +147,9 @@ TIMESTAMP_COLUMN_NAMES = (
 )
 TIMESTAMP_COLUMN_NAME_RE = re.compile(rf"(?:{TIMESTAMP_COLUMN_NAMES})", re.IGNORECASE)
 _TIMESTAMP_COLUMN_RE = re.compile(rf"\b(?:{TIMESTAMP_COLUMN_NAMES})\b", re.IGNORECASE)
+# <, >, <=, >= or BETWEEN -- but not <>, ->, ->>, @>, <@, <<, >>, <=> (the range
+# fallback, and ``query_shape``'s shape check on comment- and literal-stripped text).
+RANGE_PREDICATE_RE = re.compile(r"\bBETWEEN\b|(?<![<>=!@\-])(?:<=|>=|<|>)(?![<>=@])", re.IGNORECASE)
 _JSON_ACCESS_RE = re.compile(
     r"\bjsonb?_\w+\s*\(|->>?|#>|::jsonb?\b|@>\s*'|\bopenjson\s*\(|\bfor\s+json\b|\bis\s+json\b",
     re.IGNORECASE,
@@ -584,3 +589,15 @@ def regex_multi_table_write(query_text: str) -> bool:
         return False
     rest = text[delete.end() :]
     return bool(_USING_RE.search(rest) or _JOIN_RE.search(rest))
+
+
+def regex_range_predicate(query_text: str) -> bool:
+    """``BETWEEN`` or a ``<``/``<=``/``>``/``>=`` comparison."""
+    return bool(RANGE_PREDICATE_RE.search(query_text or ""))
+
+
+def aggregate_function_names(query_text: str) -> frozenset[str]:
+    """The aggregate function words (``count``, ``sum``, ``avg``, ``min``, ``max``,
+    ``group_concat``, ``string_agg``, ``array_agg``) the text names, lower-cased: the
+    same words as the aggregate fallback's count."""
+    return frozenset(m.lower() for m in _AGGREGATE_WORD_RE.findall(query_text or ""))

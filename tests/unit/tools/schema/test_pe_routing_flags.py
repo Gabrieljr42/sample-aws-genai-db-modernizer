@@ -323,6 +323,7 @@ class TestTheOrchestratorRoutesAFlagByScore:
             "designed": ["q-4"]
         }
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_the_rerouted_version_never_claims_customer_approval(self, tmp_path) -> None:
         """#713 round 2: the customer approved v1, not the move; v2 has its own
         status and lists the move with the version that was approved."""
@@ -348,6 +349,7 @@ class TestTheOrchestratorRoutesAFlagByScore:
         assert reroute["approved_version"] == 1
         assert (reroute["score_before"], reroute["score_after"]) == (90, 70)
 
+    @pytest.mark.usefixtures("table_confidence_scores")  # #728: scores per table
     def test_every_pass_is_kept_in_the_router_output(self, tmp_path) -> None:
         store = LocalArtifactStore(base_dir=str(tmp_path))
         self._seed(store)

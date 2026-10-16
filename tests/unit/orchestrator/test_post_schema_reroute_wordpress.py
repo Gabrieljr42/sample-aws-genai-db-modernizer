@@ -4,7 +4,7 @@ The deterministic wordpress pipeline runs to the approved assignment (v2), the
 customer approves it, DynamoDB gets a design (a stand-in designer that designs
 exactly the engine's assigned queries), and DynamoDB's PE review flags
 ``b05af520...`` (an ``INSERT INTO wp_actionscheduler_logs``). The post-schema router
-moves it to Aurora MySQL (27 against 30) and writes v3. Then synthesis and the reports run on v3, and every deliverable
+moves it to Aurora MySQL (51 against 90) and writes v3. Then synthesis and the reports run on v3, and every deliverable
 must agree with the v3 assignment: the moved query appears once, on Aurora
 MySQL; DynamoDB's counts match its own v3 queries; the move is listed as made
 after approval, with the override path; and v3 never claims the customer
@@ -14,6 +14,10 @@ approved it.
 wp_wc_product_meta_lookup``), is no longer on DynamoDB: DocumentDB's product-catalog
 fired on its wide table by column count alone, and DynamoDB's call-rate fit is gone,
 so it stays on Aurora MySQL from the first assignment.
+
+#728: the INSERT is a key lookup by its own class, so it scores DynamoDB 90 (the
+key-lookup class, 100, with the table's other dimensions) and Aurora MySQL 71 less
+no-relational-need's 20 = 51, where its table's pattern scores gave 30 and 47 less 20.
 """
 
 from __future__ import annotations
@@ -111,6 +115,7 @@ def rerouted(tmp_path_factory) -> dict:
         "flagged": flagged,
         "v2": v2,
         "v3": store.read_json(f"{DB}/{JOB}/assignment/v3/assignment.json"),
+        "v3_access_patterns": store.read_json(f"{DB}/{JOB}/assignment/v3/access_patterns.json"),
         "report": json.loads((synthesis / "report.json").read_text()),
         "decision": next(synthesis.glob("*decision-report*.html")).read_text(),
         "engineering": next(synthesis.glob("*engineering-report*.md")).read_text(),
@@ -132,8 +137,10 @@ class TestTheRerouteOnWordpress:
             qa["query_id"]: qa["assigned_engine"] for qa in rerouted["v3"]["query_assignments"]
         }
         assert engine_of[rerouted["flagged"]] == "aurora_mysql"
+        # The reroute's version carries its access-pattern record too (#728).
+        assert rerouted["v3_access_patterns"]["queries"]
         (reroute,) = rerouted["v3"]["post_schema_reroutes"]
-        assert (reroute["score_before"], reroute["score_after"]) == (30, 27)
+        assert (reroute["score_before"], reroute["score_after"]) == (90, 51)
 
     def test_the_rerouted_version_never_claims_customer_approval(self, rerouted):
         assert rerouted["v2"]["status"] == "customer_approved"

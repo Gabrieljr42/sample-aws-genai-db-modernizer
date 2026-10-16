@@ -166,8 +166,8 @@ Detected by `src.tools.analysis.opensearch_analysis_tools:analyze_opensearch_use
 
 Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases`.
 
-- Aurora PostgreSQL, fit 70 (aurora-common-11): Batch lookups using WHERE column IN \(...\) with multiple values. Aurora optimizes IN-list queries with index range scans — more flexible than DynamoDB's BatchGetItem \(100-item limit, PK-only\).
-- Aurora MySQL, fit 70 (aurora-common-11): Batch lookups using WHERE column IN \(...\) with multiple values. Aurora optimizes IN-list queries with index range scans — more flexible than DynamoDB's BatchGetItem \(100-item limit, PK-only\).
+- Aurora PostgreSQL, fit 70 (aurora-common-11): Batch lookups using WHERE column IN \(...\) with multiple values: one index scan probes every listed value \(PostgreSQL documentation, Indexes, a ScalarArrayOpExpr on a B-tree; MySQL Reference Manual, Range Optimization, equality ranges for IN lists\), with no item limit, where DynamoDB's BatchGetItem takes at most 100 keys and 16 MB \(Amazon DynamoDB API Reference, BatchGetItem\). In the key-lookup class it raises no score: key-value-lookup rates the same read at 80.
+- Aurora MySQL, fit 70 (aurora-common-11): Batch lookups using WHERE column IN \(...\) with multiple values: one index scan probes every listed value \(PostgreSQL documentation, Indexes, a ScalarArrayOpExpr on a B-tree; MySQL Reference Manual, Range Optimization, equality ranges for IN lists\), with no item limit, where DynamoDB's BatchGetItem takes at most 100 keys and 16 MB \(Amazon DynamoDB API Reference, BatchGetItem\). In the key-lookup class it raises no score: key-value-lookup rates the same read at 80.
 - No effect on: DynamoDB, DocumentDB, OpenSearch, ElastiCache.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 

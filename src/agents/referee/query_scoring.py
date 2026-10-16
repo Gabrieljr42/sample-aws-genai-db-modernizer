@@ -43,6 +43,7 @@ from src.agents.referee.capability_registry import (
     triage_query_capabilities,
 )
 from src.agents.referee.engine_exclusions import check_exclusions
+from src.agents.referee.query_pattern import QueryPatternModel
 from src.agents.referee.substring_match import scan_adjustments
 from src.contracts.analysis_output import ScoreBreakdown
 from src.shared.capability_labels import capability_label
@@ -65,39 +66,42 @@ CAPABILITY_REDESIGN_NOTES: dict[str, str] = capability_redesign_notes()
 CAPABILITY_EXEMPT_NOTES: dict[str, str] = capability_exempt_notes()
 
 
-@dataclass(frozen=True)
-class QueryPatternModel:
-    """The per-query pattern dimension (ADR-031 Decision 14, Amendment 5, #728). Shadow only.
-
-    ``pattern_scores``: ``query_id -> engine -> pattern score`` from the query's own
-    access-pattern class (``src.shared.catalog.access_classes``). ``weights``:
-    ``(engine, table_id) -> dimension weights`` the engine's analysis used for that
-    table, read from ``analysis.json`` (``src.tools.analysis.score_weights``; the
-    referee never reads the decision trace, ADR-017 Decision 3); a missing pair uses
-    ``DEFAULT_WEIGHTS``. ``identity``: the attribution control -- every covered query
-    keeps each table's own pattern score, so only the per-query table rule differs
-    from today. Built by :mod:`src.agents.referee.access_pattern_shadow`; no
-    production routing path builds one yet, so routing is unchanged.
-    """
-
-    pattern_scores: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
-    weights: Mapping[tuple[str, str], Mapping[str, float]] = field(default_factory=dict)
-    identity: bool = False
-
-
-def _query_pattern_confidence(
-    query: Mapping, engine: str, analysis: Mapping, pattern_score: int, model: QueryPatternModel
+def compute_query_confidence(
+    query_id: str,
+    query: Mapping,
+    engine: str,
+    analysis: Mapping,
+    *,
+    pattern_model: QueryPatternModel,
 ) -> int:
-    """The base score with the pattern dimension taken from the query's own class.
+    """Base confidence (0-100) for a query->engine pair (ADR-031 Decision 2 step 4).
 
-    For each of the query's own rated tables, the table's complexity, performance
-    and cost dimensions are kept and its pattern dimension is replaced by
-    ``pattern_score``, weighted as the engine's analysis weighted that table; the
-    base is the mean over those tables. No all-tables fallback: a query with no rated
-    table of its own scores 0. A pattern-only engine (``PATTERN_ONLY_ENGINES``) whose
-    catalog gives the class no score scores 0, its existing "own pattern or 0" rule.
+    The pattern dimension is the query's own access-pattern class score on ``engine``
+    (``pattern_model.pattern_score``, ADR-031 Decision 14 Amendment 5, #728), never
+    its tables' pattern scores: a table's ``pattern_match_score`` and
+    ``confidence_score`` are not read for a classified query at all, so no other
+    query on the same table, and no pattern found on it, can move this query's
+    pattern dimension (#784, #885). The other three dimensions -- complexity,
+    performance and cost -- are still each of the query's own tables'
+    (``tables_accessed``, #302), combined with the weights that engine's analysis used
+    for the table; the base is the mean over those tables. No all-tables fallback: a
+    classified query with no rated table of its own scores 0. A pattern-only engine
+    (``PATTERN_ONLY_ENGINES``, #475) whose catalog gives the query's class no score
+    scores 0: a table-wide classification earned by another query is no evidence
+    about this one. Per-query pattern evidence is the class score itself, inside the
+    weighted pattern dimension, never a flat bonus on top (maintainer decision, PR
+    #500 review round 1).
+
+    A statement with no access-pattern class -- ``utility`` (it reads or writes no
+    table the facade can see: ``SET``, ``EXEC`` of a procedure, ``SELECT fn(...)``)
+    or ``unparsed`` (a data statement the SQL facade cannot read) -- has no class
+    score, so it keeps the pre-switch rule (:func:`_unclassified_confidence`), as
+    ADR-031 Decision 14 Amendment 5 states.
     """
-    if not model.identity and engine in PATTERN_ONLY_ENGINES and pattern_score <= 0:
+    if not pattern_model.has_class_score(query):
+        return _unclassified_confidence(query_id, query, engine, analysis)
+    pattern_score = pattern_model.pattern_score(query, engine)
+    if engine in PATTERN_ONLY_ENGINES and pattern_score <= 0:
         return 0
     table_recs = {r["table_id"]: r for r in analysis.get("table_recommendations", [])}
     scores = []
@@ -106,67 +110,25 @@ def _query_pattern_confidence(
         if rec is None or not rec.get("score_breakdown"):
             continue
         breakdown = dict(rec["score_breakdown"])
-        if not model.identity:
-            breakdown["pattern_match_score"] = pattern_score
-        weights = dict(model.weights.get((engine, table_id)) or DEFAULT_WEIGHTS)
+        breakdown["pattern_match_score"] = pattern_score
+        weights = dict(pattern_model.weights.get((engine, table_id)) or DEFAULT_WEIGHTS)
         scores.append(compute_confidence(ScoreBreakdown(**breakdown), weights))
     return int(sum(scores) / len(scores)) if scores else 0
 
 
-def compute_query_confidence(
-    query_id: str,
-    query: Mapping,
-    engine: str,
-    analysis: Mapping,
-    *,
-    pattern_model: QueryPatternModel | None = None,
-) -> int:
-    """Compute base confidence (0–100) for a query→engine pair.
+def _unclassified_confidence(query_id: str, query: Mapping, engine: str, analysis: Mapping) -> int:
+    """The base score of a statement with no access-pattern class (``utility`` or
+    ``unparsed``): the rule every query had before the switch (#302, #475), kept only
+    for statements whose access pattern the facade cannot read.
 
-    With ``pattern_model`` covering ``query_id`` (shadow only, #728), the pattern
-    dimension is the query's own class score instead of its tables' patterns
-    (:func:`_query_pattern_confidence`); otherwise the rule below is unchanged.
-
-    The query's own ``tables_accessed`` decide the base score (#302):
-    a table-level recommendation only ever informs a query through
-    tables THAT QUERY itself touches, never through a pattern's full
-    ``table_ids`` list, which can span every table any query matching
-    that pattern type touches anywhere in the schema (a broad pattern
-    like "pagination" matches most queries in a workload, so its own
-    table list is close to the whole schema, not this one query's
-    tables).
-
-    Per-query pattern evidence is not added here (maintainer decision,
-    PR #500 review round 1): a flat bonus is not itself per-query
-    evidence, and it double-counts the pattern dimension the table
-    confidence already weighs in (40% by default, ADR-017/ADR-031). A
-    near-universal, low-confidence pattern (DynamoDB's
-    ``low-frequency-read``, matched by most of a workload) would still
-    trigger the same flat bonus as a precise, high-confidence one, which
-    favours whichever engine happens to have the broadest catch-all
-    pattern rather than reflecting real fit. Per-query pattern evidence
-    is coming with the engine-neutral detectors (#491), inside the
-    weighted pattern dimension rather than on top of it.
-
-    ``PATTERN_ONLY_ENGINES`` (#475) keep their own, unchanged rule,
-    untouched by this fix: a table-wide classification earned by a
-    different query is not evidence about this one at all for these
-    engines, so they score their own matched pattern directly, or 0 --
-    never a ``tables_accessed`` average. Using ``tables_accessed`` as
-    these engines' base too would reintroduce #475's table-wide
-    classification bleed (OpenSearch classifies a whole table as
-    SEARCH/TIMESERIES the moment any one query against it matches,
-    which says nothing about a neighboring plain lookup on the same
-    table).
+    A pattern-only engine scores the tables of the patterns that matched this query
+    itself, or 0; any other engine the mean confidence of the query's own tables, or,
+    when it has none the analysis rated (``EXEC`` of a procedure, ``SELECT fn(...)``),
+    the mean over every table the analysis rated.
     """
-    if pattern_model is not None and query_id in pattern_model.pattern_scores:
-        pattern_score = int(pattern_model.pattern_scores[query_id].get(engine, 0))
-        return _query_pattern_confidence(query, engine, analysis, pattern_score, pattern_model)
-
     table_recs = {r["table_id"]: r for r in analysis.get("table_recommendations", [])}
-    wa = analysis.get("workload_analysis", {})
-
     if engine in PATTERN_ONLY_ENGINES:
+        wa = analysis.get("workload_analysis", {})
         pattern_tables = list(
             dict.fromkeys(
                 t
@@ -175,28 +137,20 @@ def compute_query_confidence(
                 for t in (pattern.get("table_ids") or [])
             )
         )
-        if not pattern_tables:
-            return 0
-        matched_scores = [
+        matched = [
             table_recs[t].get("confidence_score", 0) for t in pattern_tables if t in table_recs
         ]
-        return int(sum(matched_scores) / len(matched_scores)) if matched_scores else 0
-
-    # The query's own tables_accessed decide the base score -- no
-    # pattern-match bonus on top (see the docstring above).
-    query_tables = query.get("tables_accessed", [])
-    matched_scores = [
-        table_recs[t].get("confidence_score", 0) for t in query_tables if t in table_recs
+        return int(sum(matched) / len(matched)) if matched else 0
+    own = [
+        table_recs[t].get("confidence_score", 0)
+        for t in query.get("tables_accessed", [])
+        if t in table_recs
     ]
-    if matched_scores:
-        return int(sum(matched_scores) / len(matched_scores))
-
-    # Last resort, when the query has no tables of its own at all (or
-    # none the analysis rated): average across every table
-    # recommendation, unchanged from before #302.
+    if own:
+        return int(sum(own) / len(own))
     if table_recs:
-        scores = [r.get("confidence_score", 0) for r in table_recs.values()]
-        return int(sum(scores) / len(scores))
+        every = [r.get("confidence_score", 0) for r in table_recs.values()]
+        return int(sum(every) / len(every))
     return 0
 
 
@@ -401,9 +355,11 @@ class ScoringContext:
     # Empty unless a model flag was accepted (``src.agents.referee.model_flags``),
     # so a run without a model never sees it.
     flag_gaps: Mapping[str, frozenset[str]] = field(default_factory=dict)
-    # The per-query pattern dimension (#728, shadow only): ``None`` everywhere in
-    # production, so the score is today's. Only the shadow builder sets one.
-    pattern_model: QueryPatternModel | None = None
+    # The per-query pattern dimension (ADR-031 Decision 14 Amendment 5, #728): each
+    # query's own access-pattern class. :meth:`from_pipeline` builds it from the
+    # collector's schema and the analysis outputs' weights; the bare default has no
+    # schema keys, for a test that isolates another gate or dimension.
+    pattern_model: QueryPatternModel = field(default_factory=QueryPatternModel)
     # The collector's source engine (``metadata.source_database.engine``): the
     # dialect the exclusion gate reads each query's facts in (#893), the same
     # one triage's capability detection reads them in. :meth:`from_pipeline`
@@ -486,6 +442,7 @@ class ScoringContext:
             anti_pattern_map=anti_pattern_map,
             anti_pattern_notes=anti_pattern_notes,
             query_capabilities=query_capabilities,
+            pattern_model=QueryPatternModel.from_pipeline(collector, analysis_outputs),
             source_engine=source_engine_of(collector),
         )
 
