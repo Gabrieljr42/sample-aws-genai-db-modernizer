@@ -45,7 +45,12 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts, source_engine_of
+from src.tools.sql.query_facts import (
+    ColumnTypes,
+    query_facts,
+    source_engine_of,
+    timestamp_column_trace,
+)
 
 # ---------------------------------------------------------------------------
 # LLM Advisor Pydantic models (structured LLM response parsing only)
@@ -919,6 +924,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
     tables = collector_output.get("database_schema", {}).get("tables", [])
     source_engine = source_engine_of(collector_output)
     scope = SourceScope.from_collector(collector_output)
+    column_types = ColumnTypes.from_collector(collector_output)
 
     if not tables:
         return WorkloadAnalysis(patterns_detected=[], anti_patterns_detected=None)
@@ -983,7 +989,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
 
         # Time-series / event log: an INSERT into a table the workload only appends
         # to, or an entity-anchored time range read (a partition key plus a range).
-        if facts.timestamp_column and (
+        if facts.timestamp_column(column_types) and (
             (qt == "INSERT" and all(reader.append_only(t) for t in tables_accessed))
             or (qt == "SELECT" and access.partition_range)
         ):
@@ -1550,6 +1556,9 @@ def build_decision_trace(
             if len(members) > 1
         ],
     }
+
+    # How the timestamp-column fact was read (#935): by type, or by name and why.
+    trace["timestamp_columns"] = timestamp_column_trace(collector_output)
 
     # --- New trace sections (v1.1) ---
     trace["pk_classifications"] = (

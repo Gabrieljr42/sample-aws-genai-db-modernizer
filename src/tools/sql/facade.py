@@ -81,7 +81,7 @@ from src.tools.sql.regex_facts import (
     regex_recursive_cte,
     regex_row_limit,
     regex_similarity_match,
-    regex_timestamp_column,
+    regex_timestamp_column_names,
     regex_top_n,
     regex_wildcard_leading,
     regex_wildcard_likes,
@@ -215,6 +215,30 @@ class TableReferences:
 
 
 @dataclass(frozen=True)
+class ColumnUse:
+    """A column the statement reads or writes, and the stored tables it can belong to
+    (#935: the timestamp-column fact looks the column's type up in the collection).
+
+    ``name`` is the column's name as written. ``scopes`` are the candidate tables,
+    one tuple per enclosing scope, innermost first: a qualified column has one,
+    holding the table its qualifier names (an alias or a table name, looked up from
+    its own scope outward), or none when the qualifier names a derived table, a CTE
+    or a table function; an unqualified column has every scope's stored tables, so
+    the caller takes the innermost scope in which one table holds a column of that
+    name, the way SQL resolves it; an ``INSERT`` column list's is the target table.
+    ``from_regex``: the facade fell back to the regex, so the text was not parsed, the
+    column's tables are unknown (``scopes`` is empty) and only the timestamp names
+    (``regex_facts.TIMESTAMP_COLUMN_NAMES``) are read. A flag rather than a ``None``
+    scope, so the stored form (``stored_facts``, which leaves empty values out) tells
+    "not parsed" from "parsed, no stored table" (#935).
+    """
+
+    name: str
+    scopes: tuple[tuple[TableRef, ...], ...] = ()
+    from_regex: bool = False
+
+
+@dataclass(frozen=True)
 class SqlFacts:
     """Query-shape facts about one piece of SQL text (#796).
 
@@ -290,10 +314,15 @@ class SqlFacts:
         top_n: A query (a ``SELECT`` or a set operation) with both an
             ``ORDER BY`` and a row limit: a top-N read. ``TOP`` with no
             ``ORDER BY`` returns arbitrary rows and is not one.
-        timestamp_column: A column (read, written, or in an ``INSERT``'s
-            column list) whose name is a timestamp's
-            (``regex_facts.TIMESTAMP_COLUMN_NAMES``: ``created_at``,
+        columns: Every column the statement reads, writes, or lists in an
+            ``INSERT``'s column list, with the stored tables it can belong to
+            (:class:`ColumnUse`), duplicates collapsed. On the regex fallback,
+            each timestamp name (``regex_facts.TIMESTAMP_COLUMN_NAMES``) the text
+            holds as a word, with no tables. ``timestamp_column`` is the name
+            reading of these columns: a timestamp-named one (``created_at``,
             ``updated_at``, ``timestamp``, ``event_time``, ``*_date``, ...).
+            The timestamp-column fact readers use reads the collection's column
+            types instead (``query_facts.QueryFacts.timestamp_column``, #935).
         json_access: The query reads or builds JSON: a JSON function or
             operator (``JSON_EXTRACT``, ``->``, ``->>``, ``#>``,
             ``jsonb_*``, ``JSON_VALUE``, ``OPENJSON``, ``FOR JSON``, ``IS
@@ -333,10 +362,15 @@ class SqlFacts:
     order_by: bool = False
     row_limit: bool = False
     top_n: bool = False
-    timestamp_column: bool = False
+    columns: tuple[ColumnUse, ...] = ()
     json_access: bool = False
     multi_table_write: bool = False
     wildcard_likes: tuple[WildcardLike, ...] = ()
+
+    @property
+    def timestamp_column(self) -> bool:
+        """A column named as a timestamp (the name list, ``regex_facts.TIMESTAMP_COLUMN_NAMES``)."""
+        return any(TIMESTAMP_COLUMN_NAME_RE.fullmatch(c.name) for c in self.columns)
 
 
 @dataclass(frozen=True)
@@ -656,7 +690,10 @@ def _regex_facts(sql: str, reason: FallbackReason, dialect: str) -> SqlFacts:
         order_by=regex_order_by(sql),
         row_limit=regex_row_limit(sql),
         top_n=regex_top_n(sql),
-        timestamp_column=regex_timestamp_column(sql),
+        columns=tuple(
+            ColumnUse(name, from_regex=True)
+            for name in dict.fromkeys(regex_timestamp_column_names(sql))
+        ),
         json_access=regex_json_access(sql),
         multi_table_write=regex_multi_table_write(sql),
     )
@@ -708,9 +745,7 @@ def _facts_from_statements(
             isinstance(node, exp.Query) and node.args.get("order") and node.args.get("limit")
             for node in nodes
         ),
-        timestamp_column=any(
-            TIMESTAMP_COLUMN_NAME_RE.fullmatch(name) for name in _column_names(nodes)
-        ),
+        columns=_column_uses(statements),
         json_access=any(_is_json_access(node) for node in nodes),
         multi_table_write=any(_is_multi_table_write(node) for node in nodes),
     )
@@ -735,13 +770,128 @@ _JSON_NODES: tuple[type[exp.Expr], ...] = tuple(
 ) + (exp.OpenJSON,)
 
 
-def _column_names(nodes: list[exp.Expr]) -> Iterable[str]:
-    """Every column name: column references, and an ``INSERT``'s column list."""
-    for node in nodes:
-        if isinstance(node, exp.Column) and node.name:
-            yield node.name
-        elif isinstance(node, exp.Insert) and isinstance(node.this, exp.Schema):
-            yield from (c.name for c in node.this.expressions if isinstance(c, exp.Identifier))
+def _column_uses(statements: tuple[exp.Expr, ...]) -> tuple[ColumnUse, ...]:
+    """Every column of the statements with its candidate tables (``SqlFacts.columns``)."""
+    uses: list[ColumnUse] = []
+    for statement in statements:
+        # Every CTE name, so a reference to one is a derived source, never a table.
+        ctes = {c.alias_or_name.lower(): -1 for c in statement.find_all(exp.CTE)}
+        levels: dict[int, _ColumnScope | None] = {}
+        for node in statement.walk():
+            if isinstance(node, exp.Column):
+                if node.name and not isinstance(node.this, exp.Star) and not _is_bind(node):
+                    uses.append(ColumnUse(node.name, _column_scopes(node, levels, ctes)))
+            elif isinstance(node, exp.Insert) and isinstance(node.this, exp.Schema):
+                target = node.this.this
+                ref = _ref_from_node(target) if isinstance(target, exp.Table) else None
+                scopes = ((ref,),) if ref is not None else ()
+                uses.extend(
+                    ColumnUse(c.name, scopes)
+                    for c in node.this.expressions
+                    if isinstance(c, exp.Identifier)
+                )
+    return tuple(dict.fromkeys(uses))
+
+
+# The nodes whose sources a column inside them reads.
+_COLUMN_SCOPE_NODES: tuple[type[exp.Expr], ...] = (
+    exp.Select,
+    exp.Update,
+    exp.Delete,
+    exp.Insert,
+    exp.Merge,
+)
+
+
+@dataclass(frozen=True)
+class _ColumnScope:
+    """One scope's row sources: each alias (and table name) -> its table, or None
+    for a derived table, CTE or table function; ``closed``: such a source is read,
+    so an unqualified column none of the tables holds is one of its columns."""
+
+    by_alias: dict[str, TableRef | None]
+    tables: tuple[TableRef, ...]
+    closed: bool
+
+
+def _column_scope(root: exp.Expr, ctes: dict[str, int]) -> _ColumnScope | None:
+    """The sources a column in ``root`` reads, or None when ``root`` names none of its
+    own (a ``MERGE``'s ``WHEN NOT MATCHED THEN INSERT``, which writes the target)."""
+    if isinstance(root, exp.Insert):
+        target = root.this.this if isinstance(root.this, exp.Schema) else root.this
+        if not isinstance(target, exp.Table):
+            return None
+        sources = [s for s in (_source(target, {}, ctes),) if s is not None]
+    elif isinstance(root, exp.Merge):
+        nodes = [n for n in (root.this, root.args.get("using")) if n is not None]
+        sources = [s for n in nodes if (s := _source(n, {}, ctes)) is not None]
+    else:
+        sources, _joins = _scope_sources(root, {}, ctes)
+    # An alias a source declares wins over a bare table name: T-SQL's ``UPDATE t ...
+    # FROM [Ticket] t`` names its target by the FROM list's alias.
+    aliased = [s for s in sources if s.table is None or s.alias != s.table.name.lower()]
+    by_alias: dict[str, TableRef | None] = {}
+    for source in aliased + [s for s in sources if s not in aliased]:
+        if source.alias:
+            by_alias.setdefault(source.alias, source.table)
+        if source.table is not None:
+            by_alias.setdefault(source.table.name.lower(), source.table)
+    tables = tuple(dict.fromkeys(s.table for s in sources if s.table is not None))
+    return _ColumnScope(by_alias, tables, closed=any(s.table is None for s in sources))
+
+
+def _set_target(
+    column: exp.Column, levels: dict[int, _ColumnScope | None], ctes: dict[str, int]
+) -> TableRef | None:
+    """The updated table, for an unqualified column an ``UPDATE``'s ``SET`` assigns: a
+    ``SET`` target is the target table's column, whatever the ``FROM`` list reads (the
+    target named through its alias, T-SQL's ``UPDATE t ... FROM [Ticket] t``)."""
+    assign = column.parent
+    update = assign.parent if assign is not None else None
+    if (
+        column.table
+        or not isinstance(assign, exp.EQ)
+        or assign.this is not column
+        or not isinstance(update, exp.Update)
+        or not isinstance(update.this, exp.Table)
+    ):
+        return None
+    if id(update) not in levels:
+        levels[id(update)] = _column_scope(update, ctes)
+    level = levels[id(update)]
+    name = update.this.alias_or_name.lower()
+    return level.by_alias.get(name) if level is not None else None
+
+
+def _column_scopes(
+    column: exp.Column, levels: dict[int, _ColumnScope | None], ctes: dict[str, int]
+) -> tuple[tuple[TableRef, ...], ...]:
+    """``ColumnUse.scopes`` for one column node."""
+    target = _set_target(column, levels, ctes)
+    if target is not None:
+        return ((target,),)
+    scopes: list[_ColumnScope] = []
+    node = column.parent
+    while node is not None:
+        if isinstance(node, _COLUMN_SCOPE_NODES):
+            if id(node) not in levels:
+                levels[id(node)] = _column_scope(node, ctes)
+            if (level := levels[id(node)]) is not None:
+                scopes.append(level)
+        node = node.parent
+    qualifier = column.table.lower() if column.table else ""
+    if qualifier:
+        for scope in scopes:
+            if qualifier in scope.by_alias:
+                ref = scope.by_alias[qualifier]
+                return ((ref,),) if ref is not None else ()
+        return ()
+    found: list[tuple[TableRef, ...]] = []
+    for scope in scopes:
+        found.append(scope.tables)
+        if scope.closed:
+            break
+    return tuple(found)
 
 
 def _is_json_access(node: exp.Expr) -> bool:

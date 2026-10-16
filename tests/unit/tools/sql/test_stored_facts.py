@@ -26,6 +26,7 @@ from src.tools.sql import facade
 from src.tools.sql import query_facts as query_facts_module
 from src.tools.sql.facade import query_readings
 from src.tools.sql.query_facts import (
+    ColumnTypes,
     QueryFacts,
     query_facts,
     remember_collected_facts,
@@ -100,22 +101,43 @@ def test_a_stored_probe_reads_back_as_parsed(text, engine):
     assert _as_dicts(readings_from_stored(stored, text, engine)) == _as_dicts(fresh)
 
 
-def test_every_query_fact_reads_the_same_from_stored_facts(collected, monkeypatch):
+@pytest.fixture(scope="module")
+def sample_types() -> dict[str, ColumnTypes | None]:
+    """Each sample's column types, by source engine (one sample per engine)."""
+    types = {}
+    for name in SAMPLES:
+        data = load_sample(name)
+        engine, _port = detect_source_engine(data.get("metadata"))
+        tables = parse_offline_collection(data)["tables"]
+        types[engine] = ColumnTypes.from_collector(
+            {
+                "metadata": {"source_database": {"engine": engine}},
+                "database_schema": {"tables": tables},
+            }
+        )
+    return types
+
+
+def test_every_query_fact_reads_the_same_from_stored_facts(collected, sample_types, monkeypatch):
     """Every public fact of every sample query, read with the stored facts remembered and
-    no parse allowed, equals the fact read from a parse."""
+    no parse allowed, equals the fact read from a parse; the timestamp column (#935) with
+    the sample's column types and with none."""
     names = [
         n
         for n, v in vars(QueryFacts).items()
         if isinstance(v, cached_property | property) and not n.startswith("_")
     ]
 
-    def read(facts: QueryFacts) -> dict:
+    def read(facts: QueryFacts, engine: str) -> dict:
         values = {n: getattr(facts, n) for n in names}
         values["access_facts"] = dataclasses.asdict(facts.access_facts())
         values["text_search_type"] = facts.text_search_type()
+        values["timestamp_column"] = facts.timestamp_column(sample_types[engine])
+        values["timestamp_column_by_name"] = facts.timestamp_column(None)
         return values
 
-    expected = {(q["query_text"], e): read(QueryFacts(q["query_text"], e)) for q, e in collected}
+    assert all(sample_types.values())
+    expected = {(q["query_text"], e): read(QueryFacts(q["query_text"], e), e) for q, e in collected}
     for q, engine in collected:
         remember_stored_facts(q["query_text"], engine, q["parsed_facts"])
 
@@ -124,7 +146,7 @@ def test_every_query_fact_reads_the_same_from_stored_facts(collected, monkeypatc
 
     monkeypatch.setattr(query_facts_module, "query_readings", no_parse)
     for (text, engine), values in expected.items():
-        assert read(query_facts(text, engine)) == values, text[:80]
+        assert read(query_facts(text, engine), engine) == values, text[:80]
 
 
 def test_the_live_collectors_store_the_same_readings():

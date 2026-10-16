@@ -51,7 +51,9 @@ count:
   number, ``(`` or a variable;
 - ``top_n``: ``ORDER BY ... LIMIT``/``FETCH FIRST|NEXT``, or ``TOP (n) ... ORDER
   BY`` (the top-N regex triage and the cache overlay read before, #296/#663);
-- ``timestamp_column``: a :data:`TIMESTAMP_COLUMN_NAMES` name as a word;
+- ``columns``: each :data:`TIMESTAMP_COLUMN_NAMES` name as a word, with no
+  tables (``timestamp_column`` is whether there is one): the fallback can't tell
+  a column's table, so the timestamp-column fact reads these by name (#935);
 - ``json_access``: a ``json_*``/``jsonb_*`` call, ``->``/``->>``, ``#>``,
   ``::json``/``::jsonb``, ``@> '``, ``OPENJSON(``, ``FOR JSON``, ``IS JSON``;
 - ``multi_table_write``: outside parentheses, ``UPDATE`` with a ``JOIN`` or a comma
@@ -147,7 +149,10 @@ _TOP_N_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 # The names of a timestamp column: every name the DynamoDB, OpenSearch,
-# ElastiCache and triage detectors read before #893, as whole names.
+# ElastiCache and triage detectors read before #893, as whole names. Since #935 a
+# column's collected type decides; these names are read only for a collection with
+# no column types, or a column whose table can't be told
+# (``query_facts.QueryFacts.timestamp_column``).
 TIMESTAMP_COLUMN_NAMES = (
     r"created_at|updated_at|timestamp|date|time|expires?_at|ttl|last_\w+_at|event_time|"
     r"log_time|ingested_at|open_date|close_date|created_date|modified_date|event_date"
@@ -547,9 +552,14 @@ def regex_top_n(query_text: str) -> bool:
     return bool(_TOP_N_RE.search(_without_windows(query_text or "")))
 
 
+def regex_timestamp_column_names(query_text: str) -> list[str]:
+    """Each timestamp column name the text holds as a word, in order."""
+    return [m.group(0) for m in _TIMESTAMP_COLUMN_RE.finditer(query_text or "")]
+
+
 def regex_timestamp_column(query_text: str) -> bool:
     """A timestamp column name as a word."""
-    return bool(_TIMESTAMP_COLUMN_RE.search(query_text or ""))
+    return bool(regex_timestamp_column_names(query_text))
 
 
 def regex_json_access(query_text: str) -> bool:

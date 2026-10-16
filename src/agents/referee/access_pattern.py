@@ -76,7 +76,7 @@ from dataclasses import dataclass, field, replace
 
 from src.agents.referee.table_resolution import TableNameResolver
 from src.tools.sql.facade import AccessFacts, ColumnFact, ScopeFacts, ScopeSource
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import is_timestamp_type, query_facts
 
 KEY_LOOKUP = "key_lookup"
 KEY_SCOPED = "key_scoped"
@@ -116,9 +116,9 @@ CLASS_LABELS: dict[str, str] = {
 
 # Index types that are not an access key for an equality or a range.
 _NON_KEY_INDEX_TYPES = frozenset({"fulltext", "gin", "gist", "spatial"})
-# Column types that are a point in time: an index on one orders rows, it does not
-# address an entity, so its leading column is not a key.
-_TEMPORAL_TYPES = frozenset({"date", "datetime", "timestamp", "time"})
+# A time of day, which (like a point in time, ``query_facts.is_timestamp_type``)
+# orders rows rather than addressing an entity.
+_TIME_OF_DAY_TYPES = frozenset({"time", "timetz"})
 # A non-unique index's leading column whose distinct values (the collector's
 # ``cardinality``) number at most this share of the table's rows addresses a large
 # slice of the table per value, not an item collection, so it is not a key.
@@ -174,11 +174,14 @@ def _lower(columns: Iterable) -> tuple[str, ...]:
 
 
 def _is_temporal(column: Mapping) -> bool:
+    """A date, datetime or timestamp (the timestamp-column fact's own definition,
+    #935) or a time of day: an index on one orders rows, it does not address an
+    entity, so its leading column is not a key."""
+    if is_timestamp_type(column):
+        return True
     normalized = str(column.get("normalized_data_type") or "").lower()
-    if normalized:
-        return normalized in _TEMPORAL_TYPES
-    native = str(column.get("data_type") or "").lower()
-    return "date" in native or "time" in native
+    native = str(column.get("data_type") or "").lower().split("(")[0].split()
+    return (normalized or (native[0] if native else "")) in _TIME_OF_DAY_TYPES
 
 
 def _is_low_cardinality(column: Mapping, row_count: object) -> bool | None:

@@ -21,7 +21,7 @@ from src.tools.analysis.scoring import (
     compute_base_scores,
     compute_confidence,
 )
-from src.tools.sql.query_facts import query_facts, source_engine_of
+from src.tools.sql.query_facts import ColumnTypes, query_facts, source_engine_of
 
 
 def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
@@ -48,6 +48,7 @@ def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
     """
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     source_engine = source_engine_of(collector_output)
+    column_types = ColumnTypes.from_collector(collector_output)
 
     # Single-pass classification. The text detectors are engine-neutral query
     # facts (``src.tools.sql.query_facts``, #491), read once per query.
@@ -77,7 +78,7 @@ def analyze_redis_use_cases(collector_output: dict) -> WorkloadAnalysis:
             leaderboard_queries.append(q)
 
         # Time series: timestamp/date keywords + GROUP BY
-        if facts.timestamp_column and facts.group_by:
+        if facts.timestamp_column(column_types) and facts.group_by:
             timeseries_queries.append(q)
 
         # Time series: time binning functions (DATE_TRUNC()). The check this

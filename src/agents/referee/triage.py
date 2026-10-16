@@ -55,7 +55,7 @@ from src.agents.referee.capability_registry import (
 )
 from src.agents.referee.table_resolution import SourceScope
 from src.tools.analysis.key_access import KeyAccessReader
-from src.tools.sql.query_facts import query_facts, source_engine_of
+from src.tools.sql.query_facts import ColumnTypes, query_facts, source_engine_of
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +288,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         return signals
     source_engine = source_engine_of(co)
     key_reader = KeyAccessReader.from_collector(co, source_engine)
+    column_types = ColumnTypes.from_collector(co)
 
     # Accumulators: list of query_ids per signal
     kv_lookups: list[str] = []
@@ -300,6 +301,9 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
     aggregations: list[str] = []
     large_scans: list[str] = []
     timeseries: list[str] = []
+    # Time-series queries whose timestamp column was read by name although the
+    # collection has column types (its table could not be told, #935).
+    timeseries_by_name: list[str] = []
     session_store: list[str] = []
     metadata_config: list[str] = []
     text_searches: list[str] = []
@@ -370,8 +374,11 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
             large_scans.append(qid)
 
         # Group 8: Time-series / event log
-        if facts.timestamp_column and (qtype == "INSERT" or (qtype == "SELECT" and facts.order_by)):
+        timestamp = facts.timestamp_column(column_types)
+        if timestamp and (qtype == "INSERT" or (qtype == "SELECT" and facts.order_by)):
             timeseries.append(qid)
+            if timestamp.read_by_name and not timestamp.no_types:
+                timeseries_by_name.append(qid)
 
         # Group 9: Session store. Matched on the original text, not the
         # lower-cased one, so a PascalCase [SessionToken] still splits (#663).
@@ -493,14 +500,18 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
             )
         )
     if timeseries:
-        signals.append(
-            _signal(
-                "time_series",
-                ["dynamodb", "keyspaces", "documentdb", "opensearch"],
-                "time-series / event log queries (timestamp in WHERE/ORDER BY)",
-                timeseries,
-            )
+        time_series = _signal(
+            "time_series",
+            ["dynamodb", "keyspaces", "documentdb", "opensearch"],
+            "time-series / event log queries (timestamp in WHERE/ORDER BY)",
+            timeseries,
         )
+        by_name = len(dict.fromkeys(timeseries_by_name))
+        if by_name:
+            time_series.evidence += (
+                f"; {by_name} by column name (the column's table could not be told)"
+            )
+        signals.append(time_series)
     if session_store:
         signals.append(
             _signal(
