@@ -69,6 +69,10 @@ psutil. On Windows, run `ci/test.sh` from Git Bash or WSL, or run
 `uv run pytest tests/ --ignore=tests/e2e -m "not integration and not e2e" --fail-on-skip`
 directly.
 
+## `pre_merge.sh`
+
+A cheap failsafe to run before pushing or asking for a merge: `./ci/pre_merge.sh` (add `--quick` to skip the test suite). In order, each step prints one status line: fetch the public repo's main (`upstream` or `origin`, whichever points at it, `origin` as the fallback); count how many commits the branch is behind main; check for merge conflicts with `git merge-tree --write-tree` (no change to the worktree, index or refs; older git falls back to listing files both sides changed); check that every changed `src/contracts/*.py` has a `contract_version` higher than main's (a version that only collides with one already on main says "take the next version"); warn when a generated file (routing snapshot, `tests/contract/schema_snapshot.json`, rendered catalog, report template) differs from main but its generator check fails; run `ci/lint.sh`; run `ci/test.sh -q`; print the `needs_llm_run.sh` verdict against main. It exits non-zero on a conflict, a lint or test failure, or a contract version problem, and ends with a summary. The parsing and verdict logic lives in `ci/pre_merge.py`, covered by `tests/unit/ci/test_pre_merge.py`. No env vars; needs network only for the fetch.
+
 ## `e2e.sh`
 
 The deterministic end-to-end suite (`tests/e2e/`): runs the full pipeline

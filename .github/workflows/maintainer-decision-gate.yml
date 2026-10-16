@@ -6,13 +6,17 @@ name: Maintainer Decision gate
 on:
   pull_request:
     types: [opened, reopened, synchronize, labeled, unlabeled]
+  # For GitHub's merge queue: a required check must report on the merge group
+  # too. A merge group has no pull request payload (no labels), so the gate
+  # passes there; the label was already enforced when the PR entered the queue.
+  merge_group:
 
 permissions: {}
 
 # Only the newest run per PR counts, so a quick label then unlabel can't leave
 # an older failing run as the latest result.
 concurrency:
-  group: maintainer-decision-gate-${{ github.event.pull_request.number }}
+  group: maintainer-decision-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
