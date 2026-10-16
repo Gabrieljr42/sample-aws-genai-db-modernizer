@@ -162,7 +162,8 @@ def test_redis_pattern_frequency_percent_zero_geospatial():
             "query_id": "s2",
             "query_type": "SELECT",
             "calls_per_second": 0.5,
-            "query_text": "SELECT * FROM accounts WHERE user_id = ?",
+            # A session key (the session_key fact, #893); a user_id alone is not one.
+            "query_text": "SELECT * FROM accounts WHERE auth_token = ?",
             "tables_accessed": ["accounts"],
         },
     ]

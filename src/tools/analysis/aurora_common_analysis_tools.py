@@ -255,7 +255,7 @@ def analyze_aurora_common_use_cases(
                 mm_table_ids.extend(tables)
 
         # aurora-common-08: pagination
-        if facts.pagination_keyword:
+        if facts.row_limit:
             pg_query_ids.append(qid)
             pg_table_ids.extend(tables)
 

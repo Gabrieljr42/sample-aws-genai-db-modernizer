@@ -16,6 +16,12 @@ own detection) and ``unsupported_pattern``'s comment/literal stripping and
 scalar-function allowlist. The few new facts it adds (key predicate, range
 predicate, CTE, ``DISTINCT``, pattern match, a primary-key-ordered first-row
 read) are defined once, here.
+
+A declared fact module (ADR-031 Decision 8, #893): the one place these shape
+facts are defined, held to the one-definition guard
+(``tests/unit/tools/sql/test_one_definition_per_fact.py``). The single-table
+access shape is replaced by the per-query access-pattern classes when ADR-031
+Decision 14 Amendment 5 switches routing over (#728).
 """
 
 from __future__ import annotations
@@ -26,6 +32,13 @@ from collections.abc import Mapping, Sequence
 from src.agents.referee.capability_registry import detect_required_capabilities
 from src.agents.referee.table_resolution import SourceScope
 from src.shared.unsupported_pattern import non_scalar_function_names, strip_comments_and_literals
+from src.tools.sql.regex_facts import (
+    GROUP_BY_RE,
+    LITERAL_PREFIX_LIKE_RE,
+    ORDER_BY_RE,
+    PATTERN_PREDICATE_RE,
+    SELECT_WORD_RE,
+)
 
 __all__ = [
     "CRUD",
@@ -60,15 +73,12 @@ order over non-key columns, an engine-specific function, ..."""
 # ``"t"."id" = $1`` and leave nothing to tell it apart from ``$1 = $2``.
 _QUOTED_IDENT_RE = re.compile(r'"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]')
 
-_SELECT_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
 _DISTINCT_RE = re.compile(r"\bDISTINCT\b", re.IGNORECASE)
-_GROUP_BY_RE = re.compile(r"\bGROUP\s+BY\b", re.IGNORECASE)
 _CTE_RE = re.compile(
     r"\bWITH\s+(?:RECURSIVE\s+)?(?:\w+\s*)?(?:\([^()]*\)\s*)?AS\s*"
     r"(?:NOT\s+)?(?:MATERIALIZED\s*)?\(",
     re.IGNORECASE,
 )
-_ORDER_BY_RE = re.compile(r"\bORDER\s+BY\b", re.IGNORECASE)
 _WHERE_RE = re.compile(
     r"\bWHERE\b(?P<where>.*?)(?=\b(?:ORDER\s+BY|GROUP\s+BY|HAVING|LIMIT|OFFSET|FETCH|"
     r"RETURNING|FOR\s+UPDATE|FOR\s+SHARE|LOCK\s+IN|UNION)\b|$)",
@@ -90,10 +100,6 @@ _NOT_A_COLUMN = frozenset({"null", "true", "false", "not", "and", "or"})
 _RANGE_PREDICATE_RE = re.compile(
     r"\bBETWEEN\b|(?<![<>=!@\-])(?:<=|>=|<|>)(?![<>=@])", re.IGNORECASE
 )
-# LIKE/ILIKE/SIMILAR TO/REGEXP/RLIKE, and a literal-prefix LIKE ('abc%', no
-# leading wildcard) -- read on the text before literals are stripped.
-_PATTERN_MATCH_RE = re.compile(r"\b(?:I?LIKE|SIMILAR\s+TO|REGEXP|RLIKE)\b", re.IGNORECASE)
-_LITERAL_PREFIX_LIKE_RE = re.compile(r"\bI?LIKE\s+'[^%_']", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # Primary-key-ordered reads (maintainer decision on #692)
@@ -626,14 +632,16 @@ def single_table_access_shape(
     sql = strip_comments_and_literals(with_idents)
     if _CTE_RE.search(sql):
         return RELATIONAL
-    if len(_SELECT_RE.findall(sql)) > (1 if query_type == "SELECT" else 0):
+    if len(SELECT_WORD_RE.findall(sql)) > (1 if query_type == "SELECT" else 0):
         return RELATIONAL
-    if _DISTINCT_RE.search(sql) or _GROUP_BY_RE.search(sql):
+    if _DISTINCT_RE.search(sql) or GROUP_BY_RE.search(sql):
         return RELATIONAL
     where_match = _WHERE_RE.search(sql)
     where = where_match.group("where") if where_match else ""
-    pattern_match = bool(_PATTERN_MATCH_RE.search(where))
-    if pattern_match and not _LITERAL_PREFIX_LIKE_RE.search(with_idents):
+    # A pattern-match predicate (LIKE/ILIKE/SIMILAR TO/REGEXP/RLIKE) and a literal-prefix
+    # LIKE ('abc%', no leading wildcard) are read on the text before literals are stripped.
+    pattern_match = bool(PATTERN_PREDICATE_RE.search(where))
+    if pattern_match and not LITERAL_PREFIX_LIKE_RE.search(with_idents):
         return RELATIONAL
     keyed = _has_key_predicate(where)
     ranged = pattern_match or bool(_RANGE_PREDICATE_RE.search(where))
@@ -642,7 +650,7 @@ def single_table_access_shape(
     if query_type == "SELECT" and not keyed:
         if ranged:
             return RELATIONAL
-        if _ORDER_BY_RE.search(sql):
+        if ORDER_BY_RE.search(sql):
             if is_primary_key_first_row_read(text, primary_key or [], limit_value):
                 return CRUD
             if primary_key_ordered_limit(text, primary_key or []) is not None:

@@ -33,6 +33,12 @@ _ADDED_FACT_FALLBACKS = {
     "offset_window_function": regex_facts.regex_offset_window_function,
     "windowed_aggregate": regex_facts.regex_windowed_aggregate,
     "recursive_cte": regex_facts.regex_recursive_cte,
+    "order_by": regex_facts.regex_order_by,
+    "row_limit": regex_facts.regex_row_limit,
+    "top_n": regex_facts.regex_top_n,
+    "timestamp_column": regex_facts.regex_timestamp_column,
+    "json_access": regex_facts.regex_json_access,
+    "update_target_join": regex_facts.regex_update_target_join,
 }
 
 
@@ -264,6 +270,66 @@ class TestTheFactsAddedFor893:
                 "recursive_cte",
                 False,
             ),
+            ("SELECT * FROM t ORDER BY a", "postgresql", "order_by", True),
+            ("SELECT RANK() OVER (ORDER BY a) FROM t", "postgresql", "order_by", False),
+            ("SELECT * FROM t LIMIT 5", "postgresql", "row_limit", True),
+            ("SELECT TOP (5) * FROM t", "sqlserver", "row_limit", True),
+            ("SELECT * FROM t FETCH FIRST 5 ROWS ONLY", "oracle", "row_limit", True),
+            ("SELECT credit_limit FROM t", "postgresql", "row_limit", False),
+            ("DELETE FROM t WHERE a < ? LIMIT 1000", "mysql", "row_limit", True),
+            # The T-SQL bridge drops a DML TOP before parsing; the row limit is kept.
+            ("DELETE TOP (5000) FROM [S] WHERE [ExpiresAt] < @now", "sqlserver", "row_limit", True),
+            ("SELECT * FROM t ORDER BY a LIMIT 5", "postgresql", "top_n", True),
+            (
+                "SELECT a FROM t UNION SELECT a FROM u ORDER BY a LIMIT 5",
+                "postgresql",
+                "top_n",
+                True,
+            ),
+            ("SELECT TOP (5) * FROM t ORDER BY a", "sqlserver", "top_n", True),
+            ("SELECT TOP (5) * FROM t", "sqlserver", "top_n", False),
+            ("SELECT * FROM t WHERE created_at > ?", "mysql", "timestamp_column", True),
+            (
+                "INSERT INTO t (id, created_at) VALUES ($1, $2)",
+                "postgresql",
+                "timestamp_column",
+                True,
+            ),
+            (
+                "UPDATE t SET updated_at = now() WHERE id = $1",
+                "postgresql",
+                "timestamp_column",
+                True,
+            ),
+            ("SELECT CAST(a AS DATE) FROM t", "postgresql", "timestamp_column", False),
+            ("SELECT * FROM t WHERE note = 'created_at'", "postgresql", "timestamp_column", False),
+            ("SELECT JSON_EXTRACT(doc, '$.a') FROM t", "mysql", "json_access", True),
+            ("SELECT doc->>'a' FROM t", "postgresql", "json_access", True),
+            ("SELECT doc #> '{a,b}' FROM t", "postgresql", "json_access", True),
+            ("SELECT * FROM t WHERE doc ? 'k'", "postgresql", "json_access", False),
+            ("SELECT * FROM t WHERE doc @> '{\"a\": 1}'", "postgresql", "json_access", True),
+            ("SELECT * FROM t WHERE tags @> ARRAY[1]", "postgresql", "json_access", False),
+            ("SELECT jsonb_build_object('a', 1)", "postgresql", "json_access", True),
+            ("SELECT doc::jsonb FROM t", "postgresql", "json_access", True),
+            ("SELECT * FROM t FOR JSON PATH", "sqlserver", "json_access", True),
+            ("SELECT * FROM t FOR XML PATH", "sqlserver", "json_access", False),
+            ("SELECT * FROM t WHERE doc IS JSON", "oracle", "json_access", True),
+            ("SELECT json_value FROM t", "mysql", "json_access", False),
+            ("UPDATE a JOIN b ON b.id = a.id SET a.x = ?", "mysql", "update_target_join", True),
+            ("UPDATE a INNER JOIN b USING (id) SET a.x = 1", "mysql", "update_target_join", True),
+            (
+                "UPDATE t SET t.a = 1 FROM [T] t JOIN [U] u ON u.id = t.id",
+                "sqlserver",
+                "update_target_join",
+                False,
+            ),
+            (
+                "UPDATE posts p SET a = 1 FROM topics t WHERE t.id = p.topic_id",
+                "postgresql",
+                "update_target_join",
+                False,
+            ),
+            ("UPDATE a SET x = 1 WHERE id = ?", "mysql", "update_target_join", False),
         ],
     )
     def test_each_fact(self, sql, engine, fact, expected):
@@ -404,3 +470,19 @@ class TestTheFallbackReadsLikeTheParse:
     def test_string_and_array_aggregates_are_aggregation(self, sql):
         assert regex_facts.regex_aggregate_function_count(sql) == 1
         assert regex_has_aggregation(sql)
+
+    @pytest.mark.parametrize(
+        "sql,order_by,top_n",
+        [
+            ("SELECT ROW_NUMBER() OVER (ORDER BY a) FROM t LIMIT 5", False, False),
+            (
+                "SELECT RANK() OVER (PARTITION BY b ORDER BY a) r FROM t ORDER BY r LIMIT 5",
+                True,
+                True,
+            ),
+            ("SELECT * FROM t ORDER BY a LIMIT 5", True, True),
+        ],
+    )
+    def test_an_order_by_inside_a_window_sorts_no_rows(self, sql, order_by, top_n):
+        assert regex_facts.regex_order_by(sql) is order_by
+        assert regex_facts.regex_top_n(sql) is top_n

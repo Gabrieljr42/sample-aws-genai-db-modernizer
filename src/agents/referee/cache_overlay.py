@@ -189,7 +189,7 @@ def cache_pattern(query: Mapping, source_engine: str = "") -> str | None:
         return None
     if facts.session_key:
         return CACHE_HINT_SIGNALS["session_store"]
-    if facts.top_n_shape:
+    if facts.top_n:
         return "top_n" if float(query.get("rows_returned_avg") or 0) > 1 else "point_lookup"
     if facts.where_word:
         # A keyed read: an equality or IN predicate (a range scan is not a lookup).

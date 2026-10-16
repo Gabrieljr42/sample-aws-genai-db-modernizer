@@ -82,14 +82,27 @@ def test_sql_server_source_is_collected_as_sql_server(trailgear_run: PipelineRes
 def test_aurora_choice_is_a_close_call_tipped_by_workload_features(
     trailgear_run: PipelineResult,
 ) -> None:
-    """Aurora MySQL scores the higher total, within the 5% margin, so the
-    workload's own features decide -- every one of them, and never Babelfish
-    (a last resort only when no workload feature is present)."""
+    """The two Aurora totals are within the 5% margin, so the workload's own
+    features decide -- every one of them, and never Babelfish (a last resort only
+    when no workload feature is present).
+
+    Aurora PostgreSQL leads, 7305 to 7285 (#893). Until #893, Aurora MySQL led
+    only because the two analyses' JSON detectors disagreed: MySQL's read
+    ``JSON_VALUE(`` and PostgreSQL's did not, worth +7 on four ``Product``
+    queries and +3 on three that join it. With one JSON definition both engines
+    score ``Product`` the same, and the lead is PostgreSQL's recursive-CTE
+    pattern on ``TicketMessage`` (the thread CTE and the ``INSERT``, +3 each; the
+    three ``Ticket`` joins, +2 each) plus +1 on eight queries whose tables do not
+    resolve (``EXEC``, ``SET``, ``ALTER INDEX``, ``NEXT VALUE FOR``, a scalar
+    function), which take the all-tables average. No T-SQL statement favours a
+    MySQL-only pattern (``ON DUPLICATE KEY``, ``GROUP_CONCAT``, ``CALL``, MySQL's
+    ``UPDATE a JOIN b``), so the higher total and the features now agree; the
+    margin is what is pinned."""
     choice = _assignment(trailgear_run, 1)["aurora_engine_choice"]
     assert choice["source_engine"] == "sqlserver"
     mysql, pg = choice["totals"]["aurora_mysql"], choice["totals"]["aurora_postgresql"]
-    assert mysql > pg, "the sample must make the higher-total engine lose on features"
-    assert mysql - pg <= 0.05 * mysql, "the totals must be close enough for features to decide"
+    assert (mysql, pg) == (7285.0, 7305.0)
+    assert abs(pg - mysql) <= 0.05 * max(mysql, pg), "close enough for features to decide"
     assert choice["margin"] == round(pg - mysql, 2)
     assert choice["engine"] == "aurora_postgresql"
     assert choice["deciding_features"] == WORKLOAD_FEATURES
