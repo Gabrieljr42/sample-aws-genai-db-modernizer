@@ -48,8 +48,7 @@ Limits on the raw endpoint:
   (`504`), a memory cap and a 16 MiB result cap (`400`). At most two run at
   once; more return `429`.
 
-The curated endpoints run fixed queries on a read-only handle with the same
-10-second timeout (`504`) and a 256 MiB buffer pool (`503` when it is full).
+The curated endpoints run fixed queries on a read-only handle with the same 10-second timeout (`504`). The handle has a 256 MiB buffer pool (`MODERNIZER_GRAPH_BUFFER_POOL_MB`), runs each statement on 2 engine threads (`MODERNIZER_GRAPH_QUERY_THREADS`) and runs at most 4 statements at once (`MODERNIZER_GRAPH_MAX_CONCURRENT_READS`); further reads wait for a slot. A read that still runs out of buffer pool memory, or waits more than 30 seconds for a slot, returns `503` with `Retry-After: 1`. `GET /query-journeys` reads only the requested page from the graph.
 
 The graph is built lazily on first access (or explicitly via
 `POST /api/v1/assessments/{job_id}/graph/rebuild`) from the assessment's S3

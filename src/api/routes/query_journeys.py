@@ -28,19 +28,28 @@ def _get_database_name(job_id: str) -> str:
     return db_name
 
 
-def _journeys_from_graph(job_id: str) -> list[dict] | None:
-    """Return all query journeys from the assessment graph, or None if unavailable.
+def _journeys_page_from_graph(
+    job_id: str, page: int, page_size: int
+) -> tuple[int, list[dict]] | None:
+    """Return ``(total, page_items)`` from the assessment graph, or None if unavailable.
 
     The graph is the read-model that replaces the per-query journey artifacts.
     Uses the same graph accessor the /graph routes use (build-on-demand + cache).
-    Returns None when the graph layer is not wired (so the caller falls back to
-    the journey artifacts, which still exist for legacy jobs)."""
+    Only the requested page is read from the graph (#998): the results page
+    requests every page at once, so reading the whole job per request ran the
+    graph engine out of memory on large jobs. Returns None when the graph
+    layer is not wired (so the caller falls back to the journey artifacts,
+    which still exist for legacy jobs)."""
     try:
         from src.api.routes import graph as graph_route
         from src.graph import queries as graph_queries
 
         with graph_route.graph_lease(job_id) as (store, _db):
-            return graph_queries.query_journeys(store)
+            total = graph_queries.query_count(store)
+            skip = (page - 1) * page_size
+            if skip >= total:
+                return total, []
+            return total, graph_queries.query_journeys_page(store, skip, page_size)
     except RuntimeError as exc:
         mapped = graph_route.graph_error_to_http(exc)
         if mapped is not None:
@@ -66,16 +75,14 @@ def list_query_journeys(
     legacy jobs that predate the graph read-model."""
     page_size = min(page_size, _MAX_PAGE_SIZE)
 
-    graph_items = _journeys_from_graph(job_id)
-    if graph_items is not None:
-        total = len(graph_items)
+    from_graph = _journeys_page_from_graph(job_id, page, page_size)
+    if from_graph is not None:
+        total, page_items = from_graph
         if total == 0:
             raise HTTPException(
                 status_code=404, detail="No query journeys found for this assessment"
             )
         total_pages = math.ceil(total / page_size)
-        start = (page - 1) * page_size
-        page_items = graph_items[start : start + page_size]
         return {
             "job_id": job_id,
             "total": total,

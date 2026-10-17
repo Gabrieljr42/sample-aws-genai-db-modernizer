@@ -1,5 +1,6 @@
 """Unit tests for query journeys route."""
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
@@ -224,26 +225,112 @@ class TestGetQueryJourney:
         assert response.json()["detail"] == "Services not configured"
 
 
+@contextmanager
+def _graph_with_queries(tmp_path, n: int):
+    """A real graph with ``n`` queries (gq0, gq1, ...) and a graph_lease stand-in for it."""
+    from src.graph.populators import populate_from_collector
+    from src.graph.schema import initialize_schema
+    from src.graph.store import GraphStore
+
+    path = str(tmp_path / "journeys.lbug")
+    writer = GraphStore(path)
+    initialize_schema(writer)
+    populate_from_collector(
+        {
+            "queries": {
+                "query_patterns": [
+                    {
+                        "query_id": f"gq{i}",
+                        "query_text": "SELECT 1",
+                        "query_type": "SELECT",
+                        "tables_accessed": ["t"],
+                        "calls_per_second": 1.0,
+                    }
+                    for i in range(n)
+                ]
+            }
+        },
+        writer,
+    )
+    writer.close()
+    reader = GraphStore(path, read_only=True)
+
+    @contextmanager
+    def _lease(job_id):
+        yield reader, "test_db"
+
+    try:
+        yield _lease
+    finally:
+        reader.close()
+
+
 class TestGraphBackedJourneys:
     """When the context graph is available it is the source of journeys; the
     per-query artifacts are the fallback for legacy / json-mode jobs."""
 
-    def test_list_served_from_graph_when_available(self, mock_services):
+    def test_list_served_from_graph_when_available(self, mock_services, tmp_path):
         from unittest.mock import patch
 
-        graph_journeys = [
-            {"query_id": f"gq{i}", "source": {}, "assignment": None, "design": None}
-            for i in range(3)
-        ]
-        with patch.object(query_journeys, "_journeys_from_graph", return_value=graph_journeys):
-            resp = client.get("/api/v1/assessments/job-1/query-journeys?page=1&page_size=2")
+        from src.api.routes import graph as graph_route
+
+        with _graph_with_queries(tmp_path, 3) as lease:
+            with patch.object(graph_route, "graph_lease", lease):
+                resp = client.get("/api/v1/assessments/job-1/query-journeys?page=1&page_size=2")
+                last = client.get("/api/v1/assessments/job-1/query-journeys?page=2&page_size=2")
+                beyond = client.get("/api/v1/assessments/job-1/query-journeys?page=9&page_size=2")
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] == 3
         assert body["page_size"] == 2
+        assert body["total_pages"] == 2
         assert [i["query_id"] for i in body["items"]] == ["gq0", "gq1"]
+        assert [i["query_id"] for i in last.json()["items"]] == ["gq2"]
+        assert beyond.status_code == 200
+        assert beyond.json()["items"] == []
         # The artifact path was not consulted when the graph served the list.
+        mock_services["store"].list_prefix.assert_not_called()
+
+    def test_list_reads_only_the_requested_page_from_the_graph(self, mock_services, tmp_path):
+        """#998: a page request never materialises every journey of the job."""
+        from unittest.mock import patch
+
+        from src.api.routes import graph as graph_route
+        from src.graph import queries as graph_queries
+
+        def _everything(*args, **kwargs):
+            raise AssertionError("the list endpoint read every journey")
+
+        pages: list[tuple[int, int]] = []
+        real_page = graph_queries.query_journeys_page
+
+        def _page(store, skip, limit):
+            pages.append((skip, limit))
+            return real_page(store, skip, limit)
+
+        with _graph_with_queries(tmp_path, 5) as lease:
+            with (
+                patch.object(graph_route, "graph_lease", lease),
+                patch.object(graph_queries, "query_journeys", _everything),
+                patch.object(graph_queries, "query_journeys_page", _page),
+            ):
+                resp = client.get("/api/v1/assessments/job-1/query-journeys?page=2&page_size=2")
+
+        assert resp.status_code == 200
+        assert [i["query_id"] for i in resp.json()["items"]] == ["gq2", "gq3"]
+        assert pages == [(2, 2)]
+
+    def test_empty_graph_is_404(self, mock_services, tmp_path):
+        from unittest.mock import patch
+
+        from src.api.routes import graph as graph_route
+
+        with _graph_with_queries(tmp_path, 0) as lease:
+            with patch.object(graph_route, "graph_lease", lease):
+                resp = client.get("/api/v1/assessments/job-1/query-journeys")
+
+        assert resp.status_code == 404
         mock_services["store"].list_prefix.assert_not_called()
 
     def test_list_falls_back_to_artifacts_when_graph_absent(self, mock_services):
@@ -255,7 +342,7 @@ class TestGraphBackedJourneys:
         mock_services["store"].read_json.side_effect = [
             {"query_id": "q_001", "source": {}, "assignment": None, "design": None},
         ]
-        with patch.object(query_journeys, "_journeys_from_graph", return_value=None):
+        with patch.object(query_journeys, "_journeys_page_from_graph", return_value=None):
             resp = client.get("/api/v1/assessments/job-1/query-journeys")
 
         assert resp.status_code == 200
@@ -305,7 +392,8 @@ def test_graph_timeout_returns_504_not_artifact_fallback(mock_services, path):
 
     with (
         patch.object(graph_route, "graph_lease", _lease),
-        patch.object(graph_queries, "query_journeys", _timeout),
+        patch.object(graph_queries, "query_count", _timeout),
+        patch.object(graph_queries, "query_journeys_page", _timeout),
         patch.object(graph_queries, "query_journey", _timeout),
     ):
         resp = client.get(f"/api/v1/assessments/job-1{path}")
@@ -313,3 +401,46 @@ def test_graph_timeout_returns_504_not_artifact_fallback(mock_services, path):
     assert resp.status_code == 504
     assert resp.json()["detail"] == graph_route.TIMEOUT_DETAIL
     mock_services["store"].read_json.assert_not_called()
+
+
+@pytest.mark.parametrize("path", ["/query-journeys", "/query-journeys/q_001"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError(
+            "Buffer manager exception: Unable to allocate memory! The buffer pool is full"
+        ),
+        "busy",
+    ],
+)
+def test_graph_memory_or_busy_error_is_a_retryable_503(mock_services, path, error):
+    """#998: an out-of-memory or saturated graph read answers 503 with Retry-After,
+    and is not hidden by the artifact fallback."""
+    from unittest.mock import patch
+
+    from src.api.routes import graph as graph_route
+    from src.graph import queries as graph_queries
+    from src.graph.store import GraphBusyError
+
+    exc = GraphBusyError("no graph read slot") if error == "busy" else error
+
+    @contextmanager
+    def _lease(job_id):
+        yield MagicMock(), "test_db"
+
+    def _fail(*args):
+        raise exc
+
+    with (
+        patch.object(graph_route, "graph_lease", _lease),
+        patch.object(graph_queries, "query_count", _fail),
+        patch.object(graph_queries, "query_journey", _fail),
+    ):
+        resp = client.get(f"/api/v1/assessments/job-1{path}")
+
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "1"
+    expected = graph_route.BUSY_DETAIL if error == "busy" else graph_route.MEMORY_DETAIL
+    assert resp.json()["detail"] == expected
+    mock_services["store"].read_json.assert_not_called()
+    mock_services["store"].list_prefix.assert_not_called()

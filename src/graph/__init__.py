@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from src.graph.store import READ_BUFFER_POOL_BYTES, READ_QUERY_TIMEOUT_MS, GraphStore
+from src.graph.store import READ_QUERY_TIMEOUT_MS, GraphStore, ReadLimits
 from src.shared.database_name import validate_database_name
 from src.shared.job_id import validate_job_id
 
@@ -35,8 +35,9 @@ class GraphStoreCache:
     each key the cache guarantees that at most one handle is open at a time:
 
     - ``reader()`` leases the shared read-only handle (opened with the read
-      query timeout and buffer pool limit). When none is open it first calls
-      ``prepare(local_path)`` with exclusive access to the file, so the caller
+      query timeout and the configured ``ReadLimits``: buffer pool, engine
+      threads per statement, concurrent statements). When none is open it
+      first calls ``prepare(local_path)`` with exclusive access to the file, so the caller
       can download or build the database there.
     - ``exclusive()`` waits until no lease is active, closes the read-only
       handle, and gives the caller sole access to the file (for a rebuild).
@@ -119,7 +120,7 @@ class GraphStoreCache:
                         path,
                         read_only=True,
                         query_timeout_ms=READ_QUERY_TIMEOUT_MS,
-                        buffer_pool_size=READ_BUFFER_POOL_BYTES,
+                        read_limits=ReadLimits.from_env(),
                     )
                 entry.readers += 1
                 store = entry.store
