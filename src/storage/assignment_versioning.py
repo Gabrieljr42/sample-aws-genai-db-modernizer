@@ -106,7 +106,12 @@ _CUSTOMER_GATE_SOURCE = "customer_gate"
 # A post-schema reroute (#629) edits the approved version it descends from, the
 # same way a customer edit does: Reality Check already ran for that lineage.
 _POST_SCHEMA_ROUTING_SOURCE = "post_schema_routing"
-_EDIT_SOURCES = frozenset({_CUSTOMER_GATE_SOURCE, _POST_SCHEMA_ROUTING_SOURCE})
+# A saved assignment re-routed to one source of truth per table when loaded for
+# approval (#992) edits the version it was loaded from, like a customer edit.
+_SOURCE_OF_TRUTH_REROUTE_SOURCE = "source_of_truth_reroute"
+_EDIT_SOURCES = frozenset(
+    {_CUSTOMER_GATE_SOURCE, _POST_SCHEMA_ROUTING_SOURCE, _SOURCE_OF_TRUTH_REROUTE_SOURCE}
+)
 
 
 def is_reality_check_produced(assignment: dict) -> bool:

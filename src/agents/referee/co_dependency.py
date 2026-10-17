@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 
 # ---------------------------------------------------------------------------
 # Co-dependency detection (Task 4.2)
@@ -94,10 +94,19 @@ def build_co_dependency_groups(
 # ---------------------------------------------------------------------------
 
 
+# A group's score is rounded to this many decimal places, so float noise in a
+# weighted mean (``75.75000000000001`` against ``75.75``) never decides between
+# two engines: scores equal to this precision are an exact tie, which goes
+# through ``tie_break`` (ADR-031 Decisions 2 and 12, #992). Every pass compares
+# the rounded value (the reality check rounds a group's mean to 2 places on top).
+GROUP_SCORE_PLACES = 6
+
+
 def group_engine_scores(
     members: Iterable[str],
     candidates: Iterable[str],
     member_score: Callable[[str, str], float | None],
+    weights: Mapping[str, float] | None = None,
 ) -> dict[str, float]:
     """A co-dependency group's score on each candidate engine that can serve
     every member: the mean of the members' own scores there.
@@ -110,18 +119,31 @@ def group_engine_scores(
     Members are scored in the order given, and scoring an engine stops at its
     first ``None``. Candidates keep their order; no engine serving every member
     gives ``{}``.
+
+    ``weights`` (#992, ADR-031 Amendment 9): a unit that holds a table's write
+    group is judged on the call-rate-weighted mean of its members' scores, each
+    member's weight from ``write_groups.unit_call_weights``. Only when ``weights``
+    covers every member; otherwise (a plain co-dependency group, or a unit with
+    no call statistics) the plain mean, Amendment 4's rule. Either way the mean is
+    rounded to ``GROUP_SCORE_PLACES``.
     """
     member_ids = list(members)
     out: dict[str, float] = {}
     if not member_ids:
         return out
+    weight = (
+        {qid: float(weights[qid]) for qid in member_ids}
+        if weights and all(qid in weights for qid in member_ids)
+        else {qid: 1.0 for qid in member_ids}
+    )
+    total_weight = sum(weight.values())
     for engine in candidates:
         total = 0.0
         for qid in member_ids:
             score = member_score(qid, engine)
             if score is None:
                 break
-            total += score
+            total += weight[qid] * score
         else:
-            out[engine] = total / len(member_ids)
+            out[engine] = round(total / total_weight, GROUP_SCORE_PLACES)
     return out

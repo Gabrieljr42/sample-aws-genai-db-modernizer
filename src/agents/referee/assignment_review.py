@@ -88,6 +88,16 @@ def _bool_to_scope(in_scope: bool) -> str:
     return "yes" if in_scope else "no"
 
 
+_REVIEW_VERSION_RE = re.compile(r"Assignment version (\d+):")
+
+
+def review_version(markdown: str) -> int | None:
+    """The assignment version a rendered review document shows, or None (#992): a
+    submission is compared against the version the customer saw."""
+    match = _REVIEW_VERSION_RE.search(markdown or "")
+    return int(match.group(1)) if match else None
+
+
 def render_assignment_review(assignment: Assignment) -> str:
     """Render the effective assignment as a customer-editable review document.
 

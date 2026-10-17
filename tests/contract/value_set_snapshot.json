@@ -86,9 +86,10 @@
       "assignment_resolution",
       "customer_gate",
       "post_schema_routing",
-      "reality_check"
+      "reality_check",
+      "source_of_truth_reroute"
     ],
-    "version": "1.16"
+    "version": "1.17"
   },
   "assignment_models.AssignmentStatus": {
     "module": "assignment_models",
@@ -99,7 +100,7 @@
       "reroute_rolled_back",
       "rerouted_after_approval"
     ],
-    "version": "1.16"
+    "version": "1.17"
   },
   "capability_ids": {
     "module": "triage_output",
@@ -570,16 +571,17 @@
       "neptune",
       "opensearch"
     ],
-    "version": "1.16"
+    "version": "1.17"
   },
   "feasibility_models.FindingKind": {
     "module": "feasibility_models",
     "values": [
       "co_dependency_on_non_join_engine",
       "co_dependency_split",
-      "read_write_split"
+      "read_write_split",
+      "write_split"
     ],
-    "version": "1.1"
+    "version": "1.2"
   },
   "feasibility_models.FindingSeverity": {
     "module": "feasibility_models",
@@ -587,7 +589,7 @@
       "advisory",
       "blocking"
     ],
-    "version": "1.1"
+    "version": "1.2"
   },
   "model_flag.FlagReason": {
     "module": "model_flag",
@@ -618,7 +620,7 @@
       "model_flag",
       "rule"
     ],
-    "version": "1.6"
+    "version": "1.7"
   },
   "move_ledger.MovePass": {
     "module": "move_ledger",
@@ -642,7 +644,7 @@
       "tie",
       "utility_pin"
     ],
-    "version": "1.6"
+    "version": "1.7"
   },
   "move_ledger.ReasonCode": {
     "module": "move_ledger",
@@ -659,6 +661,9 @@
       "floor.opensearch",
       "group.customer_propagation",
       "group.mean",
+      "group.write",
+      "group.write_customer_propagation",
+      "group.write_reroute",
       "highest_score",
       "override.text_search",
       "override.utility",
@@ -670,7 +675,7 @@
       "tie.source_compatible",
       "tie.stability"
     ],
-    "version": "1.6"
+    "version": "1.7"
   },
   "phase_models.Phase": {
     "module": "phase_models",
@@ -705,7 +710,7 @@
       "group_mean",
       "query"
     ],
-    "version": "1.31"
+    "version": "1.32"
   },
   "referee_output.ArchitectureType": {
     "module": "referee_output",

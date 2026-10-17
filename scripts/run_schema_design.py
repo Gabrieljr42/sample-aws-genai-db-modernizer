@@ -116,11 +116,25 @@ def _get_output_schema(engine: str) -> dict:  # type: ignore[type-arg]
     return dict(contract_cls.model_json_schema())  # type: ignore[attr-defined]
 
 
-def _resolve_version(store, job_id: str, db: str, requested: int | None) -> int:
-    """Return the explicit ``--assignment-version`` or the effective one (ADR-028)."""
+def _resolve_version(
+    store, job_id: str, db: str, requested: int | None, *, reroute: bool = False
+) -> int:
+    """Return the explicit ``--assignment-version`` or the effective one (ADR-028).
+
+    ``reroute`` (a design run, never ``--status``, ``--merge``, ``--finalize`` or a
+    cost check): a resumed job whose saved assignment split a table's writes is
+    re-routed to one source of truth first, as a new version marked as a change
+    after approval (#992). Concurrent design runs write that version once
+    (``reroute_split_writes`` creates it exclusively).
+    """
     if requested is not None:
         return requested
     from src.storage.assignment_versioning import resolve_downstream_assignment_version
+
+    if reroute:
+        from src.agents.referee.assignment_overrides import reroute_split_writes
+
+        reroute_split_writes(store, db, job_id, after_approval=True)
 
     return resolve_downstream_assignment_version(store, db, job_id)
 
@@ -748,7 +762,13 @@ def main() -> None:
         return
 
     store = LocalArtifactStore(base_dir=args.artifact_root)
-    version = _resolve_version(store, args.job_id, args.db, args.assignment_version)
+    version = _resolve_version(
+        store,
+        args.job_id,
+        args.db,
+        args.assignment_version,
+        reroute=not (args.status or args.merge or args.finalize),
+    )
 
     if not args.status:
         # --status is read-only (see its help text) -- everything else here

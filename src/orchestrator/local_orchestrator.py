@@ -13,6 +13,10 @@ import logging
 from datetime import UTC, datetime
 
 from src.agents.referee.query_pattern import write_access_patterns
+from src.agents.referee.write_groups import (
+    assignment_placement_groups,
+    assignment_unit_weights,
+)
 from src.contracts.phase_models import (
     PHASE_PREREQUISITES,
     SCHEMA_DESIGN_SKIP_REASON_NO_LLM,
@@ -327,7 +331,19 @@ class LocalOrchestrator(Orchestrator):
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
+        from src.agents.referee.assignment_overrides import reroute_split_writes
         from src.agents.schema_design.handler import run_schema_design_auto as run_schema_design
+
+        # A resumed job whose saved assignment split a table's writes is re-routed
+        # to one source of truth first, as a new version (#992); schema design then
+        # runs on that version.
+        rerouted = reroute_split_writes(self.store, database_name, job_id, after_approval=True)
+        if rerouted is not None:
+            print(
+                f"[schema-design] re-routed {len(rerouted.moved_query_ids)} queries to one "
+                f"source of truth (assignment v{rerouted.assignment.version}); affected "
+                f"engines: {', '.join(rerouted.affected_engines)}"
+            )
 
         assignment_version = self._get_assignment_version(job_id, database_name)
         engines_with_queries = self._get_engines_with_in_scope_queries(
@@ -476,6 +492,7 @@ class LocalOrchestrator(Orchestrator):
         already_routed: set[str] = set()
         all_routings: list = []
         all_terminal: list[str] = []
+        all_held: list[str] = []
         max_depth = 2
 
         for depth in range(max_depth + 1):
@@ -535,7 +552,13 @@ class LocalOrchestrator(Orchestrator):
                     for qa in assignment.get("query_assignments", [])
                     if qa.get("customer_override")
                 },
-                co_dependency_groups=assignment.get("co_dependency_groups", []),
+                # Co-dependency and write groups (ADR-031 Decision 4 and Amendment 9):
+                # a reroute moves a table's writes together.
+                co_dependency_groups=assignment_placement_groups(assignment),
+                # A pinned write holds its table's other writes in place (#992).
+                write_groups=assignment.get("write_groups") or {},
+                # A write unit is judged on its call-rate-weighted mean (#992).
+                unit_weights=assignment_unit_weights(assignment, scoring.get("query_map") or {}),
                 # A tied query is re-routed among its tied engines first and
                 # keeps the rest of its tie (ADR-031 Decision 12, #811).
                 tied_engines={
@@ -552,18 +575,28 @@ class LocalOrchestrator(Orchestrator):
             # written on its own, so no pass's scores are lost.
             all_routings.extend(router_output.routings)
             all_terminal.extend(q for q in router_output.terminal_queries if q not in all_terminal)
+            all_held.extend(q for q in router_output.held_queries if q not in all_held)
             prefix_router = f"{database_name}/{job_id}/post-schema-router"
             self.store.write_json(
                 f"{prefix_router}/pass-{depth}/router_output.json",
                 router_output.model_dump(mode="json"),
             )
             cumulative = router_output.model_copy(
-                update={"routings": list(all_routings), "terminal_queries": list(all_terminal)}
+                update={
+                    "routings": list(all_routings),
+                    "terminal_queries": list(all_terminal),
+                    "held_queries": list(all_held),
+                }
             )
             self.store.write_json(
                 f"{prefix_router}/router_output.json", cumulative.model_dump(mode="json")
             )
 
+            if router_output.held_queries:
+                print(
+                    f"[router] {len(router_output.held_queries)} flagged queries held in place: "
+                    "their table's writes include a write the customer pinned"
+                )
             if not router_output.routings:
                 if router_output.terminal_queries:
                     print(

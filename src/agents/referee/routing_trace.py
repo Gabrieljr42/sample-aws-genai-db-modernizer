@@ -54,6 +54,7 @@ class RoutingTrace:
         group: Iterable[str],
         group_score: Mapping[str, float],
         fallback: str | None = None,
+        weights: Mapping[str, float] | None = None,
     ) -> None:
         """A co-dependency group's membership and every candidate's group score.
 
@@ -74,6 +75,10 @@ class RoutingTrace:
         }
         if fallback is not None:
             payload["fallback"] = fallback
+        # #992: a write unit's call-rate weights, so the reality check judges the
+        # unit on the same weighted mean (``reality_check_rules._moving_group_scores``).
+        if weights and all(qid in weights for qid in members):
+            payload["weights"] = {qid: weights[qid] for qid in members}
         for qid in members:
             self.group_by_query[qid] = payload
 

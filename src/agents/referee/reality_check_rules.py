@@ -418,7 +418,8 @@ def _moving_group_scores(
 ) -> dict[str, float]:
     """The group's score on each of ``engines`` that serves every one of
     ``members`` (``_moving_members``): the mean of their resolver scores
-    (``co_dependency.group_engine_scores``, ADR-031 Decision 4, Amendment 4),
+    (``co_dependency.group_engine_scores``, ADR-031 Decision 4, Amendment 4;
+    call-rate weighted for a unit holding a write group, Amendment 9),
     rounded to 2 decimals as the routing trace records a group's mean. An
     engine that strands a member has no entry. For one query (ungrouped, or
     the only member that moves) this is its own resolver score, unrounded.
@@ -426,8 +427,15 @@ def _moving_group_scores(
     from here, so they judge it on the same numbers (Decision 7).
     """
     members = list(members)
+    # A write unit's call-rate weights, as the resolver recorded them (#992).
+    weights = {
+        m: w
+        for m in members
+        if (w := ((trace_by_query.get(m, {}).get("group") or {}).get("weights") or {}).get(m))
+        is not None
+    }
     scores = group_engine_scores(
-        members, engines, lambda mqid, e: _resolver_score(trace_by_query, mqid, e)
+        members, engines, lambda mqid, e: _resolver_score(trace_by_query, mqid, e), weights
     )
     if len(members) == 1:
         # One query's own resolver score, read raw as everywhere else.

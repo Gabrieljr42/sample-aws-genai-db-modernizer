@@ -422,6 +422,41 @@ class TestFeasibilityGate:
         v1 = store.read_json(f"{DB}/{JOB}/assignment/v1/assignment.json")
         assert v1["status"] == "customer_approved"
 
+    def test_a_saved_split_of_a_tables_writes_is_rerouted_not_infeasible(self, store) -> None:
+        """#992: a job saved before a table had one writer holds q1 and q2, both
+        writes of t.users, on DynamoDB and Aurora PostgreSQL. The gate re-routes
+        them to one engine as a new version and approves, never "infeasible"."""
+        a = store.read_json(f"{DB}/{JOB}/assignment/v1/assignment.json")
+        a.pop("write_groups", None)
+        for qa in a["query_assignments"]:
+            if qa["query_id"] == "q2":
+                qa["assigned_engine"] = "aurora_postgresql"
+                qa["source_tables"] = ["t.users"]
+        store.write_json(f"{DB}/{JOB}/assignment/v1/assignment.json", a)
+        store.write_json(
+            f"{DB}/{JOB}/analysis-aurora_postgresql/analysis.json", {"workload_analysis": {}}
+        )
+        collector = store.read_json(f"{DB}/{JOB}/collector/output.json")
+        for q in collector["queries"]["query_patterns"]:
+            if q["query_id"] in ("q1", "q2"):
+                q.update(
+                    query_type="UPDATE",
+                    query_text="UPDATE users SET a = ? WHERE id = ?",
+                    tables_accessed=["t.users"],
+                )
+        store.write_json(f"{DB}/{JOB}/collector/output.json", collector)
+        with patch("src.atx_orchestrator.tools._make_store", return_value=store):
+            out = json.loads(tools.finalize_assignment_review(JOB, DB, ""))
+        assert out["status"] == "approved", out
+        note = out["source_of_truth_reroute"]
+        assert note["split_tables"] == ["t.users"]
+        assert out["assignment_version"] == note["assignment_version"] == 2
+        assert not [f for f in out["feasibility_findings"] if f["kind"] == "write_split"]
+        v2 = store.read_json(f"{DB}/{JOB}/assignment/v2/assignment.json")
+        engines = {qa["query_id"]: qa["assigned_engine"] for qa in v2["query_assignments"]}
+        assert engines["q1"] == engines["q2"]
+        assert v2["source"] == "source_of_truth_reroute"
+
     def test_blocking_codep_split_loops_gate(self, store) -> None:
         self._make_blocking_codep_split(store)
         with patch("src.atx_orchestrator.tools._make_store", return_value=store):

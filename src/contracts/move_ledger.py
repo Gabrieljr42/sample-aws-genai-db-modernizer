@@ -111,6 +111,15 @@ Version History:
   ``CandidateScore`` and ``GroupGate``: Unknown fields are accepted and kept
   (``extra="allow"``, was ``"forbid"``): a file written by a later MINOR loads in
   older code (ADR-008 Decision 5, #976).
+- 1.7 (2026-10-18, #992): Added ``ReasonCode.WRITE_GROUP`` (``group.write``) and
+  ``ReasonCode.WRITE_GROUP_CUSTOMER_PROPAGATION``
+  (``group.write_customer_propagation``); additive, 1.6 records still load. A
+  table's writes and locking reads land on one engine, its source of truth
+  (ADR-031 Amendment 9): a unit holding a table's write group is placed with
+  ``group.write`` (pass ``co_dependency``), and a query the customer gate moves
+  with a write group the customer re-routed carries
+  ``group.write_customer_propagation``, and a saved assignment that split a
+  table's writes, re-routed when loaded for approval, ``group.write_reroute``.
 """
 
 from __future__ import annotations
@@ -159,6 +168,9 @@ class ReasonCode(str, Enum):
     # A Move that only clears a query's unresolved tie (the engine stays).
     TIE_CLEARED = "tie.cleared"
     GROUP_MEAN = "group.mean"
+    # A unit holding a table's write group: all of a table's writes share one
+    # engine, its source of truth (ADR-031 Amendment 9, #992), placed on the unit's mean.
+    WRITE_GROUP = "group.write"
     OVERRIDE_TEXT_SEARCH = "override.text_search"
     OVERRIDE_UTILITY = "override.utility"
     FALLBACK_NO_SCORE = "fallback.no_score"
@@ -180,6 +192,12 @@ class ReasonCode(str, Enum):
     # A query moved with a co-dependent query the customer re-routed (Decision 4);
     # the customer did not pick it themselves.
     GROUP_CUSTOMER_PROPAGATION = "group.customer_propagation"
+    # A query moved with a write of the same table the customer re-routed
+    # (Amendment 9): a table's writes stay on one engine.
+    WRITE_GROUP_CUSTOMER_PROPAGATION = "group.write_customer_propagation"
+    # A saved assignment that split a table's writes, re-routed to one source of
+    # truth when it is loaded for approval or resumed (Amendment 9, #992).
+    WRITE_GROUP_REROUTE = "group.write_reroute"
     CACHE_LEGACY_OWNER = "cache.legacy_owner"
     # A post-schema rollback: the redesign on a reroute version failed, so the
     # next version restates the one before the reroute and each moved query

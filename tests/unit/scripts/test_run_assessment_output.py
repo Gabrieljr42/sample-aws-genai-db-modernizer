@@ -411,10 +411,15 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # #986: ``REPLACE INTO wp_wc_product_meta_lookup`` (``d72966f8...``) is read as the
     # insert by key it is (key lookup), which DynamoDB rates best: dynamodb +1,
     # aurora_mysql -1.
+    # #992 (a table's writes land on one engine, the group weighted by call rate):
+    # wp_postmeta's three UPDATEs join its INSERT on DynamoDB (weighted means DynamoDB
+    # 85.9, Aurora MySQL 81.2), and wp_woocommerce_order_itemmeta's UPDATE joins its
+    # other write on DynamoDB (from DocumentDB): aurora_mysql -3, documentdb -1,
+    # dynamodb +4.
     assert rc["before_distribution"] == {
-        "dynamodb": 32,
-        "aurora_mysql": 46,
-        "documentdb": 28,
+        "dynamodb": 36,
+        "aurora_mysql": 43,
+        "documentdb": 27,
         "opensearch": 1,
     }
     assert sum(rc["before_distribution"].values()) == sum(rc["after_distribution"].values())
