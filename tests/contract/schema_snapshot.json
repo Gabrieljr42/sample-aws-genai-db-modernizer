@@ -6705,6 +6705,21 @@
                         ]
                       }
                     },
+                    "parsed_facts": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "object"
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
                     "queries_with_bad_index": {
                       "required": false,
                       "schema": {
@@ -7142,8 +7157,8 @@
         }
       }
     },
-    "schema_hash": "afc403dd2a0548447f54dbc23731bca2d7b24a7903fa0c1429cdb3af3895b579",
-    "version": "3.2"
+    "schema_hash": "2b59b178659c6b76ea7eb947973549d6b387cb3565cfe043609d0b2b965719a8",
+    "version": "3.3"
   },
   "design_metrics.DesignMetricsContract": {
     "fields": {

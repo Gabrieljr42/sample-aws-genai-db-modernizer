@@ -2,7 +2,8 @@
 
 A query is classified by what it retrieves, not by how its SQL is written and
 never by what other queries on its tables do. The facts come from the SQL facade
-(:func:`src.tools.sql.facade.access_facts`: the tables each scope reads, the
+(:func:`src.tools.sql.facade.access_facts`, read once per query through
+:meth:`src.tools.sql.query_facts.QueryFacts.access_facts`, #934: the tables each scope reads, the
 columns it pins to a value or bounds by a range, the column pairs that join two
 of its tables, its order, row limit and aggregates); the keys come from the
 collector's schema (:class:`SchemaKeys`). Like :mod:`query_shape`, this module
@@ -74,7 +75,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
 from src.agents.referee.table_resolution import TableNameResolver
-from src.tools.sql.facade import AccessFacts, ColumnFact, ScopeFacts, ScopeSource, access_facts
+from src.tools.sql.facade import AccessFacts, ColumnFact, ScopeFacts, ScopeSource
 from src.tools.sql.query_facts import query_facts
 
 KEY_LOOKUP = "key_lookup"
@@ -515,7 +516,7 @@ def classify_query(
 ) -> AccessClassification:
     """The access-pattern class of one collected query."""
     text = str(query.get("query_text") or "")
-    facts = access_facts(text, source_engine or "")
+    facts = query_facts(text, source_engine).access_facts()
     result = classify_facts(facts, keys, str(query.get("query_type") or ""))
     return _with_feature_facts(result, text, source_engine)
 
@@ -607,7 +608,7 @@ def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
 def query_access(query: Mapping, keys: SchemaKeys, source_engine: str | None) -> QueryAccess:
     """:func:`classify_query` plus each scope's resolved columns, from one parse."""
     text = str(query.get("query_text") or "")
-    facts = access_facts(text, source_engine or "")
+    facts = query_facts(text, source_engine).access_facts()
     classification = classify_facts(facts, keys, str(query.get("query_type") or ""))
     classification = _with_feature_facts(classification, text, source_engine)
     return QueryAccess(classification, tuple(_scope_columns(s, keys) for s in facts.scopes))

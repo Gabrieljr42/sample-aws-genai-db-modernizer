@@ -470,6 +470,7 @@ class SQLServerRemoteCollector:
                     "has_subqueries": shape["has_subqueries"],
                     "has_text_search": shape["has_text_search"],
                     "text_search_type": shape["text_search_type"],
+                    "parsed_facts": shape["parsed_facts"],
                     "has_time_range_filter": _has_time_range_filter(query_text),
                     # SQL Server-specific (semantically reusable for Oracle later)
                     "avg_logical_reads": round(avg_logical, 2),

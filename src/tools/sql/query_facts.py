@@ -35,11 +35,19 @@ none gets sqlglot's generic dialect.
 computed the first time a reader asks for it, then kept: a query read by
 several detectors is scanned once per fact, and a reader never pays for a fact
 it doesn't read (#895 review).
+
+The parsed facts come from the readings the collector stored on each query
+pattern (``parsed_facts``, :mod:`src.tools.sql.stored_facts`, #934) when a step
+has loaded them (:func:`remember_collected_facts`) and they are this build's;
+otherwise from one parse of the text. The access-pattern facts
+(:meth:`QueryFacts.access_facts`) come from the same reading, so a step reads
+each collected query without parsing it again.
 """
 
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Mapping
 from functools import cached_property, lru_cache
 
@@ -54,6 +62,7 @@ from src.tools.sql.regex_facts import (
     regex_range_predicate,
     scan_sql,
 )
+from src.tools.sql.stored_facts import readings_from_stored
 
 __all__ = ["QueryFacts", "WildcardLike", "query_facts", "scan_sql", "source_engine_of"]
 
@@ -614,8 +623,19 @@ class QueryFacts:
 
     @cached_property
     def _readings(self) -> tuple[SqlFacts, AccessFacts]:
-        """The facade's readings of the text, from one parse in the source engine's dialect."""
+        """The facade's readings of the text in the source engine's dialect: the ones the
+        collector stored for it (:func:`remember_collected_facts`, #934), else one parse."""
+        stored = _STORED_READINGS.get((self._text, self._source_engine))
+        if stored is not None:
+            readings = readings_from_stored(stored, self._text, self._source_engine)
+            if readings is not None:
+                return readings
         return query_readings(self._text, self._source_engine)
+
+    def access_facts(self) -> AccessFacts:
+        """The facade's access-pattern facts of the text (``facade.access_facts``), from the
+        same reading as the parsed facts."""
+        return self._access
 
     @cached_property
     def _parsed(self) -> SqlFacts:
@@ -1026,6 +1046,42 @@ def query_facts(query_text: str | None, source_engine: str | None = None) -> Que
     dialect the parsed facts are read in; none reads them in sqlglot's generic one.
     """
     return _query_facts(query_text or "", (source_engine or "").strip().lower())
+
+
+# The readings each collected query pattern carries (``parsed_facts``, #934), by query
+# text and source engine, for the QueryFacts that reads that text. Bounded like the
+# QueryFacts cache: past the bound, the oldest are forgotten and parsed when read.
+_STORED_READINGS: dict[tuple[str, str], Mapping] = {}
+_STORED_READINGS_MAX = 65536
+_STORED_READINGS_LOCK = threading.Lock()
+
+
+def remember_stored_facts(query_text: str, source_engine: str | None, stored: object) -> None:
+    """Use ``stored`` (a query pattern's ``parsed_facts``) as the reading of ``query_text``
+    read for ``source_engine``. Facts it can't vouch for (another version, engine or
+    text) are ignored when read, and the text is parsed instead."""
+    if not isinstance(stored, Mapping) or not query_text:
+        return
+    key = (query_text, (source_engine or "").strip().lower())
+    with _STORED_READINGS_LOCK:  # the analyses load the collection in parallel threads
+        _STORED_READINGS.pop(key, None)
+        _STORED_READINGS[key] = stored
+        while len(_STORED_READINGS) > _STORED_READINGS_MAX:
+            _STORED_READINGS.pop(next(iter(_STORED_READINGS)))
+
+
+def remember_collected_facts(collector_output: Mapping | None) -> None:
+    """Use every query pattern's stored facts (``parsed_facts``, #934) as the reading of
+    its text, so the steps that read the collection's query facts parse none of the
+    queries the collector already parsed. A step calls it when it loads the collection."""
+    engine = source_engine_of(collector_output)
+    queries = (collector_output or {}).get("queries") or {}
+    patterns = queries.get("query_patterns") if isinstance(queries, Mapping) else queries
+    for pattern in patterns or ():
+        if isinstance(pattern, Mapping):
+            remember_stored_facts(
+                str(pattern.get("query_text") or ""), engine, pattern.get("parsed_facts")
+            )
 
 
 def source_engine_of(collector_output: Mapping | None) -> str:

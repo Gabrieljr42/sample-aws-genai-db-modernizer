@@ -107,6 +107,10 @@ _DIALECTS = {
     "oracle": "oracle",
 }
 
+# The parser's version: part of what a stored reading was read with (#934,
+# ``src.tools.sql.stored_facts``).
+PARSER_VERSION: str = sqlglot.__version__
+
 # Longer text is not parsed: it falls back to the regex with reason
 # ``too_long``, so one huge statement can't slow a collection down. The
 # samples' longest query is about 5,300 characters.
@@ -337,10 +341,13 @@ class SqlFacts:
 
 @dataclass(frozen=True)
 class SqlReading:
-    """Everything the facade reads from one piece of SQL text, from one parse."""
+    """Everything the facade reads from one piece of SQL text, from one parse: the
+    table references, the query-shape facts and the access-pattern facts (the last two
+    are what a collector stores on the query pattern, #934)."""
 
     tables: TableReferences
     facts: SqlFacts
+    access: AccessFacts
 
 
 def sqlglot_dialect(source_engine: str) -> str:
@@ -367,9 +374,10 @@ def sql_facts(sql: str, source_engine: str) -> SqlFacts:
 
 
 def read_sql(sql: str, source_engine: str) -> SqlReading:
-    """:func:`table_references` and :func:`sql_facts` from one parse."""
+    """:func:`table_references`, :func:`sql_facts` and :func:`access_facts` from one
+    parse."""
     parsed = _parse(sql, source_engine)
-    return SqlReading(tables=_tables(parsed), facts=_facts(parsed))
+    return SqlReading(tables=_tables(parsed), facts=_facts(parsed), access=_access(parsed))
 
 
 @dataclass(frozen=True)
@@ -454,6 +462,7 @@ def regex_reading(sql: str, source_engine: str, reason: FallbackReason) -> SqlRe
     return SqlReading(
         tables=_fallback(sql or "", reason, dialect, truncated=False),
         facts=_regex_facts(sql or "", reason, dialect),
+        access=_access(_Parsed(sql or "", dialect, truncated=False, fallback_reason=reason)),
     )
 
 

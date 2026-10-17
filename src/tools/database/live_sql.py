@@ -36,7 +36,8 @@ from typing import Any
 
 from src.tools.sql import facade
 from src.tools.sql.facade import SqlReading, TableRef, TableReferences
-from src.tools.sql.query_facts import query_facts
+from src.tools.sql.query_facts import query_facts, remember_stored_facts
+from src.tools.sql.stored_facts import stored_reading
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,9 @@ class LiveQueryReader:
         if reading.tables.fallback_reason:
             self._fallbacks[reading.tables.fallback_reason] += 1
         facts = reading.facts
+        stored = stored_reading(sql, self.source_engine, reading)
+        # The text-search fact from this same reading, not a second parse (#934).
+        remember_stored_facts(sql, self.source_engine, stored)
         searches = query_facts(sql, self.source_engine)
         return {
             "tables_accessed": table_names(reading.tables, self.source_engine) or list(self.empty),
@@ -131,6 +135,7 @@ class LiveQueryReader:
             "has_subqueries": facts.has_subquery,
             "has_text_search": searches.text_search,
             "text_search_type": searches.text_search_type(),
+            "parsed_facts": stored,
         }
 
     def log_fallbacks(self) -> None:

@@ -347,6 +347,7 @@ class MySQLRemoteCollector:
                     "has_subqueries": shape["has_subqueries"],
                     "has_text_search": shape["has_text_search"],
                     "text_search_type": shape["text_search_type"],
+                    "parsed_facts": shape["parsed_facts"],
                     "has_time_range_filter": _has_time_range_filter(query_text),
                     "errors": r.get("sum_errors") or 0,
                     "warnings": r.get("sum_warnings") or 0,

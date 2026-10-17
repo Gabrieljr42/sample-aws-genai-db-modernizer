@@ -11,6 +11,7 @@ from src.contracts.analysis_output import (
     WorkloadAnalysis,
 )
 from src.storage.artifact_store import ArtifactStore
+from src.tools.sql.query_facts import remember_collected_facts
 
 
 def run_analysis(
@@ -30,6 +31,7 @@ def run_analysis(
     # Read collector output
     collector_key = f"{database_name}/{job_id}/collector/output.json"
     collector_output = store.read_json(collector_key)
+    remember_collected_facts(collector_output)
     tables = collector_output.get("database_schema", {}).get("tables", [])
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     print(f"[analysis/{agent_type}] Loaded collector: {len(tables)} tables, {len(queries)} queries")

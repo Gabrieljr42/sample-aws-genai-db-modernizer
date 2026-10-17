@@ -36,7 +36,7 @@ from src.agents.referee.access_pattern import (
 )
 from src.shared.catalog.access_classes import class_engine_scores, class_parity_anchors
 from src.tools.analysis.score_weights import table_weights
-from src.tools.sql.query_facts import source_engine_of
+from src.tools.sql.query_facts import remember_collected_facts, source_engine_of
 
 
 def weights_from_analysis(
@@ -141,6 +141,7 @@ def access_patterns_record(collector_output: Mapping) -> dict:
     the note and the borrowed ``(<pattern>, <score>)``. A ``utility`` or ``unparsed``
     statement has neither scores nor anchors.
     """
+    remember_collected_facts(collector_output)
     model = QueryPatternModel.from_pipeline(collector_output, {})
     rows = []
     by_class: Counter[str] = Counter()

@@ -205,7 +205,7 @@ class TestCollectorOutputContractInstantiation:
 
     def test_contract_with_default_contract_version(self):
         """
-        Test that contract_version defaults to "3.2" when not provided.
+        Test that contract_version defaults to "3.3" when not provided.
 
         This test verifies that the contract_version field has a proper
         default value and doesn't need to be explicitly provided.
@@ -259,7 +259,7 @@ class TestCollectorOutputContractInstantiation:
         contract = CollectorOutputContract(**data)
 
         # Assert
-        assert contract.contract_version == "3.2"
+        assert contract.contract_version == "3.3"
 
 
 class TestCollectorOutputContractSerialization:

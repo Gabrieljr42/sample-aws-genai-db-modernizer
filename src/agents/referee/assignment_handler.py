@@ -18,6 +18,7 @@ from src.agents.referee.assignment_resolver import AssignmentResolver
 from src.agents.referee.assignment_validator import AssignmentValidator
 from src.agents.referee.query_pattern import write_access_patterns
 from src.storage.artifact_store import ArtifactStore
+from src.tools.sql.query_facts import remember_collected_facts
 
 
 def run_assignment_resolver(job_id: str, database_name: str, store: ArtifactStore) -> None:
@@ -43,6 +44,7 @@ def run_assignment_resolver(job_id: str, database_name: str, store: ArtifactStor
     # --- Read collector output ---
     collector_key = f"{database_name}/{job_id}/collector/output.json"
     collector_output = store.read_json(collector_key)
+    remember_collected_facts(collector_output)
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     print(f"[assignment] Loaded collector: {len(queries)} queries")
 

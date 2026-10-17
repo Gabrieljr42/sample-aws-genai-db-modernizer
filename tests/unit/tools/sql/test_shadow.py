@@ -75,7 +75,11 @@ class TestOutputUnchanged:
                 dialect="postgres",
                 truncated=False,
             )
-            return facade.SqlReading(tables=tables, facts=real_facts(sql, engine))
+            return facade.SqlReading(
+                tables=tables,
+                facts=real_facts(sql, engine),
+                access=facade.access_facts(sql, engine),
+            )
 
         data = _collection(QUERIES)
         monkeypatch.setattr(facade, "read_sql", bogus)

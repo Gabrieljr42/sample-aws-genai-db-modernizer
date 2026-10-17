@@ -516,7 +516,21 @@ class QueryPattern(BaseModel):
         None, description="Whether query uses text search (LIKE '%%', MATCH AGAINST, tsvector)"
     )
     text_search_type: str | None = Field(
-        None, description="Type of text search: like_wildcard, fulltext, tsvector, trigram"
+        None,
+        description=(
+            "Type of text search (the text_search query fact's parts): like_wildcard, "
+            "fulltext, tsvector, oracle_text, trigram, regex"
+        ),
+    )
+    parsed_facts: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "The SQL facade's readings of query_text (its query-shape and access-pattern "
+            "facts), stored by the collector so later steps need not parse the query again. "
+            "Written and read only by src.tools.sql.stored_facts, versioned by the code that "
+            "reads them: a step parses the text itself when they are missing or from another "
+            "version, engine or text"
+        ),
     )
     has_time_range_filter: bool | None = Field(
         None, description="Whether query filters on date/timestamp with range or interval"
@@ -662,11 +676,11 @@ class Metrics(BaseModel):
 class CollectorOutputContract(BaseModel):
     """
     Output contract for all Collector agents with RDS-specific enhancements
-    Version: 3.2
+    Version: 3.3
     """
 
     contract_version: str = Field(
-        default="3.2",
+        default="3.3",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

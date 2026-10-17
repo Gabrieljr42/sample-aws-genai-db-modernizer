@@ -944,6 +944,7 @@ def _build_queries(
             scan_efficiency_pct=p.get("scan_efficiency_pct"),
             has_aggregations=p.get("has_aggregations"),
             has_subqueries=p.get("has_subqueries"),
+            parsed_facts=p.get("parsed_facts"),
             has_text_search=p.get("has_text_search"),
             text_search_type=p.get("text_search_type"),
             has_time_range_filter=p.get("has_time_range_filter"),
@@ -984,6 +985,8 @@ def _merge_into_queries(live_queries: Queries, aws_patterns: list[dict]) -> Quer
             pi_text = aq.get("query_text", "")
             if pi_text and len(pi_text) > len(p.query_text):
                 p.query_text = pi_text
+                # The stored facts are the text's (#934): the new text's, read the same way.
+                p.parsed_facts = aq.get("parsed_facts")
             if p.calls_per_second is None and aq.get("calls_per_second"):
                 p.calls_per_second = aq["calls_per_second"]
             if p.db_load_contribution_percent is None and aq.get("db_load_contribution_percent"):
@@ -1039,6 +1042,7 @@ def _dict_to_query_pattern(d: dict) -> QueryPattern:
         join_count=d.get("join_count"),
         has_aggregations=d.get("has_aggregations"),
         has_subqueries=d.get("has_subqueries"),
+        parsed_facts=d.get("parsed_facts"),
         has_text_search=d.get("has_text_search"),
         text_search_type=d.get("text_search_type"),
         has_time_range_filter=d.get("has_time_range_filter") or _detect_time_range(query_text),
