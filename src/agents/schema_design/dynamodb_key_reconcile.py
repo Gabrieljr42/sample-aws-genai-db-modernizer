@@ -29,7 +29,9 @@ keeping apart (one whose ``source_tables`` include the source table and whose
    same PK type, and transitively) take one key-attribute name per key and
    type. Entities for the same rows take one ``entity_type`` and pair of
    templates when their sort-key templates use the same source columns (only
-   the static text differs, e.g. ``PROFILE`` vs ``USER``). Each is the one
+   the static text differs, e.g. ``PROFILE`` vs ``USER``) and they share the
+   label or the sort key: ``USER``/``PROFILE`` and ``USER_STATS``/``STATS``
+   are two items of one row and stay two entities (#867). Each is the one
    most of the tables use, then the longer one, then alphabetical (never the
    draft order). Template tokens are compared by the source column they copy, so
    ``{ID}`` and ``{post_id}`` (an attribute copying ``ID``) are the same.
@@ -503,6 +505,45 @@ def _entity_bucket(entity: dict) -> tuple[tuple[str, str], tuple[str, ...]]:
     return _rows(entity), tuple(_TOKEN_RE.findall(sk))
 
 
+Variant = tuple[str, str, str]
+"""(entity type, PK template, SK template) of one entity, as a draft wrote it."""
+
+
+def _one_item(a: Variant, b: Variant, sort_keys: dict[Variant, str]) -> bool:
+    """Two variants of the same rows that name one item: the same label or the same sort key.
+
+    A different label *and* a different sort key (``USER``/``PROFILE`` vs
+    ``USER_STATS``/``STATS``) are two items of one row (#867). ``sort_keys``
+    holds each variant's SK template by source column (:func:`canon_template`).
+    """
+    return a[0] == b[0] or sort_keys[a] == sort_keys[b]
+
+
+def _item_variants(
+    variants: dict[Variant, int], sort_keys: dict[Variant, str]
+) -> list[dict[Variant, int]] | None:
+    """``variants`` of one bucket split into the items they name, or None when ambiguous.
+
+    Variants are one item when :func:`_one_item` links them, transitively.
+    An item whose variants are not all linked pairwise (``USER``/``PROFILE``
+    ~ ``USER``/``STATS`` ~ ``USER_STATS``/``STATS``) gives no safe label:
+    None, so nothing in the bucket is relabelled and the merge reports it.
+    """
+    items: list[dict[Variant, int]] = []
+    for variant, count in sorted(variants.items()):
+        linked = [i for i in items if any(_one_item(variant, v, sort_keys) for v in i)]
+        joined = {variant: count}
+        for item in linked:
+            joined.update(item)
+            items.remove(item)
+        items.append(joined)
+    for item in items:
+        pairs = [(a, b) for a in item for b in item if a < b]
+        if any(not _one_item(a, b, sort_keys) for a, b in pairs):
+            return None
+    return items
+
+
 def _align_entities(drafts: _Drafts, cluster: list[_Ref]) -> None:
     """Give entities for the same rows one label and one pair of templates.
 
@@ -510,14 +551,18 @@ def _align_entities(drafts: _Drafts, cluster: list[_Ref]) -> None:
     compared by the source column they copy). The sort-key templates must use
     the same columns: the same template, both static, or the same columns
     behind different static text (``PROFILE`` vs ``USER``, ``META#{meta_id}``
-    vs ``M#{meta_id}``); different columns stay a conflict. The label and
-    templates kept are the ones most tables use, then the longer label, then
+    vs ``M#{meta_id}``); different columns stay a conflict. Variants are one
+    item only when they share the label or the sort key (:func:`_one_item`):
+    ``USER``/``PROFILE`` and ``USER_STATS``/``STATS`` stay two entities even
+    when no table holds both (#867). For each item, the label and templates
+    kept are the ones most tables use, then the longer label, then
     alphabetical. Only when every table has at most one entity for those rows:
     a table that stores one row as several items (``PROFILE`` and ``STATS``)
     gives no single label to align to, so nothing is relabelled and the merge
     reports the disagreement.
     """
-    votes: dict[tuple, dict[tuple[str, str, str], int]] = {}
+    votes: dict[tuple, dict[Variant, int]] = {}
+    sort_keys: dict[tuple, dict[Variant, str]] = {}  # bucket -> variant -> SK by column
     ambiguous: set[tuple] = set()
     for ref in cluster:
         seen: set[tuple] = set()
@@ -534,21 +579,43 @@ def _align_entities(drafts: _Drafts, cluster: list[_Ref]) -> None:
                 str(entity.get("pk_template") or ""),
                 str(entity.get("sk_template") or ""),
             )
+            sort_keys.setdefault(bucket, {}).setdefault(variant, canon_template(variant[2], entity))
             if (bucket, variant) not in seen:
                 seen.add((bucket, variant))
                 counts = votes.setdefault(bucket, {})
                 counts[variant] = counts.get(variant, 0) + 1
-    canonical = {
-        bucket: sorted(counts.items(), key=lambda v: (-v[1], -len(v[0][0]), v[0]))[0][0]
-        for bucket, counts in votes.items()
-        if len(counts) > 1 and bucket not in ambiguous
-    }
+    canonical: dict[tuple, dict[Variant, Variant]] = {}
+    for bucket, counts in votes.items():
+        if len(counts) < 2 or bucket in ambiguous:
+            continue
+        items = _item_variants(counts, sort_keys[bucket])
+        if items is None:
+            note = (
+                f"{bucket[0][0]}: entities "
+                + ", ".join(f"{t} (SK {sk})" for t, _, sk in sorted(counts))
+                + " left as they are: they share labels and sort keys in a chain, so which "
+                "items are the same is ambiguous"
+            )
+            if note not in drafts.notes:  # collections are aligned twice
+                drafts.notes.append(note)
+            continue
+        for item in items:
+            if len(item) < 2:
+                continue
+            keep = sorted(item.items(), key=lambda v: (-v[1], -len(v[0][0]), v[0]))[0][0]
+            canonical.setdefault(bucket, {}).update({v: keep for v in item})
     if not canonical:
         return
     for ref in cluster:
         used = {e.get("entity_type") for e in _dicts(ref.table.get("entities"))}
         for entity in _dicts(ref.table.get("entities")):
-            target = canonical.get(_entity_bucket(entity))
+            target = canonical.get(_entity_bucket(entity), {}).get(
+                (
+                    str(entity.get("entity_type") or ""),
+                    str(entity.get("pk_template") or ""),
+                    str(entity.get("sk_template") or ""),
+                )
+            )
             if target is None:
                 continue
             label, pk_tpl, new_sk = target

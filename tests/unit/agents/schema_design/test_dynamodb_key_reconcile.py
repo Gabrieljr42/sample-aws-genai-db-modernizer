@@ -2008,3 +2008,86 @@ class TestNameLimit:
         assert all(len(n) <= NAME_LIMIT for n in names), [len(n) for n in names]
         assert merge_failures(merged) == []
         _assert_every_pattern_is_served(merged)
+
+
+# ---------------------------------------------------------------------------
+# Static sort keys for different items of one row (#867)
+# ---------------------------------------------------------------------------
+
+
+def _users_collection(*entities: tuple[str, str]) -> dict:
+    return _collection(
+        "users",
+        "user_id",
+        "sk",
+        *(_entity(t, USERS, "{id}", sk, _attr("id", USERS)) for t, sk in entities),
+    )
+
+
+def _profile_read() -> dict:
+    return _ap("DDB-AP-1", "users", "GetItem", "PK=user_id AND SK=PROFILE", source=USERS)
+
+
+class TestDistinctItemsOfOneRow:
+    def test_profile_and_stats_items_stay_two_entities(self):
+        """Two groups store USER/PROFILE, two USER_STATS/STATS; no group holds both. PROFILE
+        reads must keep reading PROFILE, in every order."""
+        drafts = [
+            _draft([_users_collection(("USER", "PROFILE"))], [_profile_read()]),
+            _draft([_users_collection(("USER", "PROFILE"))], []),
+            _draft([_users_collection(("USER_STATS", "STATS"))], []),
+            _draft([_users_collection(("USER_STATS", "STATS"))], []),
+        ]
+
+        for order, merged in _every_order(drafts):
+            assert merge_failures(merged) == [], order
+            [table] = merged["table_definitions"]
+            by_type = {e["entity_type"]: e["sk_template"] for e in table["entities"]}
+            assert by_type == {"USER": "PROFILE", "USER_STATS": "STATS"}, order
+            read = _pattern(merged, "GetItem")
+            assert "STATS" not in read["key_condition"], (order, read)
+
+    def test_one_group_each_also_stays_apart(self):
+        drafts = [
+            _draft([_users_collection(("USER", "PROFILE"))], [_profile_read()]),
+            _draft([_users_collection(("USER_STATS", "STATS"))], []),
+        ]
+
+        for order, merged in _every_order(drafts):
+            [table] = merged["table_definitions"]
+            by_type = {e["entity_type"]: e["sk_template"] for e in table["entities"]}
+            assert by_type == {"USER": "PROFILE", "USER_STATS": "STATS"}, order
+
+    def test_same_item_variants_are_still_aligned_next_to_a_distinct_item(self):
+        """USER/PROFILE and USER/USER are one item (same label); USER_STATS/STATS is another."""
+        drafts = [
+            _draft([_users_collection(("USER", "PROFILE"))], []),
+            _draft([_users_collection(("USER", "PROFILE"))], []),
+            _draft(
+                [_users_collection(("USER", "USER"))],
+                [_ap("DDB-AP-1", "users", "GetItem", "PK=user_id AND sk='USER'", source=USERS)],
+            ),
+            _draft([_users_collection(("USER_STATS", "STATS"))], []),
+        ]
+
+        for order, merged in _every_order(drafts):
+            assert merge_failures(merged) == [], order
+            [table] = merged["table_definitions"]
+            by_type = {e["entity_type"]: e["sk_template"] for e in table["entities"]}
+            assert by_type == {"USER": "PROFILE", "USER_STATS": "STATS"}, order
+            read = _pattern(merged, "GetItem")
+            assert "sort key 'USER' is 'PROFILE'" in read["key_condition"], order
+
+    def test_a_chain_through_a_shared_label_and_a_shared_sort_key_is_reported(self):
+        """USER/PROFILE ~ USER/STATS (label) ~ USER_STATS/STATS (sort key): PROFILE and
+        USER_STATS share nothing, so nothing is relabelled and the conflict is reported."""
+        drafts = [
+            _draft([_users_collection(("USER", "PROFILE"))], [_profile_read()]),
+            _draft([_users_collection(("USER", "STATS"))], []),
+            _draft([_users_collection(("USER_STATS", "STATS"))], []),
+        ]
+
+        for order, merged in _every_order(drafts):
+            read = _pattern(merged, "GetItem")
+            assert "STATS" not in read["key_condition"], order
+            assert merge_failures(merged), order
