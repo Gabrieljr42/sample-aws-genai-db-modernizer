@@ -445,3 +445,78 @@ def test_a_live_postgres_sequence_read_is_unknown_like_offline(sql, known, expec
     assert is_utility_statement(sql, live_tables) == is_utility_statement(
         sql, offline_row["tables_accessed"]
     )
+
+
+# ---------------------------------------------------------------------------
+# has_text_search and text_search_type are the text_search query fact (#929)
+# ---------------------------------------------------------------------------
+
+# (engine, sql, has_text_search, text_search_type). Each collector used to read these
+# with regexes of its own, which disagreed with the text_search fact triage and the
+# cache overlay read next to them: a LIKE in a comment or a literal was a search, a
+# SQL Server ``LIKE @p`` or a regular-expression match was not.
+TEXT_SEARCH_CASES = [
+    ("mysql", "SELECT * FROM wp_posts WHERE post_title LIKE '%x%'", True, "like_wildcard"),
+    ("mysql", "SELECT * FROM wp_posts WHERE post_title LIKE ?", True, "like_wildcard"),
+    ("mysql", "SELECT * FROM a WHERE MATCH (b) AGAINST (?)", True, "fulltext"),
+    ("mysql", "SELECT * FROM a WHERE b REGEXP ?", True, "regex"),
+    ("mysql", "SELECT * FROM a WHERE b = ? -- LIKE '%x'", False, None),
+    ("mysql", "SELECT 'LIKE ''%x' FROM a", False, None),
+    ("mysql", "SELECT * FROM a WHERE b LIKE 'x%'", False, None),  # a prefix is a range
+    ("mariadb", "SELECT * FROM wp_posts WHERE post_title LIKE '%x%'", True, "like_wildcard"),
+    ("mariadb", "SELECT * FROM wp_posts WHERE ID = ?", False, None),
+    ("postgresql", "SELECT * FROM topics WHERE title ILIKE $1", True, "like_wildcard"),
+    ("postgresql", "SELECT * FROM topics WHERE v @@ to_tsquery($1)", True, "tsvector"),
+    ("postgresql", "SELECT similarity(title, $1) FROM topics", True, "trigram"),
+    ("postgresql", "SELECT * FROM topics WHERE title ~* $1", True, "regex"),
+    ("postgresql", "SELECT * FROM topics WHERE id % 2 = 0", False, None),  # modulo
+    ("sqlserver", "SELECT * FROM [Orders] WHERE [Name] LIKE N'%x%'", True, "like_wildcard"),
+    ("sqlserver", "SELECT * FROM [Orders] WHERE [Name] LIKE @p0", True, "like_wildcard"),
+    ("sqlserver", "SELECT * FROM [Orders] WHERE CONTAINS([Notes], @q)", True, "fulltext"),
+    ("sqlserver", "SELECT * FROM [Orders] WHERE [Id] = @p0", False, None),
+    ("oracle", "SELECT * FROM orders WHERE CONTAINS(notes, :1) > 0", True, "oracle_text"),
+    ("oracle", "SELECT * FROM orders WHERE name LIKE '%smith%'", True, "like_wildcard"),
+    ("oracle", "SELECT * FROM orders WHERE REGEXP_LIKE(name, :1)", True, "regex"),
+    ("oracle", "SELECT * FROM orders WHERE id = :1", False, None),
+]
+
+
+@pytest.mark.parametrize(
+    "engine,sql,searches,kind,live",
+    [(e, s, h, k, live) for e, s, h, k in TEXT_SEARCH_CASES for live in LIVE[e]],
+    ids=[f"{c[0]}:{c[1][:40]}:{live.__name__}" for c in TEXT_SEARCH_CASES for live in LIVE[c[0]]],
+)
+def test_every_live_collector_sets_text_search_from_the_query_fact(
+    engine, sql, searches, kind, live
+):
+    from src.tools.sql.query_facts import query_facts
+
+    row = live(sql)
+    facts = query_facts(sql, engine)
+    assert (row["has_text_search"], row["text_search_type"]) == (searches, kind)
+    assert row["has_text_search"] is facts.text_search
+    assert row["text_search_type"] == facts.text_search_type()
+
+
+def test_a_performance_insights_pattern_keeps_the_collected_text_search():
+    """A pattern built from Performance Insights alone (``_dict_to_query_pattern``) keeps
+    the fields its live reader set, and reads no text of its own."""
+    from src.agents.collector.mysql_collector import _dict_to_query_pattern
+
+    row = _live_rds_pi("mysql")("SELECT * FROM a WHERE b = ? -- LIKE '%x'")
+    pattern = _dict_to_query_pattern(row)
+    assert (pattern.has_text_search, pattern.text_search_type) == (False, None)
+    row = _live_rds_pi("mysql")("SELECT * FROM a WHERE MATCH (b) AGAINST (?)")
+    pattern = _dict_to_query_pattern(row)
+    assert (pattern.has_text_search, pattern.text_search_type) == (True, "fulltext")
+
+
+def test_the_collectors_hold_no_text_search_detector():
+    from src.agents.collector import mysql_collector
+    from src.tools.database import mysql_tools, oracle_tools, postgres_tools, sqlserver_tools
+
+    for module in (mysql_tools, postgres_tools, sqlserver_tools, oracle_tools):
+        assert not hasattr(module, "_has_text_search"), module.__name__
+        assert not hasattr(module, "_text_search_type"), module.__name__
+    assert not hasattr(mysql_collector, "_detect_text_search")
+    assert not hasattr(mysql_collector, "_detect_text_search_type")

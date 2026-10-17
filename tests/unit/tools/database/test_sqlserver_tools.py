@@ -19,11 +19,10 @@ from src.tools.database.sqlserver_tools import (
     _extract_query_type,
     _extract_sort_columns,
     _extract_tables,
-    _has_text_search,
     _has_time_range_filter,
     _hash,
-    _text_search_type,
 )
+from src.tools.sql.query_facts import query_facts
 
 
 @pytest.fixture
@@ -545,20 +544,33 @@ class TestHelpers:
         assert _estimate_rows_p95(10, 5, 15) == 30.0
 
     def test_has_text_search_recognizes_like_wildcard(self) -> None:
-        assert _has_text_search("SELECT * FROM t WHERE name LIKE '%foo%'") is True
-        assert _has_text_search("SELECT * FROM t WHERE name LIKE N'%foo%'") is True
+        assert (
+            query_facts("SELECT * FROM t WHERE name LIKE '%foo%'", "sqlserver").text_search is True
+        )
+        assert (
+            query_facts("SELECT * FROM t WHERE name LIKE N'%foo%'", "sqlserver").text_search is True
+        )
 
     def test_has_text_search_recognizes_fulltext(self) -> None:
-        assert _has_text_search("SELECT * FROM t WHERE CONTAINS(notes, 'urgent')") is True
-        assert _has_text_search("SELECT * FROM t WHERE FREETEXT(notes, 'urgent')") is True
+        assert (
+            query_facts("SELECT * FROM t WHERE CONTAINS(notes, 'urgent')", "sqlserver").text_search
+            is True
+        )
+        assert (
+            query_facts("SELECT * FROM t WHERE FREETEXT(notes, 'urgent')", "sqlserver").text_search
+            is True
+        )
 
     def test_has_text_search_negative(self) -> None:
-        assert _has_text_search("SELECT id FROM t WHERE id = 1") is False
+        assert query_facts("SELECT id FROM t WHERE id = 1", "sqlserver").text_search is False
 
     def test_text_search_type_returns_specific(self) -> None:
-        assert _text_search_type("WHERE name LIKE '%foo%'") == "like_wildcard"
-        assert _text_search_type("WHERE CONTAINS(c, 'q')") == "fulltext"
-        assert _text_search_type("WHERE id = 1") is None
+        assert (
+            query_facts("WHERE name LIKE '%foo%'", "sqlserver").text_search_type()
+            == "like_wildcard"
+        )
+        assert query_facts("WHERE CONTAINS(c, 'q')", "sqlserver").text_search_type() == "fulltext"
+        assert query_facts("WHERE id = 1", "sqlserver").text_search_type() is None
 
     def test_has_time_range_filter_recognizes_functions(self) -> None:
         assert _has_time_range_filter("WHERE created >= GETDATE()")

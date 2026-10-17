@@ -67,20 +67,24 @@ OTHER_SQL_MODULES: dict[str, str] = {
         "query facts (#930)"
     ),
     "src/agents/collector/mysql_collector.py": (
-        "the collector's has_text_search and time-range fields, before any fact is read "
-        "(#929: set has_text_search from the text_search fact)"
+        "the collector's time-range field, before any fact is read; its has_text_search is the "
+        "text_search fact the live reader sets (#929)"
     ),
     "src/tools/database/mysql_tools.py": (
-        "a live collector's own parsing of its source's output; its has_text_search is #929"
+        "a live collector's own parsing of its source's output (filter, sort and time-range "
+        "columns); its has_text_search is the text_search fact (#929)"
     ),
     "src/tools/database/postgres_tools.py": (
-        "a live collector's own parsing of its source's output; its has_text_search is #929"
+        "a live collector's own parsing of its source's output (filter, sort and time-range "
+        "columns); its has_text_search is the text_search fact (#929)"
     ),
     "src/tools/database/oracle_tools.py": (
-        "a live collector's own parsing of its source's output; its has_text_search is #929"
+        "a live collector's own parsing of its source's output (filter, sort and time-range "
+        "columns); its has_text_search is the text_search fact (#929)"
     ),
     "src/tools/database/sqlserver_tools.py": (
-        "a live collector's own parsing of its source's output; its has_text_search is #929"
+        "a live collector's own parsing of its source's output (filter, sort and time-range "
+        "columns); its has_text_search is the text_search fact (#929)"
     ),
     "src/tools/aws/rds_tools.py": "a live collector's own parsing of its source's output",
     "src/tools/database/offline_parser.py": "the offline collector's digest and bulk-load reading",

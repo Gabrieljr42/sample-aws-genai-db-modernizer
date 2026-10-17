@@ -468,8 +468,8 @@ class SQLServerRemoteCollector:
                     "join_count": shape["join_count"],
                     "has_aggregations": shape["has_aggregations"],
                     "has_subqueries": shape["has_subqueries"],
-                    "has_text_search": _has_text_search(query_text),
-                    "text_search_type": _text_search_type(query_text),
+                    "has_text_search": shape["has_text_search"],
+                    "text_search_type": shape["text_search_type"],
                     "has_time_range_filter": _has_time_range_filter(query_text),
                     # SQL Server-specific (semantically reusable for Oracle later)
                     "avg_logical_reads": round(avg_logical, 2),
@@ -641,24 +641,6 @@ def _estimate_rows_p95(avg_rows: float, avg_ms: float, p95_ms: float) -> float |
     if avg_ms <= 0:
         return None
     return round(avg_rows * (p95_ms / avg_ms), 2)
-
-
-def _has_text_search(query_text: str) -> bool:
-    lower = query_text.lower()
-    if "like '%" in lower or "like n'%" in lower:
-        return True
-    if " contains(" in lower or " freetext(" in lower:  # SQL Server full-text search
-        return True
-    return False
-
-
-def _text_search_type(query_text: str) -> str | None:
-    lower = query_text.lower()
-    if " contains(" in lower or " freetext(" in lower:
-        return "fulltext"
-    if "like '%" in lower or "like n'%" in lower:
-        return "like_wildcard"
-    return None
 
 
 def _has_time_range_filter(query_text: str) -> bool:

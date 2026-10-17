@@ -345,8 +345,8 @@ class MySQLRemoteCollector:
                     ),
                     "has_aggregations": shape["has_aggregations"],
                     "has_subqueries": shape["has_subqueries"],
-                    "has_text_search": _has_text_search(query_text),
-                    "text_search_type": _text_search_type(query_text),
+                    "has_text_search": shape["has_text_search"],
+                    "text_search_type": shape["text_search_type"],
                     "has_time_range_filter": _has_time_range_filter(query_text),
                     "errors": r.get("sum_errors") or 0,
                     "warnings": r.get("sum_warnings") or 0,
@@ -414,28 +414,6 @@ def _extract_sort_columns(sql: str) -> list[str] | None:
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
-
-
-def _has_text_search(query_text: str) -> bool:
-    """Detect text search patterns in MySQL (handles parameterized queries)."""
-    if re.search(r"\bMATCH\s*\(.*\)\s*AGAINST\s*\(", query_text, re.I):
-        return True
-    if re.search(r"\b[I]?LIKE\s+'%", query_text, re.I):
-        return True
-    # MySQL performance_schema normalizes: LIKE '%foo%' → LIKE ?
-    if re.search(r"\b[I]?LIKE\s+\?", query_text, re.I):
-        return True
-    return False
-
-
-def _text_search_type(query_text: str) -> str | None:
-    if re.search(r"\bMATCH\s*\(.*\)\s*AGAINST\s*\(", query_text, re.I):
-        return "fulltext"
-    if re.search(r"\b[I]?LIKE\s+'%", query_text, re.I):
-        return "like_wildcard"
-    if re.search(r"\b[I]?LIKE\s+\?", query_text, re.I):
-        return "like_wildcard"
-    return None
 
 
 def _has_time_range_filter(query_text: str) -> bool:

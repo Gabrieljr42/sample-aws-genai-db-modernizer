@@ -57,10 +57,8 @@ class MariaDBRemoteCollector(MySQLRemoteCollector):
             _extract_filter_columns,
             _extract_query_type,
             _extract_sort_columns,
-            _has_text_search,
             _has_time_range_filter,
             _hash,
-            _text_search_type,
         )
 
         extra_cols = ""
@@ -161,8 +159,8 @@ class MariaDBRemoteCollector(MySQLRemoteCollector):
                     ),
                     "has_aggregations": shape["has_aggregations"],
                     "has_subqueries": shape["has_subqueries"],
-                    "has_text_search": _has_text_search(query_text),
-                    "text_search_type": _text_search_type(query_text),
+                    "has_text_search": shape["has_text_search"],
+                    "text_search_type": shape["text_search_type"],
                     "has_time_range_filter": _has_time_range_filter(query_text),
                     "errors": r.get("sum_errors") or 0,
                     "warnings": r.get("sum_warnings") or 0,

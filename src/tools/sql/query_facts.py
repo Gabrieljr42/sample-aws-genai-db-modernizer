@@ -95,6 +95,8 @@ _TIMESTAMP_HINTS = ("_at", "time", "date", "ttl")
 _JSON_HINTS = ("json", "->", "#>", "@>")
 # A comparison, or a prefix LIKE (a range on the column).
 _RANGE_HINTS = ("between", "<", ">", "like")
+# The collectors' name for a full-text match on each source (``text_search_type``).
+_FULLTEXT_LABELS = {"postgresql": "tsvector", "postgres": "tsvector", "oracle": "oracle_text"}
 
 # ---------------------------------------------------------------------------
 # Aggregation (#338, #336)
@@ -712,6 +714,23 @@ class QueryFacts:
             or self.pattern_match
             or self.similarity_match
         )
+
+    def text_search_type(self) -> str | None:
+        """The collector's ``text_search_type`` label for :attr:`text_search`, from its
+        parts (#929): a full-text match is ``tsvector`` on PostgreSQL, ``oracle_text`` on
+        Oracle and ``fulltext`` elsewhere; then ``trigram`` (a similarity function),
+        ``regex`` (a regular-expression or ``SIMILAR TO`` match) and ``like_wildcard``
+        (a leading-wildcard or parameterised ``LIKE``). None when there is no search.
+        """
+        if self.fulltext_search:
+            return _FULLTEXT_LABELS.get(self._source_engine, "fulltext")
+        if self.similarity_match:
+            return "trigram"
+        if self.pattern_match:
+            return "regex"
+        if self.leading_wildcard_like or self.like_parameter:
+            return "like_wildcard"
+        return None
 
     @cached_property
     def window_function(self) -> bool:

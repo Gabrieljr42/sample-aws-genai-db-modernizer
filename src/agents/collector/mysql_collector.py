@@ -1039,8 +1039,8 @@ def _dict_to_query_pattern(d: dict) -> QueryPattern:
         join_count=d.get("join_count"),
         has_aggregations=d.get("has_aggregations"),
         has_subqueries=d.get("has_subqueries"),
-        has_text_search=d.get("has_text_search") or _detect_text_search(query_text),
-        text_search_type=d.get("text_search_type") or _detect_text_search_type(query_text),
+        has_text_search=d.get("has_text_search"),
+        text_search_type=d.get("text_search_type"),
         has_time_range_filter=d.get("has_time_range_filter") or _detect_time_range(query_text),
         # Timestamps + counters
         first_seen=_normalize_datetime_str(d.get("first_seen")),
@@ -1051,31 +1051,6 @@ def _dict_to_query_pattern(d: dict) -> QueryPattern:
         db_load_contribution_percent=d.get("db_load_contribution_percent"),
         wait_events=d.get("wait_events"),
     )
-
-
-def _detect_text_search(sql: str) -> bool:
-    """Detect text search in query text (works for all engines, parameterized or not)."""
-    import re
-
-    if re.search(r"\b(MATCH\s*\(|to_tsvector|to_tsquery|@@)\b", sql, re.I):
-        return True
-    if re.search(r"\b[I]?LIKE\s+('%.+|[\?\$])", sql, re.I):
-        return True
-    return False
-
-
-def _detect_text_search_type(sql: str) -> str | None:
-    import re
-
-    if re.search(r"\b(MATCH\s*\()", sql, re.I):
-        return "fulltext"
-    if re.search(r"\b(to_tsvector|to_tsquery|@@)\b", sql, re.I):
-        return "tsvector"
-    if re.search(r"\s%\s", sql):
-        return "trigram"
-    if re.search(r"\b[I]?LIKE\s+('%.+|[\?\$])", sql, re.I):
-        return "like_wildcard"
-    return None
 
 
 def _detect_time_range(sql: str) -> bool:

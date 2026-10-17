@@ -10,13 +10,12 @@ from src.tools.database.oracle_tools import (
     _extract_query_type,
     _extract_sort_columns,
     _extract_tables,
-    _has_text_search,
     _has_time_range_filter,
     _hash,
     _normalize_fk_action,
     _normalize_index_type,
-    _text_search_type,
 )
+from src.tools.sql.query_facts import query_facts
 
 
 @pytest.fixture
@@ -433,19 +432,35 @@ class TestExtractSortColumns:
 
 class TestTextSearch:
     def test_contains(self):
-        assert _has_text_search("SELECT * FROM t WHERE CONTAINS(body, 'test')") is True
-        assert _text_search_type("SELECT * FROM t WHERE CONTAINS(body, 'test')") == "oracle_text"
+        assert (
+            query_facts("SELECT * FROM t WHERE CONTAINS(body, 'test')", "oracle").text_search
+            is True
+        )
+        assert (
+            query_facts("SELECT * FROM t WHERE CONTAINS(body, 'test')", "oracle").text_search_type()
+            == "oracle_text"
+        )
 
     def test_like_wildcard(self):
-        assert _has_text_search("SELECT * FROM t WHERE name LIKE '%smith%'") is True
-        assert _text_search_type("SELECT * FROM t WHERE name LIKE '%smith%'") == "like_wildcard"
+        assert (
+            query_facts("SELECT * FROM t WHERE name LIKE '%smith%'", "oracle").text_search is True
+        )
+        assert (
+            query_facts("SELECT * FROM t WHERE name LIKE '%smith%'", "oracle").text_search_type()
+            == "like_wildcard"
+        )
 
-    def test_ctx(self):
-        assert _has_text_search("SELECT * FROM t WHERE ctx_query(...)") is True
+    def test_a_ctx_package_call_is_not_a_search(self):
+        # The text_search fact (#929) reads Oracle Text's CONTAINS predicate; a call into
+        # one of its CTX_ packages (index maintenance, CTX_DDL.SYNC_INDEX) filters nothing.
+        assert (
+            query_facts("BEGIN ctx_ddl.sync_index('notes_idx'); END;", "oracle").text_search
+            is False
+        )
 
     def test_no_text_search(self):
-        assert _has_text_search("SELECT * FROM t WHERE id = 1") is False
-        assert _text_search_type("SELECT * FROM t WHERE id = 1") is None
+        assert query_facts("SELECT * FROM t WHERE id = 1", "oracle").text_search is False
+        assert query_facts("SELECT * FROM t WHERE id = 1", "oracle").text_search_type() is None
 
 
 class TestTimeRangeFilter:
