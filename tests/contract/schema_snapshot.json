@@ -1,4 +1,216 @@
 {
+  "agent_interaction_models.AgentAnswers": {
+    "fields": {
+      "agent_type": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "answered_by": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "scalar",
+              "type": "null"
+            },
+            {
+              "kind": "scalar",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "answers": {
+        "required": true,
+        "schema": {
+          "additional": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "object"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "timestamp": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      }
+    },
+    "schema_hash": "e8cd90d2cbf6e883d95cc78ffe380b2714de2b1962927e7c3d77be646e0d7406",
+    "version": "1.1"
+  },
+  "agent_interaction_models.AgentQuestions": {
+    "fields": {
+      "agent_type": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "partial_result_key": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "scalar",
+              "type": "null"
+            },
+            {
+              "kind": "scalar",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "questions": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "category": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "context": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "options": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "items": {
+                        "kind": "object",
+                        "properties": {
+                          "id": {
+                            "required": true,
+                            "schema": {
+                              "kind": "scalar",
+                              "type": "string"
+                            }
+                          },
+                          "recommended": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      },
+                      "kind": "array"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "question": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "question_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "table_id": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "target_engine": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "scalar",
+              "type": "null"
+            },
+            {
+              "kind": "scalar",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "timestamp": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      }
+    },
+    "schema_hash": "9d0125d29ea3f6439eb68806eea5394d0da517e96f21f97cc6682663b43e9742",
+    "version": "1.1"
+  },
   "analysis_input.AnalysisInput": {
     "fields": {
       "analysis_options": {
@@ -816,6 +1028,1188 @@
     },
     "schema_hash": "54da921afae141c14da81a88f1ee20745f6b3723af3f954932fae245e4ffac51",
     "version": "2.1"
+  },
+  "assignment_models.Assignment": {
+    "fields": {
+      "accepted_feasibility_findings": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "engines": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "kind": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "co_dependency_on_non_join_engine",
+                    "co_dependency_split",
+                    "read_write_split"
+                  ]
+                }
+              },
+              "message": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "query_ids": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "recommended_pattern": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "severity": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "advisory",
+                    "blocking"
+                  ]
+                }
+              },
+              "table": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "aurora_engine_choice": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "object",
+              "properties": {
+                "deciding_features": {
+                  "required": false,
+                  "schema": {
+                    "items": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "kind": "array"
+                  }
+                },
+                "engine": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "margin": {
+                  "required": false,
+                  "schema": {
+                    "kind": "anyOf",
+                    "members": [
+                      {
+                        "kind": "scalar",
+                        "type": "null"
+                      },
+                      {
+                        "kind": "scalar",
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "reason": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "source_engine": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "totals": {
+                  "required": false,
+                  "schema": {
+                    "additional": {
+                      "kind": "scalar",
+                      "type": "number"
+                    },
+                    "kind": "object"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "cache_notes": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
+      "cache_overlay": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "object",
+              "properties": {
+                "call_share_percent": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "maximum": 100,
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "calls_per_second": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "engine": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "max_rows_avg": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "min_calls_per_second": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "owners": {
+                  "required": false,
+                  "schema": {
+                    "additional": {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    "kind": "object"
+                  }
+                },
+                "patterns": {
+                  "required": false,
+                  "schema": {
+                    "additional": {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    "kind": "object"
+                  }
+                },
+                "query_count": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "cache_safety_net_notes": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
+      "co_dependency_groups": {
+        "required": true,
+        "schema": {
+          "items": {
+            "items": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "kind": "array"
+          },
+          "kind": "array"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "job_id": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "moves": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "actor": {
+                "required": false,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "customer",
+                    "model_flag",
+                    "rule"
+                  ]
+                }
+              },
+              "evidence": {
+                "required": false,
+                "schema": {
+                  "kind": "object",
+                  "properties": {
+                    "candidates": {
+                      "required": false,
+                      "schema": {
+                        "items": {
+                          "kind": "object",
+                          "properties": {
+                            "engine": {
+                              "required": true,
+                              "schema": {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            },
+                            "gate": {
+                              "required": false,
+                              "schema": {
+                                "kind": "anyOf",
+                                "members": [
+                                  {
+                                    "kind": "scalar",
+                                    "type": "null"
+                                  },
+                                  {
+                                    "kind": "scalar",
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            },
+                            "score": {
+                              "required": false,
+                              "schema": {
+                                "kind": "anyOf",
+                                "members": [
+                                  {
+                                    "kind": "scalar",
+                                    "type": "null"
+                                  },
+                                  {
+                                    "kind": "scalar",
+                                    "type": "number"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "kind": "array"
+                      }
+                    },
+                    "group_gates": {
+                      "required": false,
+                      "schema": {
+                        "items": {
+                          "kind": "object",
+                          "properties": {
+                            "engine": {
+                              "required": true,
+                              "schema": {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            },
+                            "gate": {
+                              "required": true,
+                              "schema": {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            },
+                            "query_id": {
+                              "required": true,
+                              "schema": {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "kind": "array"
+                      }
+                    },
+                    "group_scores": {
+                      "required": false,
+                      "schema": {
+                        "additional": {
+                          "kind": "scalar",
+                          "type": "number"
+                        },
+                        "kind": "object"
+                      }
+                    },
+                    "previous_tied_engines": {
+                      "required": false,
+                      "schema": {
+                        "items": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "array"
+                      }
+                    },
+                    "replaced_engine": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "signal": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "tie_rule": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "enum",
+                            "values": [
+                              "cache.legacy_owner",
+                              "consolidate.no_unique_value",
+                              "consolidate.source_compatible_survives",
+                              "customer.pick",
+                              "fallback.no_group_owner",
+                              "fallback.no_owner",
+                              "fallback.no_score",
+                              "flag.capability_gap",
+                              "floor.cost_share",
+                              "floor.opensearch",
+                              "group.customer_propagation",
+                              "group.mean",
+                              "highest_score",
+                              "override.text_search",
+                              "override.utility",
+                              "rollback.redesign_failed",
+                              "sweep.orphan",
+                              "tie.cleared",
+                              "tie.placeholder.hash",
+                              "tie.placeholder.settled_workload",
+                              "tie.source_compatible",
+                              "tie.stability"
+                            ]
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "from_engine": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "group_key": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "pass": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "aurora_fallback",
+                    "cache_owner_normalize",
+                    "candidates",
+                    "co_dependency",
+                    "customer_group_propagation",
+                    "customer_pick",
+                    "floor",
+                    "heterogeneous_choice",
+                    "model_flag",
+                    "place",
+                    "post_schema_flag",
+                    "resettle",
+                    "score",
+                    "settle",
+                    "signal_override",
+                    "sweep",
+                    "tie",
+                    "utility_pin"
+                  ]
+                }
+              },
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason_code": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "cache.legacy_owner",
+                    "consolidate.no_unique_value",
+                    "consolidate.source_compatible_survives",
+                    "customer.pick",
+                    "fallback.no_group_owner",
+                    "fallback.no_owner",
+                    "fallback.no_score",
+                    "flag.capability_gap",
+                    "floor.cost_share",
+                    "floor.opensearch",
+                    "group.customer_propagation",
+                    "group.mean",
+                    "highest_score",
+                    "override.text_search",
+                    "override.utility",
+                    "rollback.redesign_failed",
+                    "sweep.orphan",
+                    "tie.cleared",
+                    "tie.placeholder.hash",
+                    "tie.placeholder.settled_workload",
+                    "tie.source_compatible",
+                    "tie.stability"
+                  ]
+                }
+              },
+              "runner_up": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "object",
+                      "properties": {
+                        "engine": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "score": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "score_after": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "score_before": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "seq": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "tied_engines": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "to_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "post_schema_reroutes": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "approved_version": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "from_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason_category": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "score_after": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "score_before": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "to_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "previous_version": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "scalar",
+              "type": "integer"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "query_assignments": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "assigned_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "assignment_reason": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "cache_customer_override": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "boolean"
+                }
+              },
+              "cache_dropped": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "boolean"
+                }
+              },
+              "cache_engine": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "cache_pattern": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "cache_reason": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "co_dependency_propagated": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "boolean"
+                }
+              },
+              "confidence": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "customer_override": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "boolean"
+                }
+              },
+              "in_scope": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "boolean"
+                }
+              },
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "signal_override": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "source_tables": {
+                "required": true,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "tied_engines": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "warnings": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "rolled_back_version": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "scalar",
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "source": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "enum",
+              "values": [
+                "assignment_resolution",
+                "customer_gate",
+                "post_schema_routing",
+                "reality_check"
+              ]
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "status": {
+        "required": true,
+        "schema": {
+          "kind": "enum",
+          "values": [
+            "auto_generated",
+            "customer_approved",
+            "customer_modified",
+            "reroute_rolled_back",
+            "rerouted_after_approval"
+          ]
+        }
+      },
+      "table_assignments": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "engines": {
+                "required": true,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "multi_engine_reason": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "primary_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "query_count": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "table_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "timestamp": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "unresolved_table_names": {
+        "required": false,
+        "schema": {
+          "kind": "object",
+          "properties": {
+            "count": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "names": {
+              "required": false,
+              "schema": {
+                "items": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "kind": "array"
+              }
+            }
+          }
+        }
+      },
+      "validation_warnings": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
+      "version": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "minimum": 1,
+          "type": "integer"
+        }
+      }
+    },
+    "schema_hash": "9b604cb6a2cfb911c8e542d08886cd811c562ea410f11936eac63f7d871fd4fc",
+    "version": "1.15"
+  },
+  "assignment_models.ValidationResult": {
+    "fields": {
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "errors": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
+      "valid": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "boolean"
+        }
+      },
+      "warnings": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      }
+    },
+    "schema_hash": "481b2b83377b28119ca74ec058bdc4f420bd95b4ef3c65a9ccdb36a9892493c6",
+    "version": "1.0"
   },
   "aurora_mysql_model_output.AuroraMySQLModelOutputContract": {
     "fields": {
@@ -9718,6 +11112,778 @@
     "schema_hash": "2df46f91ea0d5015bbb231a1141dadc55cebc5a898157816c1786a3432a0973d",
     "version": "1.0"
   },
+  "load_test_models.InfrastructureManifest": {
+    "fields": {
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "resources": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "configuration": {
+                "required": true,
+                "schema": {
+                  "kind": "object"
+                }
+              },
+              "resource_arn": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "resource_type": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "tags": {
+        "required": true,
+        "schema": {
+          "additional": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "object"
+        }
+      }
+    },
+    "schema_hash": "6a4c3b623bfcaf5089c0a3b287e40bb45b2a22f8a00cbcaa8d5bf1d7e0fdf9eb",
+    "version": "1.0"
+  },
+  "load_test_models.LoadTestOutput": {
+    "fields": {
+      "assumptions": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "cost_explorer_verified": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "type": "boolean"
+        }
+      },
+      "infrastructure_deployed": {
+        "required": true,
+        "schema": {
+          "kind": "object",
+          "properties": {
+            "contract_version": {
+              "required": false,
+              "schema": {
+                "kind": "scalar",
+                "pattern": "^\\d+\\.\\d+$",
+                "type": "string"
+              }
+            },
+            "resources": {
+              "required": true,
+              "schema": {
+                "items": {
+                  "kind": "object",
+                  "properties": {
+                    "configuration": {
+                      "required": true,
+                      "schema": {
+                        "kind": "object"
+                      }
+                    },
+                    "resource_arn": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "resource_type": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "kind": "array"
+              }
+            },
+            "tags": {
+              "required": true,
+              "schema": {
+                "additional": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "kind": "object"
+              }
+            }
+          }
+        }
+      },
+      "pattern_results": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "access_pattern_description": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "code_artifact_path": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "consumed_capacity_avg": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "number"
+                }
+              },
+              "contract_version": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "pattern": "^\\d+\\.\\d+$",
+                  "type": "string"
+                }
+              },
+              "cost_per_operation_usd": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "number"
+                }
+              },
+              "error_count": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "integer"
+                }
+              },
+              "error_rate_pct": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "number"
+                }
+              },
+              "improvement_factor": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "number"
+                }
+              },
+              "operation_type": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "original_query_text": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "source_latency_ms": {
+                "required": true,
+                "schema": {
+                  "kind": "object",
+                  "properties": {
+                    "max": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "min": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p50": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p90": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p95": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p99": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p999": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              },
+              "steps": {
+                "required": true,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "target_latency_ms": {
+                "required": true,
+                "schema": {
+                  "kind": "object",
+                  "properties": {
+                    "max": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "min": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p50": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p90": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p95": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p99": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "p999": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              },
+              "throttle_count": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "integer"
+                }
+              },
+              "throughput_rps": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "number"
+                }
+              },
+              "total_requests": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "patterns_failed": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "patterns_passed": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "run_id": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "seed_summary": {
+        "required": true,
+        "schema": {
+          "kind": "object",
+          "properties": {
+            "entities": {
+              "required": true,
+              "schema": {
+                "additional": {
+                  "kind": "scalar",
+                  "type": "integer"
+                },
+                "kind": "object"
+              }
+            },
+            "key_registry_path": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "type": "string"
+              }
+            },
+            "relationships": {
+              "required": true,
+              "schema": {
+                "additional": {
+                  "kind": "object"
+                },
+                "kind": "object"
+              }
+            },
+            "seed_duration_seconds": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "type": "number"
+              }
+            },
+            "total_records": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "target_engine": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "test_duration_minutes": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "total_cost_usd": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "total_patterns_tested": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "version": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      }
+    },
+    "schema_hash": "ea13ea50939b6c4194b51cf385b07f62c02ff4ec712990e5834f3a7fa54ddf1f",
+    "version": "1.0"
+  },
+  "load_test_models.PatternResult": {
+    "fields": {
+      "access_pattern_description": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "code_artifact_path": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "consumed_capacity_avg": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "cost_per_operation_usd": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "error_count": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "error_rate_pct": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "improvement_factor": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "operation_type": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "original_query_text": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "query_id": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "source_latency_ms": {
+        "required": true,
+        "schema": {
+          "kind": "object",
+          "properties": {
+            "max": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "min": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p50": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p90": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p95": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p99": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p999": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "steps": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
+      "target_latency_ms": {
+        "required": true,
+        "schema": {
+          "kind": "object",
+          "properties": {
+            "max": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "min": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p50": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p90": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p95": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p99": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "p999": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "minimum": 0,
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "throttle_count": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "throughput_rps": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "total_requests": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      }
+    },
+    "schema_hash": "097a010ec45e919c7a7549933b65b0af747c1d66a5917cf4689e49b9f4383f56",
+    "version": "1.0"
+  },
+  "load_test_models.SeedManifest": {
+    "fields": {
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "duration_seconds": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "number"
+        }
+      },
+      "resources": {
+        "required": true,
+        "schema": {
+          "kind": "object"
+        }
+      },
+      "total_items": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      }
+    },
+    "schema_hash": "64811396f5f4ddd35b69134c2e971b022be21b20b2f2428c09d3eabda00003c0",
+    "version": "1.0"
+  },
   "opensearch_model_output.OpenSearchModelOutputContract": {
     "fields": {
       "access_patterns": {
@@ -10502,6 +12668,644 @@
       }
     },
     "schema_hash": "2f460c43abe4a65aee7128a45dbe6457ff256f068cc5c8a46d760af88946af18",
+    "version": "1.0"
+  },
+  "phase_models.PhaseProgression": {
+    "fields": {
+      "assignment_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "current_phase": {
+        "required": true,
+        "schema": {
+          "kind": "enum",
+          "values": [
+            "analysis",
+            "assignment",
+            "assignment_review",
+            "collect_triage",
+            "load_test",
+            "reality_check",
+            "schema_design",
+            "synthesis"
+          ]
+        }
+      },
+      "job_id": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "phases": {
+        "required": true,
+        "schema": {
+          "additional": {
+            "kind": "object",
+            "properties": {
+              "assignment_version": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "completed_at": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "error_message": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "execution_id": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "iteration": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "phase": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "analysis",
+                    "assignment",
+                    "assignment_review",
+                    "collect_triage",
+                    "load_test",
+                    "reality_check",
+                    "schema_design",
+                    "synthesis"
+                  ]
+                }
+              },
+              "revision_in_progress": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "boolean"
+                }
+              },
+              "scope_engines": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "skip_reason": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "started_at": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "status": {
+                "required": false,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "awaiting_input",
+                    "awaiting_review",
+                    "completed",
+                    "failed",
+                    "in_progress",
+                    "not_started",
+                    "skipped"
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "object"
+        }
+      },
+      "total_iterations": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "minimum": 1,
+          "type": "integer"
+        }
+      }
+    },
+    "schema_hash": "fd1a43d5ab0acd895545725a93b545c4f06ba2b8f385407e47e32c6e1a213359",
+    "version": "1.1"
+  },
+  "post_schema_router_output.RouterOutput": {
+    "fields": {
+      "cascade_depth": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "job_id": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "routings": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "cascade_depth": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "integer"
+                }
+              },
+              "evidence": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "object",
+                      "properties": {
+                        "candidates": {
+                          "required": false,
+                          "schema": {
+                            "items": {
+                              "kind": "object",
+                              "properties": {
+                                "engine": {
+                                  "required": true,
+                                  "schema": {
+                                    "kind": "scalar",
+                                    "type": "string"
+                                  }
+                                },
+                                "gate": {
+                                  "required": false,
+                                  "schema": {
+                                    "kind": "anyOf",
+                                    "members": [
+                                      {
+                                        "kind": "scalar",
+                                        "type": "null"
+                                      },
+                                      {
+                                        "kind": "scalar",
+                                        "type": "string"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "score": {
+                                  "required": false,
+                                  "schema": {
+                                    "kind": "anyOf",
+                                    "members": [
+                                      {
+                                        "kind": "scalar",
+                                        "type": "null"
+                                      },
+                                      {
+                                        "kind": "scalar",
+                                        "type": "number"
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "kind": "array"
+                          }
+                        },
+                        "group_gates": {
+                          "required": false,
+                          "schema": {
+                            "items": {
+                              "kind": "object",
+                              "properties": {
+                                "engine": {
+                                  "required": true,
+                                  "schema": {
+                                    "kind": "scalar",
+                                    "type": "string"
+                                  }
+                                },
+                                "gate": {
+                                  "required": true,
+                                  "schema": {
+                                    "kind": "scalar",
+                                    "type": "string"
+                                  }
+                                },
+                                "query_id": {
+                                  "required": true,
+                                  "schema": {
+                                    "kind": "scalar",
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            },
+                            "kind": "array"
+                          }
+                        },
+                        "group_scores": {
+                          "required": false,
+                          "schema": {
+                            "additional": {
+                              "kind": "scalar",
+                              "type": "number"
+                            },
+                            "kind": "object"
+                          }
+                        },
+                        "previous_tied_engines": {
+                          "required": false,
+                          "schema": {
+                            "items": {
+                              "kind": "scalar",
+                              "type": "string"
+                            },
+                            "kind": "array"
+                          }
+                        },
+                        "replaced_engine": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "signal": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "tie_rule": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "enum",
+                                "values": [
+                                  "cache.legacy_owner",
+                                  "consolidate.no_unique_value",
+                                  "consolidate.source_compatible_survives",
+                                  "customer.pick",
+                                  "fallback.no_group_owner",
+                                  "fallback.no_owner",
+                                  "fallback.no_score",
+                                  "flag.capability_gap",
+                                  "floor.cost_share",
+                                  "floor.opensearch",
+                                  "group.customer_propagation",
+                                  "group.mean",
+                                  "highest_score",
+                                  "override.text_search",
+                                  "override.utility",
+                                  "rollback.redesign_failed",
+                                  "sweep.orphan",
+                                  "tie.cleared",
+                                  "tie.placeholder.hash",
+                                  "tie.placeholder.settled_workload",
+                                  "tie.source_compatible",
+                                  "tie.stability"
+                                ]
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "explanation": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "from_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "group_key": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason_category": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "runner_up": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "object",
+                      "properties": {
+                        "engine": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "score": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "score_after": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "score_before": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "tied_engines": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "to_engine": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "terminal_queries": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      }
+    },
+    "schema_hash": "d7d11e94cc8eb18e410e9ead2c49ebfec5a8e6b90abba1c42faac60947cf0a46",
     "version": "1.0"
   },
   "reality_check_model_response.RealityCheckModelResponse": {
@@ -12008,6 +14812,891 @@
     },
     "schema_hash": "42c901dde3483cf15be56614670427c3495ee4bc15b74eba4d6235877d5a3586",
     "version": "2.0"
+  },
+  "schema_design_input.SchemaDesignGroupsManifest": {
+    "fields": {
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "database_name": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "excluded_queries": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "groups": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "group_index": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "group_name": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "input_file": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "input_pages": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "additional": {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    "kind": "object"
+                  },
+                  "kind": "array"
+                }
+              },
+              "primary_tables": {
+                "required": true,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "query_count": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "table_count": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "job_id": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "target_engine": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "total_groups": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "total_queries": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "minimum": 0,
+          "type": "integer"
+        }
+      }
+    },
+    "schema_hash": "f76f9b98f86b67da12a6c40696a53c08c1c5e5ea64f2028cbee39f926f9d43b9",
+    "version": "1.0"
+  },
+  "schema_revision_models.SchemaConfirmation": {
+    "fields": {
+      "confirmed_at": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "confirmed_version": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "engine": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      }
+    },
+    "schema_hash": "a439d28ca8a38c079aba6920fbc45e2da110231830789958bb714794363433c9",
+    "version": "1.1"
+  },
+  "schema_revision_models.SchemaRevisionRequest": {
+    "fields": {
+      "base_version": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "new_patterns": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "context": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "estimated_reads_per_second": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "estimated_writes_per_second": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "source_tables": {
+                "required": true,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "target_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "pattern_modifications": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "action": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "DROP",
+                    "NOTE",
+                    "REASSIGN"
+                  ]
+                }
+              },
+              "note": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "pattern_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "target_engine": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "table_modifications": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "action": {
+                "required": true,
+                "schema": {
+                  "kind": "const",
+                  "value": "drop"
+                }
+              },
+              "table_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      }
+    },
+    "schema_hash": "a0991901c7978feb5a95ee26e5cc0de49f0db93d36816d01db1673a98a155ddb",
+    "version": "1.1"
+  },
+  "schema_revision_models.SchemaVersionMeta": {
+    "fields": {
+      "base_version": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "scalar",
+              "type": "integer"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "changelog": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "change_type": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "added",
+                    "modified",
+                    "reassigned",
+                    "removed"
+                  ]
+                }
+              },
+              "entity_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "entity_type": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "access_pattern",
+                    "collection",
+                    "index",
+                    "table"
+                  ]
+                }
+              },
+              "from_engine": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "to_engine": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "initiated_by": {
+        "required": true,
+        "schema": {
+          "kind": "enum",
+          "values": [
+            "customer",
+            "system"
+          ]
+        }
+      },
+      "modifications": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "object",
+              "properties": {
+                "base_version": {
+                  "required": true,
+                  "schema": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  }
+                },
+                "contract_version": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "pattern": "^\\d+\\.\\d+$",
+                    "type": "string"
+                  }
+                },
+                "new_patterns": {
+                  "required": true,
+                  "schema": {
+                    "items": {
+                      "kind": "object",
+                      "properties": {
+                        "context": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "estimated_reads_per_second": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        },
+                        "estimated_writes_per_second": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        },
+                        "source_tables": {
+                          "required": true,
+                          "schema": {
+                            "items": {
+                              "kind": "scalar",
+                              "type": "string"
+                            },
+                            "kind": "array"
+                          }
+                        },
+                        "target_engine": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "kind": "array"
+                  }
+                },
+                "pattern_modifications": {
+                  "required": true,
+                  "schema": {
+                    "items": {
+                      "kind": "object",
+                      "properties": {
+                        "action": {
+                          "required": true,
+                          "schema": {
+                            "kind": "enum",
+                            "values": [
+                              "DROP",
+                              "NOTE",
+                              "REASSIGN"
+                            ]
+                          }
+                        },
+                        "note": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "pattern_id": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "target_engine": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "kind": "array"
+                  }
+                },
+                "table_modifications": {
+                  "required": true,
+                  "schema": {
+                    "items": {
+                      "kind": "object",
+                      "properties": {
+                        "action": {
+                          "required": true,
+                          "schema": {
+                            "kind": "const",
+                            "value": "drop"
+                          }
+                        },
+                        "table_id": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "kind": "array"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "redesigned_groups": {
+        "required": true,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
+      "timestamp": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "verification": {
+        "required": true,
+        "schema": {
+          "kind": "object",
+          "properties": {
+            "hard_errors": {
+              "required": true,
+              "schema": {
+                "items": {
+                  "kind": "object",
+                  "properties": {
+                    "affected_patterns": {
+                      "required": true,
+                      "schema": {
+                        "items": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "array"
+                      }
+                    },
+                    "affected_tables": {
+                      "required": true,
+                      "schema": {
+                        "items": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "array"
+                      }
+                    },
+                    "category": {
+                      "required": true,
+                      "schema": {
+                        "kind": "enum",
+                        "values": [
+                          "conflict",
+                          "consistency",
+                          "cost",
+                          "coverage"
+                        ]
+                      }
+                    },
+                    "cost_delta": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    },
+                    "message": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "severity": {
+                      "required": true,
+                      "schema": {
+                        "kind": "enum",
+                        "values": [
+                          "error",
+                          "warning"
+                        ]
+                      }
+                    },
+                    "suggested_resolutions": {
+                      "required": false,
+                      "schema": {
+                        "items": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "array"
+                      }
+                    }
+                  }
+                },
+                "kind": "array"
+              }
+            },
+            "passed": {
+              "required": true,
+              "schema": {
+                "kind": "scalar",
+                "type": "boolean"
+              }
+            },
+            "warnings": {
+              "required": true,
+              "schema": {
+                "items": {
+                  "kind": "object",
+                  "properties": {
+                    "affected_patterns": {
+                      "required": true,
+                      "schema": {
+                        "items": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "array"
+                      }
+                    },
+                    "affected_tables": {
+                      "required": true,
+                      "schema": {
+                        "items": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "array"
+                      }
+                    },
+                    "category": {
+                      "required": true,
+                      "schema": {
+                        "kind": "enum",
+                        "values": [
+                          "conflict",
+                          "consistency",
+                          "cost",
+                          "coverage"
+                        ]
+                      }
+                    },
+                    "cost_delta": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    },
+                    "message": {
+                      "required": true,
+                      "schema": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "severity": {
+                      "required": true,
+                      "schema": {
+                        "kind": "enum",
+                        "values": [
+                          "error",
+                          "warning"
+                        ]
+                      }
+                    },
+                    "suggested_resolutions": {
+                      "required": false,
+                      "schema": {
+                        "items": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "array"
+                      }
+                    }
+                  }
+                },
+                "kind": "array"
+              }
+            }
+          }
+        }
+      },
+      "version": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "integer"
+        }
+      }
+    },
+    "schema_hash": "50e9db46dceaa744f691eb2f55fc8b74fe29a774651c854fb47aace15217fa92",
+    "version": "1.1"
   },
   "synthesis_output.SynthesisOutputContract": {
     "fields": {

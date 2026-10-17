@@ -488,6 +488,14 @@ in `tests/contract/value_set_snapshot.json`. Adding a value is a MINOR bump of
 the publishing contract, removing or renaming one is MAJOR. Regenerate with
 `uv run python scripts/contract_value_snapshot.py --write`.
 
+A contract written to disk declares its own version,
+`contract_version: str = Field(default="X.Y", pattern=r"^\d+\.\d+$", ...)`,
+and a writer that builds a new version of a file from an earlier one stamps
+the model's default rather than copying the old value forward.
+`tests/contract/test_written_contracts_versioned.py` finds every
+`write_json(..., x.model_dump())` call and fails when the model it writes has
+no such field (ADR-008 Decision 1).
+
 If two in-flight PRs both touch a contract, whichever lands second
 regenerates the snapshot.
 

@@ -11,6 +11,11 @@ and a co-dependency group's key, and the tie the move leaves (#811). The
 orchestrator writes the routings as ``post_schema_flag`` Moves
 (``move_ledger.apply_to_assignment``); these fields are optional, so a router
 output written before them still loads.
+
+Version History:
+- 1.0 (2026-10-17, #972): First versioned: ``RouterOutput``
+  (``router_output.json``) carries ``contract_version`` (ADR-008 Decision 1).
+  A file written before has none, and still loads.
 """
 
 from __future__ import annotations
@@ -68,6 +73,10 @@ class QueryRouting(BaseModel):
 
 class RouterOutput(BaseModel):
     """Output contract for the post-schema router."""
+
+    contract_version: str = Field(
+        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     job_id: str = Field(..., description="Job ID for traceability")
     routings: list[QueryRouting] = Field(

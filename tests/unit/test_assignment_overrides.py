@@ -371,6 +371,20 @@ class TestMarkCustomerApproved:
         persisted = store.read_json(f"{DB}/{JOB}/assignment/v1/assignment.json")
         assert persisted["status"] == AssignmentStatus.CUSTOMER_APPROVED.value
 
+    def test_the_rewritten_file_carries_the_current_contract_version(self) -> None:
+        """#972: an older file rewritten in place says today's version, not its old one."""
+        from src.agents.referee.assignment_overrides import mark_assignment_customer_approved
+        from src.contracts.assignment_models import Assignment
+
+        store = _store_with_two_ddb_queries()
+        key = f"{DB}/{JOB}/assignment/v1/assignment.json"
+        store.write_json(key, {**store.read_json(key), "contract_version": "1.14"})
+
+        mark_assignment_customer_approved(store, DB, JOB)
+
+        current = Assignment.model_fields["contract_version"].default
+        assert store.read_json(key)["contract_version"] == current
+
     def test_leaves_customer_modified_untouched(self) -> None:
         from src.agents.referee.assignment_overrides import mark_assignment_customer_approved
 

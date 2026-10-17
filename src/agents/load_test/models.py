@@ -1,16 +1,11 @@
 """Engine-agnostic models for load test orchestration."""
 
-from typing import Any
-
 from pydantic import BaseModel
 
+# Written to disk (seed-manifest.json), so it is a versioned contract (#972).
+from src.contracts.load_test_models import SeedManifest
 
-class SeedManifest(BaseModel):
-    """What was seeded. Engine-specific details live in resources dict."""
-
-    resources: dict[str, Any]
-    total_items: int
-    duration_seconds: float
+__all__ = ["RunResult", "SeedManifest"]
 
 
 class RunResult(BaseModel):

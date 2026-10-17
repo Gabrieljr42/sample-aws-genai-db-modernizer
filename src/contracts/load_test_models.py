@@ -1,4 +1,14 @@
-"""Pydantic models for the load testing stage."""
+"""Pydantic models for the load testing stage.
+
+Version History:
+- 1.0 (2026-10-17, #972): First versioned. ``LoadTestOutput``
+  (``results/summary.json``), ``PatternResult`` (``results/<query>.json``),
+  ``InfrastructureManifest`` (``infrastructure.json``) and ``SeedManifest``
+  (``seed-manifest.json``, moved here from ``src.agents.load_test.models``)
+  carry ``contract_version``; a file written before this has none.
+"""
+
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +52,10 @@ class LatencyPercentiles(BaseModel):
 class PatternResult(BaseModel):
     """Load test results for a single access pattern."""
 
+    contract_version: str = Field(
+        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
+
     query_id: str
     access_pattern_description: str
     original_query_text: str
@@ -71,8 +85,24 @@ class DeployedResource(BaseModel):
 class InfrastructureManifest(BaseModel):
     """Record of all infrastructure deployed for the test."""
 
+    contract_version: str = Field(
+        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
+
     resources: list[DeployedResource]
     tags: dict[str, str]
+
+
+class SeedManifest(BaseModel):
+    """What was seeded. Engine-specific details live in resources dict."""
+
+    contract_version: str = Field(
+        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
+
+    resources: dict[str, Any]
+    total_items: int
+    duration_seconds: float
 
 
 class SeedSummary(BaseModel):
@@ -87,6 +117,10 @@ class SeedSummary(BaseModel):
 
 class LoadTestOutput(BaseModel):
     """Output contract for the load test stage."""
+
+    contract_version: str = Field(
+        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     run_id: str
     version: int

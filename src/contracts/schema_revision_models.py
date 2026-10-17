@@ -6,6 +6,9 @@ changelog tracking, and schema version metadata for the revision loop feature.
 
 Version History:
 - 1.0 (2026-05-01): Initial version — schema design revision loop contracts
+- 1.1 (2026-10-17, #972): Added ``contract_version`` to ``SchemaRevisionRequest``, ``SchemaVersionMeta`` and ``SchemaConfirmation``,
+  the contracts written to disk (ADR-008 Decision 1). A file without it was
+  written at 1.0, and still loads.
 """
 
 from datetime import datetime
@@ -79,6 +82,10 @@ class NewPattern(BaseModel):
 
 class SchemaRevisionRequest(BaseModel):
     """Customer-provided revision request against a specific schema version."""
+
+    contract_version: str = Field(
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     base_version: int = Field(..., description="Schema version number this revision is based on")
     pattern_modifications: list[PatternModification] = Field(
@@ -161,6 +168,10 @@ class ChangelogEntry(BaseModel):
 class SchemaVersionMeta(BaseModel):
     """Metadata for a single schema version, tracking its origin and changes."""
 
+    contract_version: str = Field(
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
+
     version: int = Field(..., description="Monotonically increasing schema version number")
     base_version: int | None = Field(
         None,
@@ -189,6 +200,10 @@ class SchemaVersionMeta(BaseModel):
 
 class SchemaConfirmation(BaseModel):
     """Customer confirmation of a schema version for a specific engine."""
+
+    contract_version: str = Field(
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     confirmed_version: int = Field(
         ..., description="Schema version number the customer is confirming"

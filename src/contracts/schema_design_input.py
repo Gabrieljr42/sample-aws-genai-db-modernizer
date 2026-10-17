@@ -336,7 +336,14 @@ class SchemaDesignGroupsManifest(BaseModel):
     """Manifest produced by prepare_schema_input.py --split.
 
     Lives at: artifacts/{db}/{job}/schema-{engine}/v1/groups_manifest.json
+
+    Versioned on its own (ADR-008 Decision 1): 1.0 (2026-10-17, #972) added
+    ``contract_version``; a manifest written before has none, and still loads.
     """
+
+    contract_version: str = Field(
+        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     job_id: str
     database_name: str
