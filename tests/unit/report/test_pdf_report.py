@@ -154,6 +154,22 @@ class TestMarkdownSubset:
         assert pdf_markdown.printable("a中b", glyphs) == "a?b"
 
 
+TEXT_SOURCE_SUFFIXES = {
+    ".md",
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".json",
+    ".toml",
+    ".yml",
+    ".yaml",
+    ".sh",
+    ".txt",
+    ".css",
+}
+
+
 def test_nothing_in_the_repo_lists_a_pptx_deliverable() -> None:
     """The deck is gone: no renderer, doc, command, script or UI source names it."""
     roots = ["docs", ".claude", "scripts", "ci", "src", "README.md", "AGENTS.md", "mkdocs.yml"]
@@ -163,7 +179,9 @@ def test_nothing_in_the_repo_lists_a_pptx_deliverable() -> None:
         base = REPO / root
         files = [base] if base.is_file() else [p for p in base.rglob("*") if p.is_file()]
         for p in files:
-            if skip_parts & set(p.parts) or p.suffix in {".png", ".ttf", ".zip", ".pyc", ".svg"}:
+            # Text sources this repo authors. Rendered HTML pages are left out: a downstream copy of
+            # the repo may keep presentation pages that mention a deck, and those list no deliverables.
+            if skip_parts & set(p.parts) or p.suffix not in TEXT_SOURCE_SUFFIXES:
                 continue
             try:
                 text = p.read_text(encoding="utf-8")

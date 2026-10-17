@@ -263,8 +263,9 @@ def test_garbage_with_braces_is_still_a_parse_error(tmp_path: Path) -> None:
 
 # An oversized reply costs this process about 5x a normal one (writing and
 # reading 3.5 MB, then the length check); scanning it instead would cost
-# hundreds of times more.
-OVERSIZED_REPLY_MAX_COST_RATIO = 20.0
+# hundreds of times more. Busy shared CI runners have measured up to about 22x, so the
+# limit sits well above that and still far below the regression it guards.
+OVERSIZED_REPLY_MAX_COST_RATIO = 60.0
 
 
 def test_oversized_adversarial_reply_errors_fast(tmp_path: Path) -> None:
