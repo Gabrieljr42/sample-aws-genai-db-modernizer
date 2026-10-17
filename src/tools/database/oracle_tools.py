@@ -426,8 +426,8 @@ class OracleRemoteCollector:
                     "join_count": shape["join_count"],
                     "has_aggregations": shape["has_aggregations"],
                     "has_subqueries": shape["has_subqueries"],
-                    "has_text_search": _has_text_search(query_text),
-                    "text_search_type": _text_search_type(query_text),
+                    "has_text_search": shape["has_text_search"],
+                    "text_search_type": shape["text_search_type"],
                     "has_time_range_filter": _has_time_range_filter(query_text),
                     "avg_logical_reads": round(avg_logical, 2),
                     "avg_physical_reads": round(avg_physical, 2),
@@ -544,22 +544,6 @@ def _extract_sort_columns(sql: str) -> list[str] | None:
         return None
     cols = [c.strip().split()[0].lower() for c in m.group(1).split(",")]
     return [c for c in cols if c and c not in ("asc", "desc")] or None
-
-
-def _has_text_search(query_text: str) -> bool:
-    lower = query_text.lower()
-    return bool(
-        re.search(r"contains\s*\(", lower) or re.search(r"like\s+'%", lower) or "ctx_" in lower
-    )
-
-
-def _text_search_type(query_text: str) -> str | None:
-    lower = query_text.lower()
-    if re.search(r"contains\s*\(", lower) or "ctx_" in lower:
-        return "oracle_text"
-    if re.search(r"like\s+'%", lower):
-        return "like_wildcard"
-    return None
 
 
 def _has_time_range_filter(query_text: str) -> bool:

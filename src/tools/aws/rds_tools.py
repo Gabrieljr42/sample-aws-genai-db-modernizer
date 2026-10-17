@@ -269,6 +269,8 @@ def get_performance_insights_queries(
                     "join_count": shape["join_count"],
                     "has_aggregations": shape["has_aggregations"],
                     "has_subqueries": shape["has_subqueries"],
+                    "has_text_search": shape["has_text_search"],
+                    "text_search_type": shape["text_search_type"],
                     "wait_events": wait_events,  # Global wait events (not per-SQL for MySQL)
                 }
             )
@@ -523,6 +525,8 @@ def get_database_insights(
                     "join_count": shape["join_count"],
                     "has_aggregations": shape["has_aggregations"],
                     "has_subqueries": shape["has_subqueries"],
+                    "has_text_search": shape["has_text_search"],
+                    "text_search_type": shape["text_search_type"],
                 }
             )
         reader.log_fallbacks()

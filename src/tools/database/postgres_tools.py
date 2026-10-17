@@ -314,8 +314,8 @@ class PostgreSQLRemoteCollector:
                     "join_count": shape["join_count"],
                     "has_aggregations": shape["has_aggregations"],
                     "has_subqueries": shape["has_subqueries"],
-                    "has_text_search": _has_text_search(query_text),
-                    "text_search_type": _text_search_type(query_text),
+                    "has_text_search": shape["has_text_search"],
+                    "text_search_type": shape["text_search_type"],
                     "has_time_range_filter": _has_time_range_filter(query_text),
                     # PostgreSQL-specific
                     "cache_hit_ratio_pct": round(shared_hit / max(total_blks, 1) * 100, 2),
@@ -423,31 +423,6 @@ def _estimate_rows_p95(avg_rows: float, avg_ms: float, p95_ms: float) -> float |
     if not avg_ms or avg_ms == 0 or not p95_ms:
         return None
     return round(avg_rows * (p95_ms / avg_ms), 1)
-
-
-def _has_text_search(query_text: str) -> bool:
-    if re.search(r"\b(to_tsvector|to_tsquery|plainto_tsquery|@@)\b", query_text, re.I):
-        return True
-    if re.search(r"\s%\s", query_text):
-        return True
-    if re.search(r"\b[I]?LIKE\s+'%", query_text, re.I):
-        return True
-    # pg_stat_statements parameterizes: LIKE $1
-    if re.search(r"\b[I]?LIKE\s+\$\d+", query_text, re.I):
-        return True
-    return False
-
-
-def _text_search_type(query_text: str) -> str | None:
-    if re.search(r"\b(to_tsvector|to_tsquery|@@)\b", query_text, re.I):
-        return "tsvector"
-    if re.search(r"\s%\s", query_text):
-        return "trigram"
-    if re.search(r"\b[I]?LIKE\s+'%", query_text, re.I):
-        return "like_wildcard"
-    if re.search(r"\b[I]?LIKE\s+\$\d+", query_text, re.I):
-        return "like_wildcard"
-    return None
 
 
 def _has_time_range_filter(query_text: str) -> bool:

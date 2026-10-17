@@ -6,7 +6,10 @@ The offline parser reads every query's table references and its
 (``mysql_tools``, also used by ``mariadb_tools``, ``postgres_tools``,
 ``sqlserver_tools``, ``oracle_tools`` and the two ``rds_tools`` call sites)
 read them here, from the same facade in their own engine's dialect, so a live
-and an offline collection of the same query text agree. The facade's regex
+and an offline collection of the same query text agree. Their ``has_text_search``
+and ``text_search_type`` are the ``text_search`` query fact and its parts
+(:mod:`src.tools.sql.query_facts`, #929), the definition triage and the cache
+overlay read next to them. The facade's regex
 fallback is the only regex scan left; a collection logs how many of its
 queries used it, as the offline parser does.
 
@@ -33,6 +36,7 @@ from typing import Any
 
 from src.tools.sql import facade
 from src.tools.sql.facade import SqlReading, TableRef, TableReferences
+from src.tools.sql.query_facts import query_facts
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +102,8 @@ def _live_name(ref: TableRef, source_engine: str) -> str:
 class LiveQueryReader:
     """Reads one live collection's query texts through the facade.
 
-    ``fields`` returns the query-text keys of one query pattern; ``log_fallbacks``
+    ``fields`` returns the query-text keys of one query pattern (the text-search ones
+    included, #929); ``log_fallbacks``
     logs, once per collection, how many queries used the regex fallback. A
     facade error logs its stack trace for the first query it hits only.
     """
@@ -117,12 +122,15 @@ class LiveQueryReader:
         if reading.tables.fallback_reason:
             self._fallbacks[reading.tables.fallback_reason] += 1
         facts = reading.facts
+        searches = query_facts(sql, self.source_engine)
         return {
             "tables_accessed": table_names(reading.tables, self.source_engine) or list(self.empty),
             "has_joins": facts.has_joins,
             "join_count": facts.join_count,
             "has_aggregations": facts.has_aggregation,
             "has_subqueries": facts.has_subquery,
+            "has_text_search": searches.text_search,
+            "text_search_type": searches.text_search_type(),
         }
 
     def log_fallbacks(self) -> None:
