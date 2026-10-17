@@ -2091,3 +2091,103 @@ class TestDistinctItemsOfOneRow:
             read = _pattern(merged, "GetItem")
             assert "STATS" not in read["key_condition"], order
             assert merge_failures(merged), order
+
+
+# ---------------------------------------------------------------------------
+# Merged tables whose names differ only in letter case (#868)
+# ---------------------------------------------------------------------------
+
+TERMS = "wordpress.wp_terms"
+
+
+def _terms(name: str, pk_type: str) -> dict:
+    t = _single(name, TERMS, "term_id", attrs=[_attr("term_id", TERMS, type_=pk_type)])
+    t["partition_key"] = _key("term_id", pk_type)
+    return t
+
+
+def _terms_drafts() -> list[dict]:
+    """Two groups name a numeric-keyed table Terms, one a text-keyed table terms: they
+    conflict (key types differ), so they stay two tables."""
+    return [
+        _draft(
+            [_terms("Terms", "N")],
+            [_ap("DDB-AP-1", "Terms", "GetItem", "PK=term_id", source=TERMS)],
+        ),
+        _draft([_terms("Terms", "N")], []),
+        _draft(
+            [_terms("terms", "S")],
+            [_ap("DDB-AP-1", "terms", "Query", "PK=term_id", source=TERMS)],
+        ),
+    ]
+
+
+class TestTableNamesThatDifferOnlyInCase:
+    def test_conflicting_tables_get_names_that_differ_beyond_case(self):
+        for order, merged in _every_order(_terms_drafts()):
+            names = [t["table_name"] for t in merged["table_definitions"]]
+            assert len(names) == 2, order
+            assert len({n.casefold() for n in names}) == 2, (order, names)
+            assert "Terms" in names, order  # the name two groups use keeps it
+            tables = _by_name(merged)
+            get, query = _pattern(merged, "GetItem"), _pattern(merged, "Query")
+            assert tables[get["table_name"]]["partition_key"]["attribute_type"] == "N", order
+            assert tables[query["table_name"]]["partition_key"]["attribute_type"] == "S", order
+            _assert_every_pattern_is_served(merged)
+
+    def test_the_resolution_is_the_same_in_every_order(self):
+        results = {
+            json.dumps(sorted(t["table_name"] for t in merged["table_definitions"]))
+            for _, merged in _every_order(_terms_drafts())
+        }
+        assert len(results) == 1, results
+
+    def test_the_rename_is_explained_in_the_merge_notes(self):
+        notes: list[str] = []
+        merged = merge_group_drafts(_terms_drafts(), "dynamodb", notes=notes)
+
+        [renamed] = [
+            t["table_name"] for t in merged["table_definitions"] if t["table_name"] != "Terms"
+        ]
+        [note] = [n for n in notes if "letter case" in n]
+        assert "terms" in note and "Terms" in note and renamed in note
+
+    def test_three_spellings_get_three_distinct_names(self):
+        drafts = [
+            _draft([_terms("Terms", "N")], []),
+            _draft([_terms("terms", "S")], []),
+            _draft([_terms("TERMS", "S")], []),
+        ]
+        # terms and TERMS are compatible (same keys and types): one table. Terms conflicts.
+        for order, merged in _every_order(drafts):
+            names = [t["table_name"] for t in merged["table_definitions"]]
+            assert len(names) == 2, (order, names)
+            assert len({n.casefold() for n in names}) == 2, (order, names)
+
+    def test_compatible_spellings_still_merge_into_one_table(self):
+        drafts = [_draft([_terms("Terms", "N")], []), _draft([_terms("terms", "N")], [])]
+
+        merged = merge_group_drafts(drafts, "dynamodb")
+
+        assert len(merged["table_definitions"]) == 1
+        assert merge_failures(merged) == []
+
+    def test_the_note_reaches_the_design_trace(self, tmp_path):
+        from src.agents.schema_design.group_merger import merge_schema_groups
+        from src.storage.local_store import LocalArtifactStore
+
+        store = LocalArtifactStore(str(tmp_path))
+        base = "shop/job-1/schema-dynamodb/v1"
+        drafts = _terms_drafts()
+        store.write_json("shop/job-1/collector/output.json", {"database_schema": {"tables": []}})
+        store.write_json(
+            f"{base}/groups_manifest.json",
+            {"groups": [{"group_index": i} for i in range(len(drafts))]},
+        )
+        for i, d in enumerate(drafts):
+            store.write_json(f"{base}/schema_draft_group_{i}.json", d)
+
+        merge_schema_groups("job-1", "shop", "dynamodb", store)
+
+        trace = store.read_json(f"{base}/design_trace.json")
+        assert any("letter case" in n for n in trace["merge_reconciliation"])
