@@ -8,12 +8,14 @@ performance/characteristics blocks round-tripped through their JSON columns.
 
 from __future__ import annotations
 
+import pytest
+
 from src.graph.populators import (
     populate_from_assignment,
     populate_from_collector,
     populate_from_schema_design,
 )
-from src.graph.queries import query_journey, query_journeys
+from src.graph.queries import query_count, query_journey, query_journeys, query_journeys_page
 
 
 def _rich_collector() -> dict:
@@ -182,3 +184,83 @@ class TestDesignEngineFollowsAssignment:
         populate_from_schema_design(_design("opensearch", "OS"), "opensearch", 1, graph_store)
         populate_from_schema_design(_design("dynamodb", "DDB"), "dynamodb", 1, graph_store)
         assert query_journey(graph_store, "q1")["design"]["engine"] == "dynamodb"
+
+
+def _many_queries(n: int) -> dict:
+    """``n`` collector patterns whose ids sort in a known order (q000, q001, ...)."""
+    return {
+        "queries": {
+            "query_patterns": [
+                {
+                    "query_id": f"q{i:03d}",
+                    "query_text": f"SELECT * FROM t{i % 3} WHERE id = ?",
+                    "query_type": "SELECT",
+                    "tables_accessed": [f"t{i % 3}", "shared"] if i % 2 else [f"t{i % 3}"],
+                    "calls_per_second": float(i),
+                }
+                for i in reversed(range(n))  # inserted out of order on purpose
+            ]
+        }
+    }
+
+
+class TestPagedJourneys:
+    """#998: a journey page is read with SKIP/LIMIT in the graph query itself."""
+
+    def test_pages_concatenate_to_the_full_list(self, graph_store):
+        populate_from_collector(_many_queries(23), graph_store)
+        full = query_journeys(graph_store)
+        pages = [query_journeys_page(graph_store, skip, 5) for skip in range(0, 25, 5)]
+        assert [len(p) for p in pages] == [5, 5, 5, 5, 3]
+        assert [j for page in pages for j in page] == full
+        assert [j["query_id"] for j in full] == [f"q{i:03d}" for i in range(23)]
+
+    def test_page_keeps_every_table_of_a_query(self, graph_store):
+        # The page limit applies to queries, not to the READS_FROM rows they expand to.
+        populate_from_collector(_many_queries(4), graph_store)
+        page = query_journeys_page(graph_store, 0, 2)
+        assert [j["query_id"] for j in page] == ["q000", "q001"]
+        assert page[1]["source"]["tables_accessed"] == ["shared", "t1"]
+
+    def test_page_past_the_end_is_empty(self, graph_store):
+        populate_from_collector(_many_queries(3), graph_store)
+        assert query_journeys_page(graph_store, 3, 10) == []
+        assert query_journeys_page(graph_store, 100, 10) == []
+
+    def test_count_matches_the_queries(self, graph_store):
+        assert query_count(graph_store) == 0
+        assert query_journeys(graph_store) == []
+        populate_from_collector(_many_queries(7), graph_store)
+        assert query_count(graph_store) == 7
+
+    def test_full_list_reads_in_bounded_batches(self, graph_store, monkeypatch):
+        # query_journeys streams the graph page by page instead of in one statement.
+        from src.graph import queries as graph_queries
+
+        populate_from_collector(_many_queries(11), graph_store)
+        seen: list[tuple[int, int]] = []
+        real = graph_queries.query_journeys_page
+
+        def _spy(store, skip, limit):
+            seen.append((skip, limit))
+            return real(store, skip, limit)
+
+        monkeypatch.setattr(graph_queries, "query_journeys_page", _spy)
+        monkeypatch.setattr(graph_queries, "JOURNEY_BATCH_SIZE", 4)
+        assert len(graph_queries.query_journeys(graph_store)) == 11
+        assert seen == [(0, 4), (4, 4), (8, 4)]
+
+    def test_pages_differ_on_one_reused_connection(self, graph_store):
+        # graph_store is a read-write handle: every statement runs on one
+        # connection. The engine binds a SKIP/LIMIT parameter once per
+        # connection, so the page must not depend on parameters.
+        populate_from_collector(_many_queries(6), graph_store)
+        first = [j["query_id"] for j in query_journeys_page(graph_store, 0, 2)]
+        second = [j["query_id"] for j in query_journeys_page(graph_store, 2, 2)]
+        assert first == ["q000", "q001"]
+        assert second == ["q002", "q003"]
+
+    @pytest.mark.parametrize(("skip", "limit"), [(-1, 5), (0, 0), (0, -3)])
+    def test_invalid_page_is_refused(self, graph_store, skip, limit):
+        with pytest.raises(ValueError):
+            query_journeys_page(graph_store, skip, limit)

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, cast
 
 import ladybug as lb
@@ -15,9 +17,66 @@ logger = logging.getLogger(__name__)
 # Bounds applied to API reads (read-only handles opened by GraphStoreCache).
 READ_QUERY_TIMEOUT_MS = 10_000
 MAX_RESULT_ROWS = 1_000
-# Buffer pool for read-only handles. Assessment graphs are a few MB; this
-# bounds the memory one handle can use for pages and intermediate results.
-READ_BUFFER_POOL_BYTES = 256 * 1024 * 1024
+
+# Memory limits of a read-only handle (#998), each overridable from the
+# environment. The buffer pool is shared by every statement on the handle and
+# holds both the file's pages and each running statement's intermediate
+# results. The engine runs a statement on every core unless told otherwise,
+# and each of those threads takes its own buffers, so a statement's memory
+# grows with the core count: capping the threads per statement and the
+# statements running at once keeps the total inside the pool on any machine.
+ENV_BUFFER_POOL_MB = "MODERNIZER_GRAPH_BUFFER_POOL_MB"
+ENV_QUERY_THREADS = "MODERNIZER_GRAPH_QUERY_THREADS"
+ENV_MAX_CONCURRENT_READS = "MODERNIZER_GRAPH_MAX_CONCURRENT_READS"
+DEFAULT_READ_BUFFER_POOL_MB = 256
+DEFAULT_READ_QUERY_THREADS = 2
+DEFAULT_MAX_CONCURRENT_READS = 4
+# How long a statement waits for one of the handle's read slots before the
+# read is reported as busy (GraphBusyError) instead of queueing forever.
+READ_SLOT_WAIT_S = 30.0
+
+
+class GraphBusyError(RuntimeError):
+    """Every read slot of the handle stayed taken for ``READ_SLOT_WAIT_S``."""
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r is not an integer; using the default %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("%s=%d is not positive; using the default %d", name, value, default)
+        return default
+    return value
+
+
+@dataclass(frozen=True)
+class ReadLimits:
+    """The buffer pool, engine threads per statement and concurrent statements
+    of a read-only handle."""
+
+    buffer_pool_bytes: int
+    query_threads: int
+    max_concurrent_reads: int
+
+    @classmethod
+    def from_env(cls) -> ReadLimits:
+        """The configured limits; an unset, non-integer or non-positive value
+        falls back to its default."""
+        pool_mb = _env_positive_int(ENV_BUFFER_POOL_MB, DEFAULT_READ_BUFFER_POOL_MB)
+        return cls(
+            buffer_pool_bytes=pool_mb * 1024 * 1024,
+            query_threads=_env_positive_int(ENV_QUERY_THREADS, DEFAULT_READ_QUERY_THREADS),
+            max_concurrent_reads=_env_positive_int(
+                ENV_MAX_CONCURRENT_READS, DEFAULT_MAX_CONCURRENT_READS
+            ),
+        )
+
 
 # Guards the one-time selection of ladybug's native backend (see
 # _ensure_backend_loaded below).
@@ -64,7 +123,10 @@ class GraphStore:
     A read-write handle runs every statement on one connection, serialised by
     a lock. A read-only handle opens a short-lived connection per statement, so
     concurrent reads from several threads do not wait on each other; each of
-    those connections carries ``query_timeout_ms``.
+    those connections carries ``query_timeout_ms``. A read-only handle is
+    bounded by its ``ReadLimits``: at most ``max_concurrent_reads`` statements
+    run at once (others wait for a slot), each on ``query_threads`` engine
+    threads.
     """
 
     def __init__(
@@ -74,6 +136,7 @@ class GraphStore:
         read_only: bool = False,
         query_timeout_ms: int | None = None,
         buffer_pool_size: int = 0,
+        read_limits: ReadLimits | None = None,
     ):
         """Open the database at db_path.
 
@@ -82,10 +145,21 @@ class GraphStore:
         schema writes at the engine level. ``query_timeout_ms`` interrupts any
         statement that runs longer than the given number of milliseconds.
         ``buffer_pool_size`` (bytes, 0 = engine default) caps the page cache.
+        A read-only handle uses ``read_limits`` (``ReadLimits.from_env()``
+        when not given); its buffer pool applies when ``buffer_pool_size`` is
+        0. A read-write handle has no read limits.
         """
         self.path = db_path
         self.read_only = read_only
         self._timeout_ms = query_timeout_ms
+        self.read_limits = (read_limits or ReadLimits.from_env()) if read_only else None
+        if self.read_limits is not None and not buffer_pool_size:
+            buffer_pool_size = self.read_limits.buffer_pool_bytes
+        self._read_slots = (
+            threading.BoundedSemaphore(self.read_limits.max_concurrent_reads)
+            if self.read_limits is not None
+            else None
+        )
         _ensure_backend_loaded()
         self._db = lb.Database(db_path, read_only=read_only, buffer_pool_size=buffer_pool_size)
         self._lock = threading.Lock()
@@ -94,7 +168,8 @@ class GraphStore:
             self._conn = self._new_connection()
 
     def _new_connection(self) -> lb.Connection:
-        conn = lb.Connection(self._db)
+        threads = self.read_limits.query_threads if self.read_limits is not None else 0
+        conn = lb.Connection(self._db, num_threads=threads)
         if self._timeout_ms is not None:
             conn.set_query_timeout(self._timeout_ms)
         return conn
@@ -105,11 +180,18 @@ class GraphStore:
             with self._lock:
                 yield self._conn
             return
-        conn = self._new_connection()
+        slots = self._read_slots
+        if slots is not None and not slots.acquire(timeout=READ_SLOT_WAIT_S):
+            raise GraphBusyError(f"no graph read slot freed within {READ_SLOT_WAIT_S:g}s")
         try:
-            yield conn
+            conn = self._new_connection()
+            try:
+                yield conn
+            finally:
+                conn.close()
         finally:
-            conn.close()
+            if slots is not None:
+                slots.release()
 
     @staticmethod
     def _execute_single(

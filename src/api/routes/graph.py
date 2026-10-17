@@ -34,7 +34,7 @@ from src.graph.persistence import GraphPersistence
 from src.graph.populators import rebuild_graph
 from src.graph.raw_query_worker import RawQueryError, run_raw_query
 from src.graph.schema import GRAPH_SCHEMA_REVISION, initialize_schema
-from src.graph.store import MAX_RESULT_ROWS, READ_QUERY_TIMEOUT_MS, GraphStore
+from src.graph.store import MAX_RESULT_ROWS, READ_QUERY_TIMEOUT_MS, GraphBusyError, GraphStore
 from src.storage.artifact_store import ArtifactStore
 from src.storage.assignment_versioning import resolve_effective_assignment_version
 
@@ -58,6 +58,9 @@ MAX_CONCURRENT_RAW_QUERIES = 2
 _raw_query_slots = threading.BoundedSemaphore(MAX_CONCURRENT_RAW_QUERIES)
 TIMEOUT_DETAIL = "The graph query did not finish within the time limit."
 MEMORY_DETAIL = "The graph query needed more memory than is available; retry shortly."
+BUSY_DETAIL = "Too many graph reads are running; retry shortly."
+# Both are transient: the client may retry after this many seconds.
+RETRY_AFTER_S = "1"
 
 
 # The job's effective assignment version is cached this long (seconds) per job,
@@ -247,12 +250,23 @@ def _prepare_graph_file(db_name: str, job_id: str, path: str) -> None:
 
 
 def graph_error_to_http(exc: Exception) -> HTTPException | None:
-    """Map an engine timeout or out-of-memory error to a neutral HTTP error."""
+    """Map an engine timeout, out-of-memory or busy error to a neutral HTTP error.
+
+    Out of memory and busy are transient (other reads finish and free the
+    buffer pool or a read slot), so they answer 503 with ``Retry-After``.
+    """
+    if isinstance(exc, GraphBusyError):
+        return HTTPException(
+            status_code=503, detail=BUSY_DETAIL, headers={"Retry-After": RETRY_AFTER_S}
+        )
     message = str(exc)
     if "Interrupted" in message:
         return HTTPException(status_code=504, detail=TIMEOUT_DETAIL)
     if "Buffer manager exception" in message:
-        return HTTPException(status_code=503, detail=MEMORY_DETAIL)
+        logger.warning("graph read ran out of buffer pool memory: %s", message)
+        return HTTPException(
+            status_code=503, detail=MEMORY_DETAIL, headers={"Retry-After": RETRY_AFTER_S}
+        )
     return None
 
 

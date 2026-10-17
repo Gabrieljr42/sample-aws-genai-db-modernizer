@@ -6,6 +6,7 @@ No FastAPI/HTTP here — handlers in src/api/routes/graph.py call these.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from src.api.models.graph_responses import (
@@ -335,14 +336,59 @@ _JOURNEY_MATCH = (
 )
 
 
+# Queries read per statement when listing every journey (query_journeys).
+JOURNEY_BATCH_SIZE = 200
+
+
+def query_count(store: GraphStore) -> int:
+    """The number of Query nodes: the journeys the list pages over."""
+    rows = store.query("MATCH (q:Query) RETURN count(q) AS c")
+    return int(rows[0]["c"]) if rows else 0
+
+
+def query_journeys_page(store: GraphStore, skip: int, limit: int) -> list[dict]:
+    """The journeys of ``limit`` queries in id order, after the first ``skip``.
+
+    The page is cut in the graph query itself, before the optional matches and
+    the aggregation, so the engine's work and memory are bounded by the page,
+    not by the job's size (#998). Rows come in the same order as the full
+    list: by query id, then assigned engine.
+    """
+    skip, limit = int(skip), int(limit)
+    if skip < 0 or limit < 1:
+        raise ValueError(f"invalid journey page: skip={skip}, limit={limit}")
+    # SKIP/LIMIT are integer literals, not parameters: the engine binds a
+    # SKIP/LIMIT parameter once per connection, so a reused connection (the
+    # read-write handle) would return the first page for every later one.
+    page_clause = f"MATCH (q:Query) WITH q ORDER BY q.id SKIP {skip} LIMIT {limit} "
+    rows = store.query(
+        _JOURNEY_MATCH.replace("MATCH (q:Query) ", page_clause)
+        + " ORDER BY query_id, assigned_engine"
+    )
+    return [_journey_from_row(r) for r in rows]
+
+
+def iter_query_journeys(store: GraphStore, batch_size: int | None = None) -> Iterator[dict]:
+    """Every query's journey, read from the graph ``batch_size`` queries at a time."""
+    size = batch_size or JOURNEY_BATCH_SIZE
+    skip = 0
+    while True:
+        page = query_journeys_page(store, skip, size)
+        yield from page
+        # A short batch is the last one (a query can span several rows).
+        if len({j["query_id"] for j in page}) < size:
+            return
+        skip += size
+
+
 def query_journeys(store: GraphStore) -> list[dict]:
     """Return every query's journey read-model, sourced from the graph.
 
     The same shape the per-query JSON artifacts held, so the results page's
-    per-query drill-down reads either. One graph query instead of N artifact reads.
+    per-query drill-down reads either. Read in batches (``iter_query_journeys``)
+    so no single statement aggregates the whole job.
     """
-    rows = store.query(_JOURNEY_MATCH + " ORDER BY query_id, assigned_engine")
-    return [_journey_from_row(r) for r in rows]
+    return list(iter_query_journeys(store))
 
 
 def query_journey(store: GraphStore, query_id: str) -> dict | None:
