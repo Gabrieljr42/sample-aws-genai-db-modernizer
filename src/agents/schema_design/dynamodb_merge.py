@@ -47,7 +47,11 @@ Merge rule
    (table, GSI, operation), and a trade-off records the merge. Tables are
    taken in :func:`_table_order`: the design the most other groups' tables
    can merge with comes first, so it is the one that survives (with its name)
-   and the one a disagreeing design is reported against.
+   and the one a disagreeing design is reported against. Merged tables never
+   get names that differ only in letter case (``Terms`` and ``terms``, #868):
+   the table more groups shaped keeps the name, the other takes another name
+   its groups use or ``<name>_<key attributes>``, and ``merge_reconciliation``
+   in the design trace says why.
 3. **True conflicts fail validation** (``validation_failures`` entries with
    prefix :data:`MERGE_FAILURE_PREFIX`, ``validation_passed=false``): one table
    name used for two different designs that rule 1a could not reconcile, the
@@ -464,12 +468,15 @@ class _Member:
     patterns: int = 0
 
 
-def _voted_name(members: list[_Member], taken: set[str]) -> str | None:
+def _voted_name(
+    members: list[_Member], taken: set[str], folded: frozenset[str] = frozenset()
+) -> str | None:
     """The table name the most groups use (case-insensitively), not in ``taken``.
 
     Then the spelling most of those groups use. When groups are tied, the name
     more access patterns use; an exact tie goes to the alphabetically first
-    name, ignoring case.
+    name, ignoring case. A name whose case-folded form is in ``folded`` (a
+    merged table already has it in some letter case) is skipped (#868).
     """
     groups: dict[str, dict[str, set[int]]] = {}
     patterns: dict[str, int] = {}
@@ -483,7 +490,9 @@ def _voted_name(members: list[_Member], taken: set[str]) -> str | None:
         used = len(set().union(*spellings.values()))
         return -used, -sum(patterns[n] for n in spellings), folded
 
-    for _, spellings in sorted(groups.items(), key=rank):
+    for folded_name, spellings in sorted(groups.items(), key=rank):
+        if folded_name in folded:
+            continue
         by_spelling = sorted(spellings.items(), key=lambda s: (-len(s[1]), -patterns[s[0]], s[0]))
         for name, _ in by_spelling:
             if name not in taken:
@@ -491,12 +500,35 @@ def _voted_name(members: list[_Member], taken: set[str]) -> str | None:
     return None
 
 
-def reconcile_tables(drafts: list[dict], group_indices: list[int]) -> TableReconciliation:
+def _case_distinct_name(name: str, table: dict, taken_folded: set[str]) -> str:
+    """``name`` with a suffix naming ``table``'s keys, so no merged table shares it in any case.
+
+    ``<name>_<key attributes>`` (the GSI rename convention), then ``2``, ``3``
+    ... when that is taken too; always within DynamoDB's name limit.
+    """
+    from src.agents.schema_design.dynamodb_key_reconcile import _pascal, fit_name
+
+    pk, sk = _key_schema(table)
+    suffix = "".join(_pascal(k[0]) for k in (pk, sk) if k) or "Table"
+    wanted = f"{name}_{suffix}"
+    final, n = fit_name(wanted), 2
+    while final.casefold() in taken_folded:
+        final, n = fit_name(f"{wanted}{n}"), n + 1
+    return final
+
+
+def reconcile_tables(
+    drafts: list[dict], group_indices: list[int], notes: list[str] | None = None
+) -> TableReconciliation:
     """Merge compatible tables across ``drafts`` (rule 2) and flag name conflicts.
 
     Tables are taken in :func:`_table_order`; each merged table then takes the
-    name most of its groups use (:func:`_voted_name`). The merged tables are
-    listed in the drafts' order (the first table that went into each).
+    name most of its groups use (:func:`_voted_name`). Two merged tables never
+    get names that differ only in letter case (#868): the table more groups
+    shaped keeps the name, the other takes another of its groups' names or
+    ``<name>_<key attributes>``, and a note for ``notes`` (the design trace)
+    says why. The merged tables are listed in the drafts' order (the first
+    table that went into each).
     """
     homes: list[_Home] = []
     members: list[list[_Member]] = []
@@ -566,10 +598,27 @@ def reconcile_tables(drafts: list[dict], group_indices: list[int]) -> TableRecon
 
     # Name every merged table by vote; never give two merged tables one name.
     order = sorted(range(len(homes)), key=lambda i: (-len(members[i]), first_seen[i]))
+    finals: dict[str, int] = {}  # case-folded final name -> home
     for i in order:
         others = {m.name for j in range(len(homes)) if j != i for m in members[j]}
         home = homes[i]
-        final = _voted_name(members[i], others) or str(home.table.get("table_name"))
+        plain = _voted_name(members[i], others) or str(home.table.get("table_name"))
+        final = _voted_name(members[i], others, frozenset(finals))
+        if final is None and plain.casefold() not in finals:
+            final = plain
+        if final is None:
+            taken = set(finals) | {n.casefold() for n in others}
+            final = _case_distinct_name(plain, home.table, taken)
+        if final != plain and notes is not None and plain.casefold() in finals:
+            kept = homes[finals[plain.casefold()]]
+            reason = _merge_conflict(kept.table, home.table) or "they hold different rows"
+            notes.append(
+                f"{final}: table {plain} ({_groups_label(home.groups)}) renamed {final}; "
+                f"table {kept.table.get('table_name')} ({_groups_label(kept.groups)}) has "
+                f"the same name in other letter case and a different design ({reason}), "
+                "so the merge keeps two tables with names that differ beyond letter case"
+            )
+        finals[final.casefold()] = i
         home.table = {**home.table, "table_name": final}
         for pos, name in [(m.pos, m.name) for m in members[i]] + dropped_into[i]:
             if name and name != final:
@@ -923,7 +972,7 @@ def prepare_drafts(
     renumbered, key_trade_offs = reconcile_shared_tables(
         renumbered, group_indices, unique_keys=unique_keys, notes=notes, column_types=column_types
     )
-    reconciliation = reconcile_tables(renumbered, group_indices)
+    reconciliation = reconcile_tables(renumbered, group_indices, notes)
     reconciliation.trade_offs[:0] = key_trade_offs
     prepared = [
         apply_renames(d, r) for d, r in zip(renumbered, reconciliation.renames, strict=True)
