@@ -41,7 +41,7 @@ from src.atx_orchestrator.runtime.job_plan import (
     register_steps_from_server,
 )
 from src.contracts.phase_models import Phase, PhaseStatus
-from src.shared.contract_versioning import load_contract
+from src.shared.contract_versioning import load_contract, stamp_artifact_version
 
 logger = logging.getLogger(__name__)
 
@@ -2159,7 +2159,9 @@ def _copy_schema_forward(
     output = store.read_json(src)  # type: ignore[attr-defined]
     if isinstance(output, dict):
         output["assignment_version"] = new_version
-    store.write_json(f"{base_new}/schema_output.json", output)  # type: ignore[attr-defined]
+    new_key = f"{base_new}/schema_output.json"
+    # A patched copy, so today's version, not the one copied (#1018).
+    store.write_json(new_key, stamp_artifact_version(new_key, output))  # type: ignore[attr-defined]
     trace_src = f"{base_prev}/design_trace.json"
     if store.exists(trace_src):  # type: ignore[attr-defined]
         store.write_json(  # type: ignore[attr-defined]

@@ -134,7 +134,11 @@ def main() -> None:
 
     # Detect format: contract (processed) vs raw (collection script output)
     from src.contracts.collector_output import CollectorOutputContract
-    from src.shared.contract_versioning import ContractVersionError, carries_contract
+    from src.shared.contract_versioning import (
+        ContractVersionError,
+        carries_contract,
+        stamp_artifact_version,
+    )
 
     # A stored collector output carries a contract_version (ADR-008 Decision 4: same
     # MAJOR only); a raw collection carries none.
@@ -269,7 +273,8 @@ def main() -> None:
 
     # Write collector output
     collector_path = f"{db_name}/{job_id}/collector/output.json"
-    store.write_json(collector_path, collector_data)
+    # An uploaded collector output may be at an older MINOR: written at today's (#1018).
+    store.write_json(collector_path, stamp_artifact_version(collector_path, collector_data))
 
     tables = collector_data.get("database_schema", {}).get("tables", [])
     queries = collector_data.get("queries", {}).get("query_patterns", [])

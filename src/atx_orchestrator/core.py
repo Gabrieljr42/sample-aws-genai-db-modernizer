@@ -325,7 +325,7 @@ def ingest_offline_collection(store, job_id: str, database_name: str, raw_input:
     )
     from src.contracts.collector_input import CollectorInput
     from src.contracts.collector_output import CollectorOutputContract
-    from src.shared.contract_versioning import carries_contract
+    from src.shared.contract_versioning import carries_contract, stamp_artifact_version
     from src.tools.database.offline_parser import parse_offline_collection
     from src.tools.validation.ingestion_limits import check_collection_counts
 
@@ -392,7 +392,8 @@ def ingest_offline_collection(store, job_id: str, database_name: str, raw_input:
         )
 
     collector_key = f"{database_name}/{job_id}/collector/output.json"
-    store.write_json(collector_key, collector_data)
+    # An uploaded collector output may be at an older MINOR: written at today's (#1018).
+    store.write_json(collector_key, stamp_artifact_version(collector_key, collector_data))
 
     return collector_data
 

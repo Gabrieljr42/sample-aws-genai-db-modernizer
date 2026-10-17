@@ -1,6 +1,5 @@
 """Analysis agent handler — dispatches to target-specific analysis agents."""
 
-import json
 from datetime import UTC, datetime
 
 from src.contracts.analysis_output import (
@@ -53,7 +52,6 @@ def run_analysis(
             result, decision_trace, mermaid_diagram = analyze_for_dynamodb(
                 analysis_input, llm_mode=llm_mode
             )
-            output_json = result.model_dump_json(indent=2)
 
             # Log key results
             recs = result.table_recommendations
@@ -95,7 +93,6 @@ def run_analysis(
             result, decision_trace, mermaid_diagram = analyze_for_documentdb(
                 analysis_input, llm_mode=llm_mode
             )
-            output_json = result.model_dump_json(indent=2)
 
             recs = result.table_recommendations
             patterns = result.workload_analysis.patterns_detected
@@ -129,7 +126,6 @@ def run_analysis(
                 target_database=TargetDatabase(agent_type),
             )
             result, decision_trace, _ = analyze_for_opensearch(analysis_input)
-            output_json = result.model_dump_json(indent=2)
 
             # Write decision trace as separate artifact
             trace_key = f"{database_name}/{job_id}/analysis-{agent_type}/decision-trace.json"
@@ -148,7 +144,6 @@ def run_analysis(
                 target_database=TargetDatabase(agent_type),
             )
             result, decision_trace, _ = analyze_for_elasticache(analysis_input)
-            output_json = result.model_dump_json(indent=2)
 
             recs = result.table_recommendations
             patterns = result.workload_analysis.patterns_detected
@@ -179,7 +174,6 @@ def run_analysis(
                 target_database=TargetDatabase(agent_type),
             )
             result, decision_trace, _ = analyze_for_aurora_pg(analysis_input, llm_mode=llm_mode)
-            output_json = result.model_dump_json(indent=2)
 
             recs = result.table_recommendations
             patterns = result.workload_analysis.patterns_detected
@@ -210,7 +204,6 @@ def run_analysis(
                 target_database=TargetDatabase(agent_type),
             )
             result, decision_trace, _ = analyze_for_aurora_mysql(analysis_input, llm_mode=llm_mode)
-            output_json = result.model_dump_json(indent=2)
 
             recs = result.table_recommendations
             patterns = result.workload_analysis.patterns_detected
@@ -252,9 +245,8 @@ def run_analysis(
                     pricing_assumptions=["Placeholder — agent not yet implemented"],
                 ),
             )
-            output_json = result.model_dump_json(indent=2)
 
     key = f"{database_name}/{job_id}/analysis-{agent_type}/analysis.json"
-    store.write_json(key, json.loads(output_json))
+    store.write_json(key, result.model_dump(mode="json"))
     elapsed = time.time() - start_time
     print(f"[analysis/{agent_type}] ✅ Complete in {elapsed:.1f}s — output written")

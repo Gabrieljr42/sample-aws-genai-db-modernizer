@@ -40,10 +40,7 @@ from src.agents.referee.reality_check import (
     refresh_patterns_and_recommendations,
     run_reality_check,
 )
-from src.agents.referee.reality_check_records import (
-    consolidations_from_moves,
-    removal_log_lines,
-)
+from src.agents.referee.reality_check_records import consolidations_from_moves, removal_log_lines
 from src.agents.referee.reality_check_request import (
     build_reality_check_request,
     query_signal_map,
@@ -52,7 +49,7 @@ from src.agents.referee.reality_check_request import (
 )
 from src.agents.referee.reality_check_summary import finalize_executive_summary
 from src.agents.referee.tie_break import settled_counts
-from src.contracts.assignment_models import Assignment, AssignmentSource
+from src.contracts.assignment_models import AssignmentSource
 from src.contracts.model_flag import ResponseContractError, validation_error_note
 from src.contracts.move_ledger import MoveActor, MovePass, ReasonCode
 from src.contracts.reality_check_model_response import (
@@ -60,6 +57,7 @@ from src.contracts.reality_check_model_response import (
     parse_reality_check_response,
 )
 from src.contracts.reality_check_output import RealityCheckOutputContract
+from src.shared.contract_versioning import stamp_artifact_version
 from src.shared.engine_elimination import eliminated_engines as settled_eliminated_engines
 from src.shared.engine_names import PLACEHOLDER_ENGINES
 from src.shared.engines_in_use import engines_in_use
@@ -532,9 +530,6 @@ def write_reality_check_result(
 
     revised_assignment = {
         **result["assignment"],
-        # #972: this file is written now, so it carries today's version, never
-        # the spread version's (an older one, or none before 1.15).
-        "contract_version": Assignment.model_fields["contract_version"].default,
         "version": new_version,
         "previous_version": assignment_version,
         "source": AssignmentSource.REALITY_CHECK.value,
@@ -566,7 +561,8 @@ def write_reality_check_result(
         dead_engines=eliminated,
     )
     revised_key = f"{database_name}/{job_id}/assignment/v{new_version}/assignment.json"
-    store.write_json(revised_key, revised_assignment)
+    # #972, #1018: written now, so today's version, never the spread one's.
+    store.write_json(revised_key, stamp_artifact_version(revised_key, revised_assignment))
     write_access_patterns(store, database_name, job_id, new_version, result["collector_output"])
     print(
         f"[reality-check] Revised assignment v{assignment_version} written to v{new_version} "

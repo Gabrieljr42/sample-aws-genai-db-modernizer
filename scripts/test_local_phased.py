@@ -77,7 +77,11 @@ def main():
 
     # Detect format
     from src.contracts.collector_output import CollectorOutputContract
-    from src.shared.contract_versioning import ContractVersionError, carries_contract
+    from src.shared.contract_versioning import (
+        ContractVersionError,
+        carries_contract,
+        stamp_artifact_version,
+    )
 
     try:
         is_contract = carries_contract(input_data, CollectorOutputContract, artifact=collector_file)
@@ -223,7 +227,8 @@ def main():
 
     # Write collector output to artifact store
     collector_path = f"{db_name}/{job_id}/collector/output.json"
-    store.write_json(collector_path, collector_data)
+    # An uploaded collector output may be at an older MINOR: written at today's (#1018).
+    store.write_json(collector_path, stamp_artifact_version(collector_path, collector_data))
     print(f"[collector] Output written to {collector_path}")
 
     # ================================================================

@@ -23,7 +23,7 @@ from src.contracts.phase_models import (
     PhaseStatus,
 )
 from src.orchestrator.base import Orchestrator, PhasePrerequisiteError, PhaseScope
-from src.shared.contract_versioning import load_contract
+from src.shared.contract_versioning import load_contract, stamp_artifact_version
 from src.storage.artifact_store import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -638,7 +638,7 @@ class LocalOrchestrator(Orchestrator):
             ledger_for,
             state_of,
         )
-        from src.contracts.assignment_models import Assignment, AssignmentSource, AssignmentStatus
+        from src.contracts.assignment_models import AssignmentSource, AssignmentStatus
         from src.contracts.move_ledger import MoveActor, MoveEvidence, MovePass, ReasonCode
 
         assignment = deepcopy(assignment)  # the refresh below edits records in place
@@ -689,8 +689,6 @@ class LocalOrchestrator(Orchestrator):
         ]
         revised = {
             **assignment,
-            # #972: written now, so today's version, not the spread one's.
-            "contract_version": Assignment.model_fields["contract_version"].default,
             "version": new_version,
             "previous_version": version,
             "status": AssignmentStatus.REROUTED_AFTER_APPROVAL.value,
@@ -772,7 +770,7 @@ class LocalOrchestrator(Orchestrator):
         from datetime import UTC, datetime
 
         from src.agents.schema_design.handler import run_schema_design_auto
-        from src.contracts.assignment_models import Assignment, AssignmentStatus
+        from src.contracts.assignment_models import AssignmentStatus
         from src.storage.assignment_versioning import (
             assignment_artifact_path,
             assignment_engine_diff,
@@ -783,7 +781,9 @@ class LocalOrchestrator(Orchestrator):
         revised = self._rerouted_assignment(
             job_id, database_name, assignment, version, new_version, routings
         )
-        self.store.write_json(assignment_artifact_path(database_name, job_id, new_version), revised)
+        # #972, #1018: written now, so today's version, not the spread one's.
+        revised_key = assignment_artifact_path(database_name, job_id, new_version)
+        self.store.write_json(revised_key, stamp_artifact_version(revised_key, revised))
         write_access_patterns(self.store, database_name, job_id, new_version)
         diff = assignment_engine_diff(self.store, database_name, job_id, version, new_version)
         designed = self._schema_engines(job_id, database_name, version)
@@ -809,8 +809,6 @@ class LocalOrchestrator(Orchestrator):
             rollback = new_version + 1
             restated = {
                 **assignment,
-                # #972: written now, so today's version, not the restated one's.
-                "contract_version": Assignment.model_fields["contract_version"].default,
                 "version": rollback,
                 "previous_version": new_version,
                 "source": revised["source"],
@@ -822,9 +820,8 @@ class LocalOrchestrator(Orchestrator):
                 # abandoned reroute back to the version it restates.
                 "moves": self._rollback_moves(revised, assignment),
             }
-            self.store.write_json(
-                assignment_artifact_path(database_name, job_id, rollback), restated
-            )
+            rollback_key = assignment_artifact_path(database_name, job_id, rollback)
+            self.store.write_json(rollback_key, stamp_artifact_version(rollback_key, restated))
             write_access_patterns(self.store, database_name, job_id, rollback)
             for engine in designed:
                 self._copy_schema_artifacts(job_id, database_name, engine, version, rollback)

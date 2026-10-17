@@ -59,6 +59,7 @@ from src.contracts.executive_summary_response import (
     parse_executive_summary_response,
 )
 from src.contracts.synthesis_output import SynthesisOutputContract
+from src.shared.contract_versioning import stamp_artifact_version
 from src.shared.engine_names import display_engine
 from src.shared.engines_in_use import engines_in_use
 from src.storage.artifact_store import ArtifactStore
@@ -865,7 +866,8 @@ def _persist_cache_safety_net(store: ArtifactStore, data, assignment_version: in
         if note not in safety_net_notes:
             safety_net_notes.append(note)
     raw["cache_overlay"] = overlay_summary(raw.get("query_assignments", []), data.source_queries)
-    store.write_json(key, raw)
+    # A rewrite in place, at today's version, not the one read (#1018).
+    store.write_json(key, stamp_artifact_version(key, raw))
     print(f"[synthesis] Cache overlay dropped for {len(dropped)} queries, written to {key}")
 
 

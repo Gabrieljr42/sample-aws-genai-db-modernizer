@@ -589,6 +589,8 @@ def _render(expr: ast.expr, ctx: _Ctx, depth: int = 0) -> list[str]:
             inner = _render(part.value, ctx, depth + 1)  # type: ignore[attr-defined]
             shapes = [x + i for x in shapes for i in (inner or [_PLACEHOLDER])]
         return shapes
+    if isinstance(expr, ast.IfExp):  # ``a if cond else b``: either shape (#1018)
+        return _render(expr.body, ctx, depth + 1) + _render(expr.orelse, ctx, depth + 1)
     if isinstance(expr, ast.Name):
         if expr.id in ctx.bound:
             return ctx.bound[expr.id]
