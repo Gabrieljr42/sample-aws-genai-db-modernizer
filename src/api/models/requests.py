@@ -1,20 +1,194 @@
 """Request models for the Database Modernizer Assessment API."""
 
+import ipaddress
+import re
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.shared.database_name import validate_database_name as _validate_database_name
 from src.shared.job_id import validate_job_id as _validate_job_id
 
+_HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_DATABASE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_$.\-]{0,127}")
+HOST_ERROR = (
+    "host must be a host name, an IP address or host:port (letters, digits, '-' and '.' "
+    "only: no '_', '@', '/', '=', spaces or a trailing dot)."
+)
+_SECRET_ARN = re.compile(
+    r"arn:aws[a-z-]{0,20}:secretsmanager:[a-z0-9-]{1,30}:[0-9]{1,12}:secret:[A-Za-z0-9/_+=.@!-]{1,512}"
+)
+ARN_REFERENCE_ERROR = (
+    "secret_arn must be an AWS Secrets Manager secret ARN (arn:aws:secretsmanager:...)."
+)
+
+_LETTERS_DIGITS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+#: The characters AWS Secrets Manager allows in a secret name (no spaces), plus the "!"
+#: of the secrets RDS manages itself (rds!db-..., rds!cluster-...).
+_SECRET_NAME_CHARS = _LETTERS_DIGITS | frozenset("/_+=.@!-")
+#: Table names and LIKE/glob wildcards, separated by commas (spaces around commas are
+#: dropped first). A name with spaces must be quoted: "Order Details", [Order Details] or
+#: `Order Details`.
+_TABLE_PATTERN_CHARS = _LETTERS_DIGITS | frozenset("_%*.$-")
+#: Inside a quoted name: words, spaces and wildcards, but no word starting with "-" (so
+#: no client flag) and none of = : / @ ' (so no assignment, user info or literal).
+_QUOTED_NAME_CHARS = _LETTERS_DIGITS | frozenset("_%*$- ")
+_QUOTE_CLOSERS = {'"': '"', "[": "]", "`": "`"}
+TABLE_PATTERN_ERROR = (
+    "table patterns must be table names or wildcards (letters, digits, _ % * . $ -), "
+    'separated by commas; quote a name with spaces as "Order Details", [Order Details] or '
+    "`Order Details`."
+)
+
+
+def _valid_table_pattern(element: str) -> bool:
+    """One comma-separated element: bare characters and quoted names (a linear scan)."""
+    if not element:
+        return False
+    i, n = 0, len(element)
+    while i < n:
+        c = element[i]
+        if c in _QUOTE_CLOSERS:
+            j = element.find(_QUOTE_CLOSERS[c], i + 1)
+            inner = element[i + 1 : j] if j != -1 else ""
+            if not inner.strip() or not set(inner) <= _QUOTED_NAME_CHARS:
+                return False
+            if any(word.startswith("-") for word in inner.split()):
+                return False
+            i = j + 1
+        elif c in _TABLE_PATTERN_CHARS:
+            i += 1
+        else:
+            return False
+    return True
+
+
+#: Engine, source and mode names: lower-case words joined by '-' or '_'.
+_NAME_CHARS = _LETTERS_DIGITS | frozenset("_-")
+_S3_KEY_CHARS = _LETTERS_DIGITS | frozenset("_-./")
+
+
+def _only(value: str, allowed: frozenset[str], max_len: int, error: str) -> str:
+    """``value`` if it is 1 to ``max_len`` characters, all in ``allowed`` (a set check:
+    linear, no regex)."""
+    if not value or len(value) > max_len or not set(value) <= allowed:
+        raise ValueError(error)
+    return value
+
+
+def validate_name(value: str, field_name: str) -> str:
+    return _only(
+        value.strip(),
+        _NAME_CHARS,
+        64,
+        f"{field_name} must be 1 to 64 letters, digits, '-' or '_'.",
+    )
+
+
+DATABASE_ERROR = (
+    "database must be 1 to 128 letters, digits or '_', '$', '.', '-' (no '@', '/', '=', ':' "
+    "or spaces)."
+)
+
+
+def _valid_port(text: str) -> bool:
+    return text.isdigit() and len(text) <= 5 and 1 <= int(text) <= 65535
+
+
+def _valid_host_name(name: str) -> bool:
+    if not name or len(name) > 253:
+        return False
+    return all(_HOST_LABEL.fullmatch(label) for label in name.split("."))
+
+
+def validate_host(value: str) -> str:
+    """A host name, IPv4/IPv6 address, or either with ``:port``; nothing else.
+
+    An allowlist rather than a credential check: ``user:pw@host``, ``scott/pw@db``,
+    ``jdbc:...`` or ``host PGPASSWORD=...`` can never reach the execution input (#723).
+    """
+    host = value.strip()
+    if not host or len(host) > 260:
+        raise ValueError(HOST_ERROR)
+    if host.startswith("["):  # [v6] or [v6]:port
+        inner, bracket, rest = host[1:].partition("]")
+        if bracket and (not rest or (rest[:1] == ":" and _valid_port(rest[1:]))):
+            try:
+                ipaddress.IPv6Address(inner)
+                return host
+            except ValueError:
+                pass
+        raise ValueError(HOST_ERROR)
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+    name, colon, port = host.partition(":")
+    if colon and not _valid_port(port):
+        raise ValueError(HOST_ERROR)
+    if not _valid_host_name(name):
+        raise ValueError(HOST_ERROR)
+    return host
+
 
 class ConnectionDetails(BaseModel):
+    """Where the source database is and which secret holds its credentials.
+
+    Credentials are only ever named by reference -- a secrets-manager ARN or name -- and
+    never sent (ADR-004 Decision 5, #723). There is no username or password field, and the
+    fields that are forwarded are allowlisted: ``host`` is a host name or IP (optionally
+    with ``:port``), ``database`` a plain name, ``credentials_type`` one of two values. A
+    request that carries a secret anywhere else is refused by ``src.api.secret_guard``
+    before it gets here.
+    """
+
     host: str
     port: int = Field(ge=1, le=65535)
     database: str
-    credentials_type: str = "secrets-arn"
+    credentials_type: Literal["secrets-arn", "secrets-name"] = "secrets-arn"
     secret_arn: str | None = None
     secret_name: str | None = None
-    username: str | None = None
-    password: str | None = None
+
+    @field_validator("host")
+    @classmethod
+    def _check_host(cls, value: str) -> str:
+        return validate_host(value)
+
+    @field_validator("database")
+    @classmethod
+    def _check_database(cls, value: str) -> str:
+        stripped = value.strip()
+        if not _DATABASE.fullmatch(stripped):
+            raise ValueError(DATABASE_ERROR)
+        return stripped
+
+    @field_validator("secret_arn")
+    @classmethod
+    def _check_secret_arn(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        if not _SECRET_ARN.fullmatch(value.strip()):
+            raise ValueError(ARN_REFERENCE_ERROR)
+        return value.strip()
+
+    @field_validator("secret_name")
+    @classmethod
+    def _check_secret_name(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        return _only(
+            value.strip(),
+            _SECRET_NAME_CHARS,
+            512,
+            "secret_name must be an AWS Secrets Manager secret name: letters, digits and "
+            "/_+=.@!- (no spaces). To pass a full ARN, use secret_arn.",
+        )
+
+    @field_validator("credentials_type", mode="before")
+    @classmethod
+    def _normalize_credentials_type(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 class CollectionOptions(BaseModel):
@@ -27,6 +201,21 @@ class CollectionOptions(BaseModel):
     exclude_table_patterns: str | None = None
     top_sql_queries: int = 100
     top_wait_events: int = 50
+
+    @field_validator("query_log_source")
+    @classmethod
+    def _check_query_log_source(cls, value: str) -> str:
+        return validate_name(value, "query_log_source")
+
+    @field_validator("include_table_patterns", "exclude_table_patterns")
+    @classmethod
+    def _check_table_patterns(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        parts = [part.strip() for part in value.split(",")]
+        if len(value) > 4096 or not all(_valid_table_pattern(part) for part in parts):
+            raise ValueError(TABLE_PATTERN_ERROR)
+        return ",".join(parts)
 
 
 class AssessmentRequest(BaseModel):
@@ -47,6 +236,37 @@ class AssessmentRequest(BaseModel):
     @classmethod
     def _check_database_name(cls, value: str) -> str:
         return _validate_database_name(value)
+
+    @field_validator("source_database_type", "collection_mode")
+    @classmethod
+    def _check_names(cls, value: str, info) -> str:  # type: ignore[no-untyped-def]
+        return validate_name(value, info.field_name)
+
+    @field_validator("target_databases")
+    @classmethod
+    def _check_target_databases(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
+        return [validate_name(v, "target_databases") for v in value]
+
+    @field_validator("cluster_id")
+    @classmethod
+    def _check_cluster_id(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        return validate_name(value, "cluster_id")
+
+    @field_validator("offline_s3_key")
+    @classmethod
+    def _check_offline_s3_key(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        return _only(
+            value,
+            _S3_KEY_CHARS,
+            1024,
+            "offline_s3_key must be an artifact key: letters, digits and _ - . / only.",
+        )
 
     @field_validator("job_id")
     @classmethod
@@ -74,3 +294,8 @@ class PrepareAssessmentRequest(BaseModel):
     @classmethod
     def _check_database_name(cls, value: str) -> str:
         return _validate_database_name(value)
+
+    @field_validator("source_database_type")
+    @classmethod
+    def _check_source_database_type(cls, value: str) -> str:
+        return validate_name(value, "source_database_type")

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from src.agents.answer_validation import validate_answer
 from src.api.dependencies import database_name_param, job_id_param
+from src.api.secret_guard import refuse_credential_shapes
 from src.contracts.agent_interaction_models import AgentAnswers, AgentQuestions
 from src.contracts.assignment_models import ValidationResult
 from src.storage.artifact_store import ArtifactStore
@@ -117,7 +118,10 @@ async def get_questions(
     return AgentQuestions.model_validate(data)
 
 
-@router.put("/{job_id}/agents/{agent}/answers")
+# Free-text answers are stored (answers.json) or sent to a model: refuse one shaped like a
+# credential (a DSN with a password, "password=...") the same way the assessment routes do
+# (#723). Keys here are question ids, so only the values are checked.
+@router.put("/{job_id}/agents/{agent}/answers", dependencies=[Depends(refuse_credential_shapes)])
 async def put_answers(
     body: SubmitAnswersRequest,
     job_id: str = Depends(job_id_param),
@@ -151,6 +155,7 @@ async def put_answers(
 @router.post(
     "/{job_id}/agents/{agent}/validate-answer",
     response_model=ValidationResult,
+    dependencies=[Depends(refuse_credential_shapes)],
 )
 async def validate_single_answer(
     body: ValidateAnswerRequest,

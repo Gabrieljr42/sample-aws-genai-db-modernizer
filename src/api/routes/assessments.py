@@ -20,6 +20,7 @@ from src.api.models.responses import (
     ErrorDetail,
     StageProgress,
 )
+from src.api.secret_guard import refuse_submitted_secrets
 from src.api.services.local_execution import (
     ArtifactDeletionError,
     JobRecentlyModifiedError,
@@ -59,7 +60,12 @@ def _require_services() -> tuple[LocalExecutionService, LocalS3Service]:
     return sfn_service, s3_service
 
 
-@router.post("/prepare", response_model=AssessmentPrepared, status_code=201)
+@router.post(
+    "/prepare",
+    response_model=AssessmentPrepared,
+    status_code=201,
+    dependencies=[Depends(refuse_submitted_secrets)],
+)
 async def prepare_assessment(request: PrepareAssessmentRequest):
     """Pre-create a job ID and S3 upload folder for offline/DDL assessments.
 
@@ -191,9 +197,19 @@ async def delete_upload(
     return {"job_id": job_id, "filename": filename, "status": "deleted"}
 
 
-@router.post("", response_model=AssessmentCreated, status_code=202)
+@router.post(
+    "",
+    response_model=AssessmentCreated,
+    status_code=202,
+    dependencies=[Depends(refuse_submitted_secrets)],
+)
 async def create_assessment(request: AssessmentRequest):
-    """Start a new database modernization assessment."""
+    """Start a new database modernization assessment.
+
+    A request carrying a password or other secret is refused with a 400 before this
+    runs (``refuse_submitted_secrets``, ADR-004 Decision 5, #723). The connection is
+    forwarded by reference only: ``ConnectionDetails`` has no username or password.
+    """
     sfn_svc, _ = _require_services()
     job_id = request.job_id or str(uuid.uuid4())
     now = datetime.now(UTC)
@@ -263,7 +279,13 @@ async def create_assessment(request: AssessmentRequest):
         sfn_input["engine"] = cluster_info["engine"]
         sfn_input["db_instance_identifier"] = cluster_info["db_instance_identifier"]
 
-    result = sfn_svc.start_execution(job_id, sfn_input)
+    try:
+        result = sfn_svc.start_execution(job_id, sfn_input)
+    except ValueError as exc:
+        # start_execution refuses an input that carries a secret. The guard and the
+        # ConnectionDetails allowlist make that unreachable from here; if it ever fires,
+        # it is still the caller's request that is at fault, so a 400, not a 500 (#723).
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
     return AssessmentCreated(
         job_id=job_id,

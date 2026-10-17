@@ -11,6 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from src.api.secret_guard import find_submitted_secrets, strip_secrets
 from src.report.deliverables import DELIVERABLES_DIR, FOLDER_FILENAMES
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,13 @@ class LocalExecutionService:
     # ------------------------------------------------------------------
 
     def start_execution(self, job_id: str, sfn_input: dict) -> dict:
-        """Store job metadata locally and return a fake execution ARN."""
+        """Store job metadata locally and return a fake execution ARN.
+
+        Refuses an input that carries a secret rather than writing it to ``_meta.json``
+        (ADR-004 Decision 5, #723); the API refuses such a request before it gets here.
+        """
+        if find_submitted_secrets(sfn_input):
+            raise ValueError("refusing to store an execution input that carries a secret")
         database_name = sfn_input.get("database_name", "unknown")
         meta = {
             "job_id": job_id,
@@ -149,7 +156,8 @@ class LocalExecutionService:
         if self._store.exists(meta_path):
             try:
                 meta = self._store.read_json(meta_path)
-                result["input"] = meta.get("input", result["input"])
+                # An input stored before #723 may still hold connection.password.
+                result["input"] = strip_secrets(meta.get("input", result["input"]))
             except Exception:
                 pass  # nosec B110 - non-critical metadata enrichment
 
