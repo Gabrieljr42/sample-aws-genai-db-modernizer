@@ -155,7 +155,7 @@ export function buildAuroraQueryGroups(engine, queryGroups) {
  * One Aurora design, ready for the "Aurora design" section: display name,
  * table list, DDL, optimizations, migration strategy and queries-on-Aurora.
  * `design` is a `schemaDesigns[]` entry (`{ target_type, content }`, the
- * shape `/assessments/:jobId/schema-designs` and the HTML export both use)
+ * shape `/assessments/:jobId/schema-designs` returns)
  * -- `null` when this engine has no schema design yet (the
  * queries still run on Aurora even then, same as the engineering report's
  * "Queries on Aurora by table" subsection, which never required one; only

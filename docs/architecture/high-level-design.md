@@ -297,7 +297,7 @@ the hosted-deployment removal.
   materialized in the LadybugDB context graph, built at two single-writer pipeline
   boundaries (end of assessment-core, end of synthesis) and published as a
   downloadable `.lbug` artifact
-- Readers (`analysis_report`, the query-journeys API) serve per-query detail from
+- Readers (the query-journeys API behind the results page) serve per-query detail from
   the graph, with a fallback to legacy per-query journey artifacts only for jobs
   that predate the graph
 - Supersedes the progressive per-query journey files in [ADR-019]

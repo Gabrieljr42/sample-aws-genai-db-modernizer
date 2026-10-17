@@ -98,10 +98,10 @@ class TestPublish:
         uploaded = _inject_sdk(monkeypatch, client)
 
         result = artifacts.publish(
-            [(b"<html>", "HTML", "Decision Report", "CUSTOMER_OUTPUT", "decision-report-db.html")]
+            [(b"<html>", "HTML", "Sample Report", "CUSTOMER_OUTPUT", "sample-report-db.html")]
         )
 
-        assert result == {"Decision Report": "art-1"}
+        assert result == {"Sample Report": "art-1"}
         assert client.completed == ["art-1"]
         # copy_artifact is what actually makes it EXTERNAL — must run after complete.
         assert client.copied == ["art-1"]
@@ -110,8 +110,8 @@ class TestPublish:
         call = client.create_calls[0]
         assert call["artifactReference"]["artifactType"]["categoryType"] == "CUSTOMER_OUTPUT"
         assert call["artifactReference"]["artifactType"]["fileType"] == "HTML"
-        assert call["fileMetadata"] == {"path": "decision-report-db.html"}
-        assert call["label"] == "Decision Report"
+        assert call["fileMetadata"] == {"path": "sample-report-db.html"}
+        assert call["label"] == "Sample Report"
 
     def test_default_path_derived_from_label_and_type(self, monkeypatch) -> None:
         client = _FakeClient()
@@ -141,7 +141,7 @@ class TestPublish:
         client = _FakeClient()
         _inject_sdk(monkeypatch, client, have_runtime=False)
 
-        result = artifacts.publish([(b"x", "HTML", "Decision Report", "CUSTOMER_OUTPUT")])
+        result = artifacts.publish([(b"x", "HTML", "Sample Report", "CUSTOMER_OUTPUT")])
 
         assert result == {}  # no context -> no-op, never raises
         assert client.create_calls == []
@@ -149,7 +149,7 @@ class TestPublish:
 
 class TestDefaultPath:
     def test_slugs_label_and_appends_extension(self) -> None:
-        assert artifacts._default_path("Decision Report", "HTML") == "decision-report.html"
+        assert artifacts._default_path("Sample Report", "HTML") == "sample-report.html"
         assert artifacts._default_path("Assessment Data", "JSON") == "assessment-data.json"
         assert artifacts._default_path("Engineering Report", "MARKDOWN") == "engineering-report.md"
 

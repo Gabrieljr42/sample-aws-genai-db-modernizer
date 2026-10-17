@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import copy
 import json
-import re
 from unittest.mock import patch
 
 import pytest
@@ -111,16 +110,22 @@ def rerouted(tmp_path_factory) -> dict:
     _run("synthesis", ["scripts/run_synthesis.py", *common, "--llm-mode", "none"], result)
     _run("report", ["scripts/run_report.py", *common], result)
     synthesis = root / DB / JOB / "synthesis" / "v3"
+    folder = root / DB / JOB / "deliverables"
     return {
         "flagged": flagged,
         "v2": v2,
         "v3": store.read_json(f"{DB}/{JOB}/assignment/v3/assignment.json"),
         "v3_access_patterns": store.read_json(f"{DB}/{JOB}/assignment/v3/access_patterns.json"),
         "report": json.loads((synthesis / "report.json").read_text()),
-        "decision": next(synthesis.glob("*decision-report*.html")).read_text(),
-        "engineering": next(synthesis.glob("*engineering-report*.md")).read_text(),
-        "analysis": next(synthesis.glob("*analysis-report*.html")).read_text(),
+        "pdf": _pdf_text(folder / "assessment.pdf"),
+        "engineering": (folder / "engineering-report.md").read_text(),
     }
+
+
+def _pdf_text(path) -> str:
+    from pypdf import PdfReader
+
+    return " ".join(" ".join((p.extract_text() or "").split()) for p in PdfReader(path).pages)
 
 
 def _in_scope(assignment: dict, engine: str) -> int:
@@ -169,7 +174,7 @@ class TestEveryDeliverableAgreesWithTheNewVersion:
     def test_dynamodb_counts_match_its_own_queries(self, rerouted):
         expected = _in_scope(rerouted["v3"], "dynamodb")
         assert expected == _in_scope(rerouted["v2"], "dynamodb") - 1
-        text = " ".join(re.sub(r"<[^>]+>", " ", rerouted["decision"]).split())
+        text = rerouted["pdf"]
         assert f"DynamoDB handles {expected} queries" in text
         assert f"{expected} in-scope access patterns)" in text
         assert f"DynamoDB: {_in_scope(rerouted['v2'], 'dynamodb')}" not in text
@@ -185,17 +190,12 @@ class TestEveryDeliverableAgreesWithTheNewVersion:
         assert not [r for r in risks if rerouted["flagged"][:12] in json.dumps(r)]
         assert "Unsupported patterns" not in rerouted["engineering"].split("## Moved after")[0]
 
-    def test_the_move_after_approval_and_the_override_path_are_in_every_report(self, rerouted):
+    def test_the_move_after_approval_and_the_override_path_are_in_the_report(self, rerouted):
         from src.report.engine_choices import REROUTE_OVERRIDE_TEXT
 
-        assert "Moved after your approval (1 query)" in rerouted["decision"]
         assert "## Moved after approval (1 query)" in rerouted["engineering"]
-        assert REROUTE_OVERRIDE_TEXT in rerouted["decision"]
         assert REROUTE_OVERRIDE_TEXT in rerouted["engineering"]
-        # The interactive analysis report carries the list and renders it.
-        assert '"post_schema_reroutes"' in rerouted["analysis"]
-        assert rerouted["flagged"] in rerouted["analysis"]
-        assert "buildPostSchemaReroutes();" in rerouted["analysis"]
+        assert rerouted["flagged"] in rerouted["engineering"]
         assert rerouted["report"]["post_schema_reroutes"][0]["approved_version"] == 2
 
 
@@ -252,7 +252,7 @@ def overridden(tmp_path_factory) -> dict:
         "flagged": flagged,
         "v4": store.read_json(f"{DB}/{JOB}/assignment/v4/assignment.json"),
         "report": json.loads((synthesis / "report.json").read_text()),
-        "decision": next(synthesis.glob("*decision-report*.html")).read_text(),
+        "engineering": (root / DB / JOB / "deliverables" / "engineering-report.md").read_text(),
     }
 
 
@@ -267,4 +267,4 @@ class TestTheCustomersMoveBackHolds:
     def test_the_undone_move_is_not_listed(self, overridden):
         assert overridden["v4"]["post_schema_reroutes"] == []
         assert overridden["report"]["post_schema_reroutes"] == []
-        assert "Moved after your approval" not in overridden["decision"]
+        assert "Moved after approval" not in overridden["engineering"]

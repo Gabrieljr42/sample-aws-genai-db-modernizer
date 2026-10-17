@@ -252,8 +252,8 @@ def load_test_results(
 #
 # This replaces the ~1,654 per-query journey JSON artifacts: the same per-query
 # facts now live in the graph (Query node + READS_FROM + MIGRATES_TO + PART_OF),
-# so these return the SAME projected shape ``analysis_report._project_journey``
-# produced, sourced from the graph instead of one artifact read per query.
+# so these return one projected journey shape, sourced from the graph instead of
+# one artifact read per query.
 # ---------------------------------------------------------------------------
 
 import json as _json  # noqa: E402 - local alias, kept out of the module import block
@@ -262,7 +262,7 @@ import json as _json  # noqa: E402 - local alias, kept out of the module import 
 def _journey_from_row(row: dict) -> dict:
     """Project one graph row into the journey read-model dict.
 
-    Mirrors ``analysis_report._project_journey``: ``source`` (with the nested
+    The journey shape: ``source`` (with the nested
     performance/characteristics decoded from their JSON columns), ``assignment``
     (or None), ``design`` (engine + status, or None).
     """
@@ -338,9 +338,8 @@ _JOURNEY_MATCH = (
 def query_journeys(store: GraphStore) -> list[dict]:
     """Return every query's journey read-model, sourced from the graph.
 
-    Same shape as ``analysis_report._read_journeys`` returned from the per-query
-    JSON artifacts, so the report's flow aggregate and per-query drill-down render
-    identically. One graph query instead of N artifact reads.
+    The same shape the per-query JSON artifacts held, so the results page's
+    per-query drill-down reads either. One graph query instead of N artifact reads.
     """
     rows = store.query(_JOURNEY_MATCH + " ORDER BY query_id, assigned_engine")
     return [_journey_from_row(r) for r in rows]
@@ -351,8 +350,7 @@ def query_journey(store: GraphStore, query_id: str) -> dict | None:
 
     The single-query journey also carries ``trace``: the query's decision
     trace (:func:`query_trace`, #339). The all-queries list
-    (:func:`query_journeys`) does not, so the report's embedded journeys are
-    unchanged.
+    (:func:`query_journeys`) does not.
     """
     rows = store.query(
         _JOURNEY_MATCH.replace("MATCH (q:Query) ", "MATCH (q:Query {id: $qid}) ")

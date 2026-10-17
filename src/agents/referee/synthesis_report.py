@@ -311,8 +311,7 @@ def build_cache_overlay(data: SynthesisData) -> dict | None:
     drops, customer-edit notes with full query hashes, the legacy-migration
     note) -- internal, for the engineering report only. ``safety_net_notes`` is
     the customer-facing subset: only the safety net's own notes, the ones every
-    other deliverable (decision report, interactive analysis report, its HTML
-    export, the Results page, chat) must read instead.
+    other deliverable (the Results page, chat) must read instead.
     """
     if not data.assignment:
         return None
@@ -2881,8 +2880,8 @@ def _architecture_rationale(
 
 
 # What one schema-design object is called per engine (for the summary, #219).
-# Relational designs say "target table": the deck and Decision Report count the
-# *source* tables mapped to each engine on the same page.
+# Relational designs say "target table": the PDF report and the engineering
+# report count the *source* tables mapped to each engine on the same page.
 _OBJECT_NOUNS = {
     "elasticache": ("key design", "key designs"),
     "documentdb": ("collection", "collections"),

@@ -6,9 +6,7 @@
  * precedent for that in this repo (AppRoutes.test.js stubs it out entirely,
  * and no `@testing-library/react` is installed) -- it isolates exactly that
  * rendering pattern and proves a hostile note (`<script>`/`<b>&`) comes out
- * as inert text, never live markup, matching the same guarantee already
- * covered server-side (decision/analysis reports) and in the standalone
- * HTML export (ExportReport.cacheLayer.test.js).
+ * as inert text, never live markup.
  */
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';

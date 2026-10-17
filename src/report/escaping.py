@@ -1,7 +1,8 @@
 """Centralized output escaping for customer-facing deliverables.
 
-Threat model finding R3 (``docs/security/atx-threat-model.md``): the HTML, SVG and
-Markdown deliverables interpolate customer-derived and LLM-derived strings — table
+Threat model finding R3 (``docs/security/atx-threat-model.md``): the Markdown
+deliverable (and the PDF report, which renders the same Markdown) interpolates
+customer-derived and LLM-derived strings — table
 and column names, raw SQL ``query_text``, risk prose, trade-off text, LLM summaries.
 When escaping is applied ad hoc per field, a single missed interpolation point is an
 injection vector into a document a human downloads and opens. Both customer input
@@ -11,10 +12,9 @@ must be rendered as escaped document content, never as trusted markup.
 This module is the one place escaping lives, so a new field is safe by default: the
 renderers call a context-appropriate helper rather than reaching for ``html.escape``
 with whatever arguments each call site happened to pass. The context matters — the
-correct neutralization differs between an HTML text node, an HTML/SVG attribute
-value, a Markdown table cell, a Markdown code span, and a Mermaid node label — and
-getting it wrong (e.g. ``html.escape`` with the default ``quote=False`` inside an
-attribute) reintroduces the very gap R3 describes.
+correct neutralization differs between a Markdown table cell, flowing text, a code
+span, a front-matter value and a Mermaid node label — and getting it wrong
+reintroduces the very gap R3 describes.
 
 None of these helpers emit markup; they only neutralize the input so the *caller's*
 surrounding markup is the only markup in the output.
@@ -22,67 +22,7 @@ surrounding markup is the only markup in the output.
 
 from __future__ import annotations
 
-import html as _html
 from typing import Any
-
-# ---------------------------------------------------------------------------
-# HTML / SVG
-#
-# HTML and SVG share the same character-reference escaping. They are kept as
-# separate names so call sites read in terms of the context they render into and
-# so the two could diverge later without touching callers.
-# ---------------------------------------------------------------------------
-
-
-def html_text(value: Any) -> str:
-    """Escape a value for an HTML/SVG **text node** (between tags).
-
-    Neutralizes ``& < >``. Quotes are left alone — they are not special in text
-    content — which keeps prose readable. Use :func:`html_attr` for anything that
-    lands inside a quoted attribute value.
-    """
-    return _html.escape(str(value), quote=False)
-
-
-def html_attr(value: Any) -> str:
-    """Escape a value for a **quoted HTML/SVG attribute** value.
-
-    Neutralizes ``& < >`` and both quote characters, so the value cannot close the
-    attribute it sits in regardless of whether the attribute is single- or
-    double-quoted. This is the correct helper for ``<meta content="...">``,
-    ``data-*`` attributes, ``<span style="...">`` fills and the like — the default
-    ``html.escape(quote=False)`` used at some call sites did *not* escape quotes and
-    so could break out of an attribute (R3).
-
-    Raw CR/LF are collapsed to a space so the value stays on one line: a newline in an
-    attribute value is legal but splits the tag across physical lines, which is both
-    ugly and a hazard for any line-oriented consumer of the document.
-    """
-    s = str(value).replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
-    return _html.escape(s, quote=True)
-
-
-def html_comment(value: Any) -> str:
-    """Escape a value embedded inside an ``<!-- ... -->`` HTML comment.
-
-    A comment is not parsed as markup, so an embedded ``<script>`` is inert; the one
-    sequence that matters is ``--``, which can terminate the comment early (and ``-->``
-    outright). Double dashes are collapsed to a single dash. As defense-in-depth the
-    angle brackets are also neutralized, so a value that leaks out of a malformed
-    comment cannot become live markup and the comment reads cleanly in a viewer.
-    """
-    s = str(value)
-    s = s.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
-    s = s.replace("<", "&lt;").replace(">", "&gt;")
-    while "--" in s:
-        s = s.replace("--", "-")
-    return s
-
-
-# SVG uses the same rules as HTML for text and attribute contexts.
-svg_text = html_text
-svg_attr = html_attr
-
 
 # ---------------------------------------------------------------------------
 # Markdown

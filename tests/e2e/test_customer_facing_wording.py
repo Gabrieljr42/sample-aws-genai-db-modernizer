@@ -6,8 +6,8 @@ run against the real deterministic wordpress/discourse pipeline output (the
 same ``run`` fixture every other ``tests/e2e/`` module shares, so this does
 not run the pipeline a second time): ``report.json``,
 ``assignment/v*/assignment.json``'s per-query reasons, the reality-check
-output, and the three rendered deliverables #572 names -- the decision
-report HTML, the engineering Markdown report, and the executive deck.
+output, and the rendered deliverables: the engineering Markdown report and
+the PDF report (the decision report HTML #572 also named was retired in #987).
 
 The scanner (``src.tools.validation.customer_text_guard``) flags a raw engine
 id where a display name belongs, an ``ADR-NNN`` reference, a snake_case
@@ -21,13 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.tools.validation.customer_text_guard import (
-    Finding,
-    scan_html,
-    scan_json,
-    scan_markdown,
-    scan_text,
-)
+from src.tools.validation.customer_text_guard import Finding, scan_json, scan_markdown, scan_text
 from tests.e2e.pipeline import PipelineResult
 
 # Accepted hits this run does not fix, each tracked by an open issue -- see that
@@ -90,14 +84,8 @@ def test_reality_check_output_has_no_internal_wording(run: PipelineResult) -> No
     assert findings == [], _describe(findings)
 
 
-def test_decision_report_html_has_no_internal_wording(run: PipelineResult) -> None:
-    findings = scan_html(run.html("decision-report").read_text())
-    findings = _filtered(findings, "decision-report.html")
-    assert findings == [], _describe(findings)
-
-
 def test_engineering_report_markdown_has_no_internal_wording(run: PipelineResult) -> None:
-    findings = scan_markdown(run.deliverable(".md").read_text())
+    findings = scan_markdown(run.deliverable("engineering-report.md").read_text())
     findings = _filtered(findings, "engineering-report.md")
     assert findings == [], _describe(findings)
 
@@ -105,7 +93,7 @@ def test_engineering_report_markdown_has_no_internal_wording(run: PipelineResult
 def test_executive_summary_pdf_has_no_internal_wording(run: PipelineResult) -> None:
     from pypdf import PdfReader
 
-    reader = PdfReader(str(run.deliverable("summary-executive-report.pdf")))
+    reader = PdfReader(str(run.deliverable("assessment.pdf")))
     text = "\n".join(p.extract_text() or "" for p in reader.pages)
-    findings = _filtered(scan_text(text), "summary-executive-report.pdf")
+    findings = _filtered(scan_text(text), "assessment.pdf")
     assert findings == [], _describe(findings)

@@ -13,11 +13,7 @@ from typing import Any
 from ci.llm import judge_facts
 from src.agents.referee.cache_overlay import safety_net_note
 from src.report.architecture import _architecture_engines
-from src.report.renderers import (
-    architecture_svg,
-    render_decision_report_html,
-    render_engineering_report_md,
-)
+from src.report.renderers import render_engineering_report_md
 
 
 def _report() -> dict[str, Any]:
@@ -82,7 +78,7 @@ def _cache_row(report: dict[str, Any]) -> dict[str, Any]:
     return next(e for e in _architecture_engines(report) if e["engine"] == "elasticache")
 
 
-class TestDecisionReport:
+class TestCacheRow:
     def test_cache_row_has_no_workload_share(self):
         row = _cache_row(_report())
         assert row["role"] == "Cache layer"
@@ -90,45 +86,13 @@ class TestDecisionReport:
         assert (row["cached_queries"], row["cached_call_share"]) == (20, 83.4)
         assert row["scope"] == "cache-aside"
 
-    def test_html_shows_cached_reads_and_call_share(self):
-        html = render_decision_report_html(_report())
-        assert "20 cached reads · 83.4% of calls" in html
-        assert "fronts 20 hot reads (83.4% of calls) cache-aside" in html
-        assert "<td>100%</td>" in html  # owner shares still add up
-
-    def test_html_explains_a_safety_net_drop(self):
-        # #424: the gate's cache_overlay and the report's disagreed with no
-        # explanation. The decision report must carry the safety net's own
-        # note (safety_net_notes), the same one the engineering report shows
-        # (via the full notes list), so the two deliverables agree.
-        html = render_decision_report_html(_report())
-        assert "owner unchanged" in html
-
-    def test_html_never_shows_the_full_notes_field(self):
-        # #459 review: `notes` also carries customer-edit notes (full query
-        # hashes) and the legacy-migration note -- neither customer-facing.
-        rep = _report()
-        rep["cache_overlay"]["safety_net_notes"] = []
-        rep["cache_overlay"]["notes"] = ["query q_8f21c carried over, full hash attached"]
-        html = render_decision_report_html(rep)
-        assert "q_8f21c" not in html
-
-    def test_html_escapes_a_hostile_safety_net_note(self):
-        # #459: the note is server-generated, deterministic text -- but
-        # escaping must not assume that. A `<script>`/`<b>&` payload must
-        # render as literal text, never as markup, in the decision report.
-        rep = _report()
-        rep["cache_overlay"]["safety_net_notes"] = [
-            "<script>alert(1)</script><b>bold</b> & escaped"
-        ]
-        html = render_decision_report_html(rep)
-        assert "<script>alert(1)</script>" not in html
-        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
-        assert "&lt;b&gt;bold&lt;/b&gt; &amp; escaped" in html
-
-    def test_svg(self):
-        svg = architecture_svg(_report())
-        assert "Cache layer  ·  20 reads · 83.4% of calls" in svg
+    def test_engine_table_shows_cached_reads_and_call_share(self):
+        md = render_engineering_report_md(_report())
+        assert (
+            "| ElastiCache | Cache layer | 20 cached reads · 83.4% of calls | cache-aside |" in md
+        )
+        total = next(x for x in md.splitlines() if x.startswith("| Total |"))
+        assert "| 100% |" in total  # owner shares still add up
 
     def test_legacy_report_keeps_the_workload_share(self):
         rep = _report()
@@ -243,15 +207,10 @@ class TestCacheOverlayShrinkExplained:
     report, which already did.
     """
 
-    def test_decision_report_states_before_and_after_numbers(self):
-        html = render_decision_report_html(_shrink_report())
-        assert "10 cached reads · 61.3% of calls" in html
-        assert "20 hot reads (83.4% of calls) were assigned at the assignment gate" in html
-        assert "ElastiCache schema design covers 10 of them" in html
-        assert "10 hot reads (61.3% of calls) remain." in html
-
     def test_engineering_report_states_before_and_after_numbers(self):
         md = render_engineering_report_md(_shrink_report())
+        assert "| 10 cached reads · 61.3% of calls |" in md
+        assert "ElastiCache schema design covers 10 of them" in md
         assert "fronts 10 hot reads (61.3% of calls" in md
         # Markdown-escaped parentheses (escaping.md_text): still the same note.
         assert "20 hot reads \\(83.4% of calls\\) were assigned at the assignment gate" in md
@@ -287,7 +246,7 @@ class TestCacheOverlayFullDropExplained:
     """#459 round 2: when the safety net drops *every* cached read, the cache
     engine leaves the engine list entirely (it owns no workload, #296) --
     exactly #424's own repro. The note must still say so, in plain words
-    ("none remain"), and the decision report must still show it even though
+    ("none remain"), and the engineering report must still show it even though
     there is no "Cache layer" row left to attach it to.
     """
 
@@ -304,20 +263,13 @@ class TestCacheOverlayFullDropExplained:
             "longer cached and stays served by its owner engine. None remain."
         )
 
-    def test_decision_report_still_shows_the_note(self):
-        rep = _full_drop_report()
-        assert not any(r["target"] == "elasticache" for r in rep["ranking"])
-        html = render_decision_report_html(rep)
-        assert "was assigned at the assignment gate" in html
-        assert "None remain." in html
-
     def test_engineering_report_still_shows_the_note_with_no_engine_in_the_heading(self):
         # #459 round 3: a full drop clears `engine`, so the heading cannot
-        # name it -- it used to hide the whole section (round 2's own fix
-        # only applied to the decision/analysis reports and the Results
-        # page); now it renders a plain "## Cache layer" heading plus the
-        # note.
-        md = render_engineering_report_md(_full_drop_report())
+        # name it -- it used to hide the whole section; now it renders a plain
+        # "## Cache layer" heading plus the note.
+        rep = _full_drop_report()
+        assert not any(r["target"] == "elasticache" for r in rep["ranking"])
+        md = render_engineering_report_md(rep)
         assert "## Cache layer\n" in md
         assert "## Cache layer (" not in md
         assert "was assigned at the assignment gate" in md
@@ -352,120 +304,6 @@ class TestJudgeFacts:
         rep = _report()
         rep.pop("cache_overlay")
         assert "cache_overlay" not in judge_facts.build_facts(rep)
-
-
-class TestAnalysisReport:
-    def test_cache_layer_stat_card(self):
-        from src.report.analysis_report import _ASSIGNMENT_FIELDS, _cache_layer_stat
-
-        card = _cache_layer_stat({"cache_overlay": _report()["cache_overlay"]})
-        assert "Cache layer · 20 cached reads · 83.4% of calls" in card
-        assert _cache_layer_stat({}) == ""
-        assert {"cache_engine", "cache_reason"} <= set(_ASSIGNMENT_FIELDS)
-
-    def test_engine_badges_names_the_cache_layer(self):
-        # #358: render_analysis_report_html's "Target Engines" badges
-        # (built from after_distribution, which never carries the cache
-        # engine -- it owns no workload share, #296) must still name it,
-        # the same way the WebApp's Results page and "Export to HTML"
-        # button do.
-        from src.report.analysis_report import _engine_badges
-
-        after = {"dynamodb": 82.0, "aurora_mysql": 21.0, "opensearch": 4.0}
-        badges = _engine_badges(after, {"engine": "elasticache"})
-        assert 'data-engine="dynamodb">DynamoDB</span>' in badges
-        assert 'data-engine="aurora_mysql">Aurora MySQL</span>' in badges
-        assert 'data-engine="opensearch">OpenSearch</span>' in badges
-        assert 'data-engine="elasticache">ElastiCache (cache layer)</span>' in badges
-
-    def test_engine_badges_no_overlay_no_suffix(self):
-        from src.report.analysis_report import _engine_badges
-
-        badges = _engine_badges({"elasticache": 29.4, "dynamodb": 24.1}, None)
-        assert 'data-engine="elasticache">ElastiCache</span>' in badges
-        assert "cache layer" not in badges
-
-    def test_rendered_report_names_the_cache_layer_and_sums_the_kept_rows(self):
-        # Shaped like the real wordpress job e6a0127b's report.json (#358): three
-        # owners (dynamodb, aurora_mysql, opensearch) plus elasticache fronting
-        # them as a cache layer, no projected_monthly_cost field, so the total
-        # falls back to summing the kept cost_breakdown rows.
-        from src.report.analysis_report import render_analysis_report_html
-
-        html = render_analysis_report_html(_export_data(_wordpress_shape()))
-        assert 'data-engine="dynamodb">DynamoDB</span>' in html
-        assert 'data-engine="aurora_mysql">Aurora MySQL</span>' in html
-        assert 'data-engine="opensearch">OpenSearch</span>' in html
-        assert 'data-engine="elasticache">ElastiCache (cache layer)</span>' in html
-        # 98.41 + 318.80 + 240.96 + 165.55 (dynamodb + aurora_mysql + opensearch + elasticache)
-        assert "823.72" in html
-
-    def test_rendered_report_uses_the_reports_own_total_even_when_cost_breakdown_disagrees(self):
-        # The report's own tco_analysis.projected_monthly_cost is the one source of
-        # truth (matches the decision report and chat) -- never a sum recomputed
-        # from cost_breakdown, which here is deliberately set to NOT add up to it.
-        from src.report.analysis_report import render_analysis_report_html
-
-        html = render_analysis_report_html(
-            _export_data(_wordpress_shape(projected_monthly_cost=900.0))
-        )
-        assert "900.00" in html
-        assert "823.72" not in html
-
-
-def _wordpress_shape(projected_monthly_cost: float | None = None) -> dict[str, Any]:
-    """Shaped like the real wordpress job e6a0127b's report.json (#358)."""
-    report: dict[str, Any] = {
-        "database_name": "wordpress",
-        "job_id": "e6a0127b",
-        "summary": "wordpress splits across three owners plus a cache layer.",
-        "reality_check": {
-            "after_distribution": {"dynamodb": 82.0, "aurora_mysql": 21.0, "opensearch": 4.0}
-        },
-        "cache_overlay": {
-            "engine": "elasticache",
-            "query_count": 14,
-            "calls_per_second": 158.85,
-            "call_share_percent": 71.5,
-        },
-        "tco_analysis": {
-            "cost_breakdown": [
-                {"database": "dynamodb", "monthly_cost_usd": 98.41, "pricing_mode": "on-demand"},
-                {
-                    "database": "elasticache",
-                    "monthly_cost_usd": 165.55,
-                    "pricing_mode": "on-demand",
-                },
-                {
-                    "database": "opensearch",
-                    "monthly_cost_usd": 240.96,
-                    "pricing_mode": "on-demand",
-                },
-                {
-                    "database": "aurora_mysql",
-                    "monthly_cost_usd": 318.80,
-                    "pricing_mode": "on-demand",
-                },
-            ]
-        },
-        "schema_designs": {},
-        "recommended_architecture": {"databases": []},
-    }
-    if projected_monthly_cost is not None:
-        report["tco_analysis"]["projected_monthly_cost"] = projected_monthly_cost
-    return report
-
-
-def _export_data(report: dict[str, Any]) -> dict[str, Any]:
-    """The ``DATA`` shape ``render_analysis_report_html`` expects (#358)."""
-    return {
-        "results": {"job_id": report["job_id"], "status": "COMPLETED", "synthesis": report},
-        "schemaDesigns": [],
-        "collector": {},
-        "jobId": report["job_id"],
-        "exportDate": "2026-10-06T00:00:00Z",
-        "queryJourneys": {"items": []},
-    }
 
 
 def _discourse_shape() -> dict[str, Any]:
@@ -535,11 +373,11 @@ class TestSearchReadModel:
         assert rows["opensearch"]["scope"] == "synced from owners"
         assert rows["opensearch"]["migrates"] == 0
 
-    def test_decision_report_never_calls_it_the_relational_core(self):
-        html = render_decision_report_html(_discourse_shape())
-        assert "retained as the relational core" not in html
-        assert "<b>OpenSearch</b> is a search read model" in html
-        assert "source schema retained" not in html
+    def test_engineering_report_never_calls_it_the_relational_core(self):
+        md = render_engineering_report_md(_discourse_shape()).replace("**", "")
+        assert "OpenSearch is retained as the relational core" not in md
+        assert "OpenSearch is a search read model" in md
+        assert "| OpenSearch | Search read model |" in md
 
     def test_retained_is_only_the_source_compatible_relational_engine(self):
         rep = _discourse_shape()
@@ -549,12 +387,12 @@ class TestSearchReadModel:
         assert rows["aurora_postgresql"] == "Retained"
         assert rows["opensearch"] == "Search read model"
 
-    def test_decision_report_cache_note_fronts_aurora_once_retained_exists(self):
-        # #321: the generic "Recommended architecture" cache note now names
-        # the retained Aurora engine it fronts, not the legacy source.
-        html = render_decision_report_html(_discourse_shape())
-        assert "It fronts Aurora PostgreSQL with no data migration of its own" in html
-        assert "invalidation follows the engine that owns each cached table" in html
+    def test_engineering_report_cache_note_fronts_aurora_once_retained_exists(self):
+        # #321: the cache note names the retained Aurora engine it fronts, not
+        # the legacy source.
+        md = render_engineering_report_md(_discourse_shape())
+        assert "It fronts Aurora PostgreSQL with no data migration of its own" in md
+        assert "invalidation follows the engine that owns each cached table" in md
 
 
 def test_engineering_report_read_shapes_use_the_pattern_labels() -> None:

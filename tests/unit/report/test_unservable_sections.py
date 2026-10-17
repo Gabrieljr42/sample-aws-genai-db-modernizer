@@ -2,9 +2,8 @@
 
 ``facts.unservable`` lists each query a fallback rule placed because no
 analyzed engine fit it: where it landed and why, the gate that ruled out each
-engine and a redesign hint for those engines. The decision report, the
-engineering report, the deck and the interactive report state them and point
-at the assignment review to re-run. They only format the facts (ADR-032).
+engine and a redesign hint for those engines. The engineering report, the PDF
+report and the UI state them and point at the assignment review to re-run. They only format the facts (ADR-032).
 """
 
 from __future__ import annotations
@@ -14,10 +13,11 @@ from typing import Any
 
 import pytest
 
-from src.report.renderers import render_decision_report_html, render_engineering_report_md
+from src.report.renderers import render_engineering_report_md
 from src.report.unservable import UNSERVABLE_RERUN_TEXT
 from src.shared.capability_labels import CAPABILITY_REDESIGN_HINTS
 from src.shared.report_facts import UNSERVABLE_SHOWN, compute_report_facts
+from tests.unit.report.pdf_text import pdf_text
 
 MD_HEADING = "## Queries on a fallback engine"
 
@@ -71,28 +71,22 @@ def report() -> dict[str, Any]:
     return _report([_row("q-count")])
 
 
-def _section_html(html: str) -> str:
-    start = html.index("<section data-figure=unservable-queries>")
-    return html[start : html.index("</section>", start)]
-
-
 def _section_md(md: str) -> str:
     start = md.index(MD_HEADING)
     end = md.find("\n## ", start + 1)
     return md[start:] if end == -1 else md[start:end]
 
 
-def test_the_decision_report_flags_each_query_with_gates_redesign_and_rerun(report) -> None:
-    section = _section_html(render_decision_report_html(report))
-    assert "Queries on a fallback engine (1 query)" in section
-    assert "no kept engine" not in section
-    assert "<code>q-count</code> landed on <b>Aurora MySQL</b>" in section
-    assert "No engine could score this query" in section
-    assert "Ruled out: DynamoDB (missing a capability the query needs)." in section
-    assert "Keep it on Aurora MySQL, or redesign it. For DynamoDB: " in section
-    assert CAPABILITY_REDESIGN_HINTS["aggregation"]["dynamodb"] in section
-    assert "does not bring back an engine it removed" in section
-    assert UNSERVABLE_RERUN_TEXT in section
+def test_the_pdf_flags_each_query_with_gates_redesign_and_rerun(report) -> None:
+    text = pdf_text(report)
+    assert "Queries on a fallback engine (1 query)" in text
+    assert "no kept engine" not in text
+    assert "Aurora MySQL No engine could score this query" in text
+    assert "DynamoDB (missing a capability the query needs)" in text
+    assert "Keep it on Aurora MySQL, or redesign it. For DynamoDB: " in text
+    assert " ".join(CAPABILITY_REDESIGN_HINTS["aggregation"]["dynamodb"].split()) in text
+    assert "does not bring back an engine it removed" in text
+    assert " ".join(UNSERVABLE_RERUN_TEXT.split()) in text
 
 
 def test_the_engineering_report_tables_the_same_queries(report) -> None:
@@ -110,16 +104,14 @@ def test_the_engineering_report_tables_the_same_queries(report) -> None:
 
 def test_more_than_the_cap_says_how_many_more() -> None:
     report = _report([_row(f"q{i:03d}") for i in range(UNSERVABLE_SHOWN + 1)])
-    html = _section_html(render_decision_report_html(report))
     md = _section_md(render_engineering_report_md(report))
-    assert "1 more query: see the Engineering Report." in html
     assert "1 more query is not shown here." in md
 
 
 @pytest.mark.parametrize("rows", [None, []])
 def test_no_section_without_any(rows) -> None:
     report = _report(rows)
-    assert "data-figure=unservable-queries" not in render_decision_report_html(report)
+    assert "Queries on a fallback engine" not in pdf_text(report)
     assert MD_HEADING not in render_engineering_report_md(report)
 
 
@@ -127,19 +119,17 @@ def test_the_renderers_print_the_stored_facts(report) -> None:
     doctored = copy.deepcopy(report)
     doctored["facts"]["unservable"]["unservable_query_count"] = 7
     doctored["facts"]["unservable"]["unservable_queries"][0]["redesign_hints"] = ["Stored hint."]
-    html = _section_html(render_decision_report_html(doctored))
+    text = pdf_text(doctored)
     md = _section_md(render_engineering_report_md(doctored))
-    assert "(7 queries)" in html and "(7 queries)" in md
-    assert "Stored hint." in html and "Stored hint." in md
+    assert "(7 queries)" in text and "(7 queries)" in md
+    assert "Stored hint." in text and "Stored hint." in md
 
 
 def test_query_ids_and_text_are_escaped() -> None:
     hostile = _report(
         [_row("q<img src=x>|`", explanation="<script>alert(1)</script> | x", engine='x"><b>')]
     )
-    html = _section_html(render_decision_report_html(hostile))
     md = _section_md(render_engineering_report_md(hostile))
-    assert "<script>" not in html and "<img" not in html and '"><b>' not in html
     assert "<script>" not in md and "<img" not in md
     row = next(line for line in md.splitlines() if line.startswith("| `q"))
     assert row.count(" | ") == 5  # no injected cell
@@ -193,13 +183,12 @@ def test_the_resolvers_own_fallback_reaches_both_reports() -> None:
     assignment = {**result.model_dump(mode="json", by_alias=True), "version": 1}
     digest = query_trace_digest(assignment, {1: assignment}.get, 1, None, capabilities)
     report = _report(digest.model_dump(mode="json", by_alias=True)["unservable"])
-    html = _section_html(render_decision_report_html(report))
     md = _section_md(render_engineering_report_md(report))
-    assert "<code>q1</code> landed on <b>Aurora MySQL</b>" in html
-    assert (
-        "Ruled out: DocumentDB (missing a capability the query needs); DynamoDB (missing a "
-        "capability the query needs)." in html
-    )
-    assert "Keep it on Aurora MySQL, or redesign it. For DocumentDB: this is session" in html
-    assert "For DynamoDB: this is session" in html
     assert "| `q1` | Aurora MySQL |" in md
+    row = next(line for line in md.splitlines() if line.startswith("| `q1`"))
+    assert (
+        "DocumentDB (missing a capability the query needs); DynamoDB (missing a "
+        "capability the query needs)" in row
+    )
+    assert "Keep it on Aurora MySQL, or redesign it. For DocumentDB: this is session" in row
+    assert "For DynamoDB: this is session" in row

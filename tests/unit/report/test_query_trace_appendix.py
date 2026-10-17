@@ -3,8 +3,8 @@
 ``report.json``'s ``query_traces`` holds the full trace of every query whose
 routing has a story (moved after its first assignment, ever left tied,
 overridden) and counts the rest by their first rule; ``facts.query_trace``
-holds the figures (ADR-032). The engineering report renders an appendix from
-both, the decision report a one-line pointer to it; neither counts anything.
+holds the figures (ADR-032). The engineering report and the PDF report render
+the same appendix from both; neither counts anything.
 The traces come from the wordpress sample's real v1/v2 ledger, trimmed
 (``tests/fixtures/wordpress_move_trace.json``).
 """
@@ -13,16 +13,16 @@ from __future__ import annotations
 
 import copy
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from src.contracts.synthesis_output import SynthesisOutputContract
-from src.report.renderers import render_decision_report_html, render_engineering_report_md
+from src.report.renderers import render_engineering_report_md
 from src.shared.query_trace import query_trace_digest
 from src.shared.report_facts import compute_report_facts
+from tests.unit.report.pdf_text import pdf_text
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "wordpress_move_trace.json"
 APPENDIX = "## Appendix: per-query routing decisions"
@@ -152,20 +152,16 @@ def test_the_figures_are_the_stored_facts(report) -> None:
         "6 placed by the customer or a design review, 5 pinned by a listed rule)"
     ) in md
     assert f"- {stored['unlisted_rules'][0]['label']}: 777 queries" in md
-    html = render_decision_report_html(report)
-    assert re.search(r"data-figure=query-traces>[^<]*42 ", html)
+    text = pdf_text(report)
+    assert "(42 queries)" in text and "The other 1000 queries" in text
 
 
-def test_the_decision_report_gives_a_one_line_pointer(report) -> None:
-    html = render_decision_report_html(report)
-    pointers = re.findall(r"<p class=note data-figure=query-traces>(.*?)</p>", html)
-    assert len(pointers) == 1
+def test_the_pdf_carries_the_same_appendix(report) -> None:
+    text = pdf_text(report)
     n = report["facts"]["query_trace"]["listed_query_count"]
-    assert pointers[0].startswith(f"{n} of the ")
-    assert "Engineering Report" in pointers[0]
-    # A pointer, not a copy: no query id or step sentence in the decision report.
+    assert f"({n} queries)" in text
     for trace in report["query_traces"]["queries"]:
-        assert trace["query_id"] not in html
+        assert trace["query_id"] in text
 
 
 def test_a_large_workload_stays_readable() -> None:
@@ -193,7 +189,6 @@ def test_no_appendix_without_traces_or_without_a_ledger() -> None:
     for traces in (None, {"has_ledger": False, "query_count": 7, "queries": []}):
         report = _report(traces)
         assert APPENDIX not in render_engineering_report_md(report)
-        assert "data-figure=query-traces" not in render_decision_report_html(report)
 
 
 def test_nothing_moved_still_says_how_every_query_was_placed() -> None:
@@ -202,7 +197,6 @@ def test_nothing_moved_still_says_how_every_query_was_placed() -> None:
     report = _report(digest)
     appendix = _appendix(render_engineering_report_md(report))
     assert "No query changed engine after its first assignment" in appendix
-    assert "data-figure=query-traces" not in render_decision_report_html(report)
 
 
 def test_trace_text_is_escaped(report) -> None:
@@ -223,8 +217,6 @@ def test_trace_text_is_escaped(report) -> None:
     assert "](http" not in md
     # The id stays inside its code span (where markup is inert), its backtick stripped.
     assert "### `q1<b>`" in md and "q`1" not in md
-    html = render_decision_report_html(tampered)
-    assert "<script>x" not in html
 
 
 def test_the_tie_wording_on_the_trailgear_numbers(report) -> None:
@@ -247,8 +239,6 @@ def test_the_tie_wording_on_the_trailgear_numbers(report) -> None:
         md
     )
     assert "left in an unresolved tie" not in md
-    html = render_decision_report_html(report)
-    assert "unresolved" not in re.search(r"data-figure=query-traces>([^<]*)<", html).group(1)
     # The wordpress query whose placeholder tie the reality check settled.
     settled = next(r for r in stored["listed_queries"] if r["tied"])
     assert not settled["open_tie"]

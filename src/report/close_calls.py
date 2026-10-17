@@ -3,8 +3,8 @@ engine the plan keeps, and how the customer moves them.
 
 The reality check keeps deciding for the customer (ADR-031 Decision 7); these
 sections say where that decision was close. Both format ``facts.close_calls``
-(``src.shared.report_facts.close_call_facts``, ADR-032): the decision report a
-short section, the engineering report a table. Nothing here counts a query.
+(``src.shared.report_facts.close_call_facts``, ADR-032): the engineering report
+and the PDF report as a table. Nothing here counts a query.
 """
 
 from __future__ import annotations
@@ -15,12 +15,11 @@ from src.shared.engine_names import display_engine
 
 from . import escaping
 from .facts import report_facts
-from .formatting import fmt_num, plural_noun, plural_verb
+from .formatting import fmt_num, plural_noun
 
-# How a customer moves a close call: both reports and the PDF. The UI
+# How a customer moves a close call: the engineering report and the PDF. The UI
 # callout says the same, with its last sentence worded for the page it is on
-# (src/ui/src/locales/en.json, analysis-results.close-calls.override), and
-# the interactive report repeats this one (src/ui/src/utils/ExportReport.js).
+# (src/ui/src/locales/en.json, analysis-results.close-calls.override).
 CLOSE_CALL_OVERRIDE_TEXT = (
     "To move any of them, change its engine in the assignment review (a query in a "
     "co-dependency group moves with its group); that writes a new assignment version "
@@ -52,79 +51,12 @@ def _points(value: Any) -> str:
     return f"{fmt_num(value, 1)} {plural_noun(value, 'point')}"
 
 
-def _gap(pair: dict[str, Any]) -> str:
-    """``a gap of 3 points`` or ``a gap of 0 to 4 points``."""
-    low, high = pair.get("min_gap"), pair.get("max_gap")
-    if low == high:
-        return f"a gap of {_points(low)}"
-    return f"a gap of {fmt_num(low, 1)} to {_points(high)}"
-
-
 def _intro(margin: Any) -> str:
     return (
         f"These queries went to an engine that scores less than {_points(margin)} above "
         "another engine the plan keeps, which could serve them too. The assessment "
         "decides for you; you can move them yourself."
     )
-
-
-def pair_sentence(pair: dict[str, Any], margin: Any) -> str:
-    """One engine pair, as plain text: the close calls with their margin and
-    gap, the settled ties apart, the group members, and the alternative."""
-    n = pair.get("pair_query_count", 0)
-    ties = pair.get("exact_tie_count") or 0
-    engine = display_engine(str(pair.get("engine", "")))
-    alt = display_engine(str(pair.get("alternative", "")))
-    tie_noun = f"{ties} exact {plural_noun(ties, 'tie')}"
-    if n:
-        out = (
-            f"{n} {plural_noun(n, 'query', 'queries')} went to {engine} by less than "
-            f"{_points(margin)} over {alt} ({_gap(pair)})"
-        )
-        if ties:
-            out += f"; {engine} also won {tie_noun} with {alt} that a routing rule settled"
-    else:
-        out = f"{tie_noun} between {engine} and {alt} went to {engine} by a routing rule"
-    group = pair.get("group_mean_count") or 0
-    if group:
-        out += (
-            f"; {group} {plural_verb(group, 'is', 'are')} compared on "
-            f"{plural_verb(group, 'its', 'their')} co-dependency group's mean score and "
-            f"{plural_verb(group, 'moves', 'move')} with the group"
-        )
-    one = "every one of them" if n and ties else plural_verb(n or ties, "it", "every one of them")
-    return f"{out}. {alt} can serve {one}."
-
-
-def close_calls_html(report: dict[str, Any]) -> list[str]:
-    """Decision Report "Close calls" section: one line per engine pair, then how to move them."""
-    facts = _facts(report)
-    if facts is None:
-        return []
-    esc = escaping.html_text
-    margin = facts.get("margin_points")
-    items = []
-    # Short: the pairs only. The engineering report names the closest queries.
-    for pair in facts.get("engine_pairs") or []:
-        items.append(
-            f'<li data-engine="{escaping.html_attr(pair.get("engine", ""))}" '
-            f'data-alternative="{escaping.html_attr(pair.get("alternative", ""))}" '
-            f'data-pair-queries="{escaping.html_attr(pair.get("pair_query_count", 0))}">'
-            f"{esc(pair_sentence(pair, margin))}</li>"
-        )
-    return [
-        "<section data-figure=close-calls>",
-        f"<h2 class=section-title>{esc(close_calls_title(facts))}</h2>",
-        "<div class=card><div class=card-b>",
-        f"<p>{esc(_intro(margin))}</p>",
-        "<ul>",
-        *items,
-        "</ul>",
-        f"<p>{esc(CLOSE_CALL_OVERRIDE_TEXT)} The Engineering Report names the closest "
-        "queries of each pair.</p>",
-        "</div></div>",
-        "</section>",
-    ]
 
 
 def close_calls_md(report: dict[str, Any]) -> list[str]:

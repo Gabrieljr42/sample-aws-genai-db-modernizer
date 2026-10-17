@@ -1,8 +1,8 @@
 """Cross-deliverable risk-count consistency (issue #201), and the fixed source
 of those risks (issue #210).
 
-The decision report, the engineering report and the executive summary deck
-(PDF) must all report the same risk totals for the same ``report.json``.
+The engineering report and the PDF report (and, before #987, the decision
+report) must all report the same risk totals for the same ``report.json``.
 Before #201, the decision/engineering reports filtered out risks with no body
 text (``report_facts.risk_has_content``) before counting, while
 the old deck renderer counted every risk in ``risk_assessment.risks``
@@ -113,11 +113,6 @@ class TestSharedRiskFilter:
         assert len(kept) == 12
         assert all(report_facts.risk_has_content(r.get("description")) for r in kept)
 
-    def test_decision_report_count_matches_filtered_risks(self, report: dict) -> None:
-        n = len(renderers.filtered_risks(report))
-        html = renderers.render_decision_report_html(report)
-        assert f"{n} open migration risks" in html
-
     def test_engineering_report_count_matches_filtered_risks(self, report: dict) -> None:
         n = len(renderers.filtered_risks(report))
         md = renderers.render_engineering_report_md(report)
@@ -131,16 +126,14 @@ class TestSharedRiskFilter:
         n = len(renderers.filtered_risks(report))
         assert f"Risk register ({n})" in pdf_text(report)
 
-    def test_decision_and_engineering_reports_agree(self, report: dict) -> None:
+    def test_pdf_and_engineering_reports_agree(self, report: dict) -> None:
         """The regression this guards: before #201/#210 this was 9 / 9 / 12."""
-        html_n = int(
-            re.search(
-                r"(\d+) open migration risks", renderers.render_decision_report_html(report)
-            ).group(1)
-        )
+        from tests.unit.report.pdf_text import pdf_text
+
+        pdf_n = int(re.search(r"Open risks: (\d+)", pdf_text(report)).group(1))
         md_n = int(
             re.search(
                 r"## Risk register \((\d+)\)", renderers.render_engineering_report_md(report)
             ).group(1)
         )
-        assert html_n == md_n == len(renderers.filtered_risks(report)) == 12
+        assert pdf_n == md_n == len(renderers.filtered_risks(report)) == 12

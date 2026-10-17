@@ -6,9 +6,6 @@ Each deliverable states the shared ``WORKLOAD_FIT_DEFINITION``
 (``src/shared/workload_fit_labels.py``) verbatim, at the figure's first
 appearance:
 
-- the decision report (HTML): right after the recommendation table, where the
-  per-engine "Why" cell first states a routed fit (``renderers.
-  render_decision_report_html``);
 - the engineering report (Markdown): right after the "Target engines" table's
   "Why" column, where a routed fit first appears (``renderers.
   render_engineering_report_md``) -- deliberately not under "Migration map"
@@ -29,7 +26,7 @@ appearance:
   with it (``test_deck_routed_confidence._report``, the discourse shape after
   #296/#304).
 
-The UI analysis export, the React results page and the approval gate are
+The React results page and the approval gate are
 covered by the JS parity suite (``src/ui/src/utils/__tests__/
 workloadFitDefinition.test.js``) and ``test_workload_fit_labels_js_sync.py``.
 """
@@ -53,11 +50,6 @@ FIXTURE = Path(__file__).parent / "fixtures" / "e2e09_report.json"
 def report() -> dict:
     data: dict = json.loads(FIXTURE.read_text())
     return data
-
-
-def test_decision_report_states_the_definition_once(report: dict) -> None:
-    html = renderers.render_decision_report_html(report)
-    assert html.count(WORKLOAD_FIT_DEFINITION) == 1
 
 
 def _routed_report() -> dict[str, Any]:

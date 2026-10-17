@@ -79,9 +79,6 @@ is easy to re-check.
 engineering report's own document metadata -- ``job_id``, ``source_artifact``,
 ``generated``, ...) before scanning: those are structured keys, the Markdown
 analogue of an ``ID_FIELDS`` exclusion, not reason text.
-
-``scan_html`` strips markup the same way, so the
-rendered deliverables can be scanned with the same four detectors.
 """
 
 from __future__ import annotations
@@ -500,18 +497,3 @@ _FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 def scan_markdown(text: str, path: str = "") -> list[Finding]:
     """Scan a rendered Markdown deliverable, skipping its YAML frontmatter."""
     return scan_text(_FRONTMATTER_RE.sub("", text, count=1), path)
-
-
-_SCRIPT_OR_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
-_TAG_RE = re.compile(r"<[^>]+>")
-
-
-def scan_html(html: str, path: str = "") -> list[Finding]:
-    """Scan a rendered HTML deliverable's visible text (script/style/tags stripped).
-
-    A plain regex strip, not a DOM parse: good enough to pull out customer-visible
-    prose from this pipeline's own, well-formed templates (never third-party HTML).
-    """
-    text = _SCRIPT_OR_STYLE_RE.sub(" ", html)
-    text = _TAG_RE.sub(" ", text)
-    return scan_text(text, path)

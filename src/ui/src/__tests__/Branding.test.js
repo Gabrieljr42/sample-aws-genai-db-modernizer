@@ -2,12 +2,12 @@
  * #957: the UI names one product, "Database Modernizer Assessment Tool", and
  * never shows "ATX", "AWS Transform" or "transform" (maintainer rule,
  * 2026-10-16). The UI runs locally; the hosted delivery channel's name must not
- * reach a page, a label or the HTML export the results page downloads.
+ * reach a page or a label.
  *
  * What a user can see comes from four places, and each is checked:
  * - every English string in src/locales/en.json;
  * - every string literal, template string and JSX text in the UI source
- *   (non-test files), which includes ExportReport.js's exported document;
+ *   (non-test files);
  * - public/index.html (the browser tab title and description) and the
  *   side-nav and header configuration.
  *

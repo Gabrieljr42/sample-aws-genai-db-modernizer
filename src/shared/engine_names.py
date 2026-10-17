@@ -2,12 +2,10 @@
 
 Single source of truth for turning an engine id (``aurora_mysql``) into the name a
 customer-facing artifact shows (``Aurora MySQL``). Before this module existed, every
-consumer kept its own copy, and two of them drifted into non-brand casing:
-``src.report.analysis_report.ENGINE_LABELS`` (feeds the decision report's engine
-badges and, via JSON injection, the client script in
-``src/report/templates/analysis_report.js``) and its hand-kept mirror in
-``src/ui/src/utils/ExportReport.js`` both said ``Elasticache``, ``AuroraPostgresql``
-and ``AuroraMySQL`` -- no space, wrong internal casing -- which then leaked into the
+consumer kept its own copy, and two of them drifted into non-brand casing: the
+interactive HTML report's engine label table and its hand-kept JS mirror (both
+retired in #987) said ``Elasticache``, ``AuroraPostgresql`` and ``AuroraMySQL`` --
+no space, wrong internal casing -- which then leaked into the
 "Resolved by the assignment" section of the engineering report (#221) once that
 section started naming engines (``src.report.engineering_report``).
 

@@ -13,11 +13,16 @@ from src.shared.unsupported_pattern import (
 from src.shared.workload_fit_labels import WORKLOAD_FIT_DEFINITION, WORKLOAD_FIT_LABEL
 
 from . import escaping
-from .architecture import _architecture_engines, _mapping_split
+from .architecture import (
+    SHARED_TABLES_LABEL,
+    SHARED_TABLES_NOTE,
+    _architecture_engines,
+    _mapping_split,
+)
 from .cache_layer import _cache_layer_md, cache_layer_text
 from .close_calls import close_calls_md
 from .engine_choices import _reroutes_md, _tied_queries_md
-from .engine_roles import _RELATIONAL_ENGINES
+from .engine_roles import _RELATIONAL_ENGINES, SEARCH_READ_MODEL
 from .facts import report_facts
 from .formatting import (
     _completed_designs,
@@ -28,6 +33,7 @@ from .formatting import (
     clip,
     fmt_num,
     plural_noun,
+    plural_verb,
 )
 from .query_traces import query_traces_md
 from .risks import (
@@ -352,19 +358,25 @@ def _trade_offs_md(report: dict[str, Any], facts: dict[str, Any]) -> list[str]:
 
 
 def _target_engines_md(report: dict[str, Any]) -> list[str]:
-    """Engineering Report "Target engines" section: the table and the fit definition.
+    """Engineering Report "Target engines" section: the table, the role notes and
+    the fit definition.
 
-    Also the PDF report's engines section, so both print the same rows.
+    Also the PDF report's engines section, so both print the same rows. Each
+    engine's Scope cell and the "N tables migrate" total are the facts layer's
+    figures (``_architecture_engines``, ``facts.tables_migrate``), in the wording
+    the retired decision report used (#987).
     """
     target_engines = _architecture_engines(report)
     out: list[str] = []
     if target_engines:
+        facts = report_facts(report)
+        migrated = int(facts.get("tables_migrate") or 0)
         # Why each engine is in the target, from the workload routed to it (#152)
         out += [
             "## Target engines",
             "",
-            "| Engine | Role | Workload | Why |",
-            "|---|---|---|---|",
+            "| Engine | Role | Workload | Scope | Why |",
+            "|---|---|---|---|---|",
         ]
         for e in target_engines:
             cached = e.get("cached_queries")
@@ -379,13 +391,22 @@ def _target_engines_md(report: dict[str, Any]) -> list[str]:
             )
             out.append(
                 f"| {escaping.md_cell(display_engine(e['engine']))} | {escaping.md_cell(e['role'])} "
-                f"| {escaping.md_cell(share)} | {escaping.md_cell(e['rationale'] or '-')} |"
+                f"| {escaping.md_cell(share)} | {escaping.md_cell(e['scope'])} "
+                f"| {escaping.md_cell(e['rationale'] or '-')} |"
             )
+        out.append(
+            f"| Total | | {fmt_num(facts.get('workload_total_percent') or 0, 0)}% "
+            f"| {migrated} {plural_noun(migrated, 'table')} "
+            f"{plural_verb(migrated, 'migrates', 'migrate')} | |"
+        )
         out.append("")
+        notes = _engine_role_notes_md(target_engines, migrated)
+        if notes:
+            out += [" ".join(notes), ""]
         # First appearance of a fit figure in this report (inside "Why", e.g. "30%
         # mean fit"): the plain-language definition every deliverable states once,
-        # shared with the decision report, the deck and the UI (bug: fit score
-        # presented as a confidence percentage). Stated here, not under "Migration
+        # shared with the PDF report and the UI (bug: fit score presented as a
+        # confidence percentage). Stated here, not under "Migration
         # map" below -- that section only renders once schema design has produced
         # table_mappings, so a report rendered with no schema design (e.g. every
         # ``--llm-mode none`` run) would otherwise never state the definition at
@@ -393,6 +414,37 @@ def _target_engines_md(report: dict[str, Any]) -> list[str]:
         out.append(f"*{escaping.md_text(WORKLOAD_FIT_DEFINITION)}*")
         out.append("")
     return out
+
+
+def _engine_role_notes_md(engines: list[dict[str, Any]], migrated: int) -> list[str]:
+    """What the retained, search and migration-target roles mean for this plan, and
+    what "incl. shared" counts; one sentence each, only for roles the plan has. The
+    cache layer has its own section."""
+    notes: list[str] = []
+    retained = [e["engine"] for e in engines if e["role"] == "Retained"]
+    if retained:
+        names = ", ".join(escaping.md_text(display_engine(x)) for x in retained)
+        notes.append(
+            f"**{names}** is retained as the relational core (source-compatible, no migration)."
+        )
+    search = [e["engine"] for e in engines if e["role"] == SEARCH_READ_MODEL]
+    if search:
+        names = ", ".join(escaping.md_text(display_engine(x)) for x in search)
+        notes.append(
+            f"**{names}** is a search read model: it serves its queries from data synced "
+            "from the engines that own those tables, holds no system-of-record data, and is "
+            "built after its owners."
+        )
+    targets = [e["engine"] for e in engines if e["role"] == "Migration target"]
+    if targets:
+        names = ", ".join(escaping.md_text(display_engine(x)) for x in targets)
+        notes.append(
+            f"The migration moves the {migrated} {plural_noun(migrated, 'table')} assigned "
+            f"to {names}."
+        )
+    if any(SHARED_TABLES_LABEL in str(e["scope"]) for e in engines):
+        notes.append(escaping.md_text(SHARED_TABLES_NOTE))
+    return notes
 
 
 def _risk_register_md(report: dict[str, Any]) -> list[str]:
@@ -470,7 +522,7 @@ def render_engineering_report_md(report: dict[str, Any], prov: dict[str, str] | 
         "# Database Modernization \u2014 Engineering Report",
         "",
         f"Source database: `{escaping.md_code(db)}`. This is the build companion to the "  # nosemgrep: string-concat-in-list -- intentional multi-line string
-        "Decision Report: "
+        "PDF report: "
         "the source-to-target mapping, the per-engine target schemas, and the query "
         "groups.",
         "",

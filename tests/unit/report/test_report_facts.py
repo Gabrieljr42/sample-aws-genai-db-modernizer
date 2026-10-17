@@ -22,11 +22,11 @@ import re
 from typing import Any
 
 from src.contracts.synthesis_output import ReportFacts, SynthesisOutputContract
-from src.report.decision_report import render_decision_report_html
 from src.report.engine_choices import reroute_summary
 from src.report.engineering_report import render_engineering_report_md
 from src.report.facts import report_facts
 from src.shared.report_facts import compute_report_facts
+from tests.unit.report.pdf_text import pdf_text
 
 
 def _wave1(tables: list[str], views: int = 0) -> dict[str, Any]:
@@ -114,9 +114,10 @@ def _with_facts(report: dict[str, Any], view_ids: set[str] | None = None) -> dic
     return out
 
 
-def _decision_tile(html: str, label: str) -> str:
-    m = re.search(rf"<p>{re.escape(label)}</p><p class=val>([^<]*)</p>", html)
-    assert m, label
+def _tables_migrate(md: str) -> str:
+    """The engine table's "N tables migrate" total in the engineering report."""
+    m = re.search(r"^\| Total \| \| [^|]* \| (\d+) tables? migrates? \|", md, re.M)
+    assert m, "no Total row"
     return m.group(1)
 
 
@@ -148,8 +149,8 @@ def test_renderers_read_the_stored_facts_not_their_own_copy() -> None:
     """Change the stored fact: every deliverable prints the changed figure."""
     report = _with_facts(_merged_report())
     report["facts"]["tables_migrate"] = 42
-    html = render_decision_report_html(report)
-    assert _decision_tile(html, "Tables migrate") == "42"
+    assert _tables_migrate(render_engineering_report_md(report)) == "42"
+    assert "42 tables migrate" in pdf_text(report)
 
 
 # --------------------------------------------------------------------------
@@ -172,12 +173,8 @@ def test_581_every_deliverable_shows_the_tile_figure_in_the_wave_headline() -> N
     report = _with_facts(_merged_report())
     tile = report["facts"]["tables_migrate"]
 
-    html = render_decision_report_html(report)
-    assert _decision_tile(html, "Tables migrate") == str(tile)
-    stats = re.search(r'data-wave="2">.*?<span data-figure=wave-stats>([^<]*)</span>', html)
-    assert stats and stats.group(1).endswith(f", 4 served, {tile} move")
-
     md = render_engineering_report_md(report)
+    assert _tables_migrate(md) == str(tile)
     assert "- 1 table kept in sync from their owner: `db.t4` -> Aurora MySQL (CDC)" in md
     assert "moves with its owner): `db.t2` -> DynamoDB (CDC)" in md
 
@@ -269,9 +266,6 @@ def test_578_wave1_states_tables_and_views_apart() -> None:
     assert (wave1["served_tables"], wave1["tables_only"], wave1["views"]) == (6, 5, 1)
     assert wave1["tables_only"] == report["source_table_count"]
 
-    html = render_decision_report_html(report)
-    stats = re.search(r'data-wave="1">.*?<span data-figure=wave-stats>([^<]*)</span>', html)
-    assert stats and stats.group(1).endswith(", 6 source tables and views (5 tables, 1 view)")
     md = render_engineering_report_md(report)
     assert "- 6 source tables and views (5 tables, 1 view): " in md
 
@@ -308,8 +302,8 @@ def test_a_percentage_total_is_rounded_once_by_the_renderer() -> None:
     report["ranking"][2]["workload_percent"] = 33.3
     report = _with_facts(report)
     assert report["facts"]["workload_total_percent"] == 99.45
-    html = render_decision_report_html(report)
-    assert re.search(r"<tr data-figure=total><td colspan=2>Total</td><td>99%</td>", html)
+    md = render_engineering_report_md(report)
+    assert re.search(r"^\| Total \| \| 99% \|", md, re.M)
 
 
 def test_the_moved_after_approval_count_is_a_fact() -> None:
@@ -322,10 +316,8 @@ def test_the_moved_after_approval_count_is_a_fact() -> None:
     report = _with_facts(report)
     assert report["facts"]["post_schema_reroute_count"] == 2
     report["facts"]["post_schema_reroute_count"] = 7
-    assert "Moved after your approval (7 queries)" in render_decision_report_html(report)
     assert "## Moved after approval (7 queries)" in render_engineering_report_md(report)
-    # The shared summary sentence (decision and engineering reports) reads it too;
-    # the interactive report's JS is pinned by ExportReport.postSchemaRerouteCount.test.js.
+    # The engineering report's summary sentence reads it too.
     summary = reroute_summary(report)
     assert summary is not None and "found that 7 queries cannot run" in summary
 
@@ -470,8 +462,8 @@ def test_546_no_deliverable_claims_the_removal_or_its_saving() -> None:
     assert "## Migration trade-offs (1)" in md
     assert "### Reversed by a later assignment edit" in md
     assert "DocumentDB stays in the architecture" in md
-    html = render_decision_report_html(report)
-    assert "Engines not used" not in html
+    text = pdf_text(report)
+    assert "leaves the architecture" not in text and "Removes $" not in text
 
 
 def test_546_a_removed_engine_still_lists_with_its_reasons() -> None:
@@ -564,10 +556,10 @@ def test_861_every_deliverable_shows_the_partial_consolidation() -> None:
     assert "Reversed by a later assignment edit" not in md
     assert "## Migration trade-offs (4)" in md
     assert "DocumentDB stays for 2 queries" in md
-    html = render_decision_report_html(report)
-    assert "DocumentDB stays for 2 queries" in html
-    assert 'data-decision="0"' in html and 'data-decision="1"' in html
-    assert "the customer chose DocumentDB" in html
+    assert "the customer chose DocumentDB" in md
+    text = pdf_text(report)
+    assert "DocumentDB stays for 2 queries" in text
+    assert "the customer chose DocumentDB" in text
 
 
 def test_861_a_customer_edit_after_the_check_still_reverses_it() -> None:
@@ -605,8 +597,8 @@ def test_861_an_edit_that_undoes_a_partial_consolidation_reverses_it() -> None:
     current = md.split("## Migration trade-offs", 1)[1].split("### Reversed", 1)[0]
     assert "moved to DynamoDB" not in current and "moved to Aurora MySQL" not in current
     assert "### Reversed by a later assignment edit" in md
-    html = render_decision_report_html(report)
-    assert "moved to DynamoDB" not in html
+    text = pdf_text(report).split("Reversed by a later assignment edit", 1)[0]
+    assert "moved to DynamoDB" not in text
 
 
 def test_861_an_edit_that_undoes_part_of_it_states_what_stayed_moved() -> None:
@@ -629,9 +621,9 @@ def test_861_an_edit_that_undoes_part_of_it_states_what_stayed_moved() -> None:
     md = render_engineering_report_md(report)
     assert "Consolidated 1 query from DocumentDB → DynamoDB" in md
     assert "3 queries moved to DynamoDB" not in md
-    html = render_decision_report_html(report)
-    assert "Consolidated 1 query from DocumentDB → DynamoDB" in html
-    assert "3 queries moved to DynamoDB" not in html
+    text = pdf_text(report)  # the PDF's font draws "→" as "to"
+    assert "Consolidated 1 query from DocumentDB to DynamoDB" in text
+    assert "3 queries moved to DynamoDB" not in text
 
 
 # --------------------------------------------------------------------------
@@ -677,22 +669,20 @@ def test_595_the_facts_carry_each_reality_check_decision() -> None:
     assert decisions[0]["query_ids"] == ["q1", "q2"]
 
 
-def test_595_the_decision_report_and_engineering_report_show_them() -> None:
+def test_595_the_pdf_report_and_engineering_report_show_them() -> None:
     report = _with_facts(_kept_report())
-    html = render_decision_report_html(report)
-    section = re.search(r"<section data-figure=reality-check-decisions>.*?</section>", html, re.S)
-    assert section, "no Reality check decisions section"
-    assert '<li data-decision="0" data-kind="kept"><b>DocumentDB kept</b>: 2 queries' in (
-        section.group(0)
-    )
-    assert "Recommended pattern: Event-Driven Sync" in section.group(0)
+    text = pdf_text(report)
+    assert "DocumentDB kept: 2 queries need nested-document updates" in text
+    assert "Recommended pattern: Event-Driven Sync" in text
 
     md = render_engineering_report_md(report)
     assert "DocumentDB kept: 2 queries need nested-document updates" in md
+    assert "Recommended pattern: Event-Driven Sync" in md
 
 
 def test_595_no_reality_check_decision_no_section() -> None:
     report = _kept_report()
     report["trade_offs"] = report["trade_offs"][2:]
     report = _with_facts(report)
-    assert "reality-check-decisions" not in render_decision_report_html(report)
+    assert report["facts"]["reality_check_decisions"] == []
+    assert "### reality-check" not in render_engineering_report_md(report)

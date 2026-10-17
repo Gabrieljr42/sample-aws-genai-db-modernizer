@@ -2,7 +2,7 @@
 
 ``risk_assessment.resolved_risks`` records analysis risks whose queries the effective
 assignment moved to an engine that serves them. The engineering report lists them in a
-"Resolved by the assignment" section and the decision report's risk line counts them,
+"Resolved by the assignment" section and the PDF report's risk lines count them,
 so a HIGH risk never vanishes from a deliverable without a trace.
 """
 
@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from src.report import renderers
+from tests.unit.report.pdf_text import pdf_text
 
 FIXTURE = Path(__file__).parent / "fixtures" / "wordpress_report.json"
 
@@ -82,15 +83,14 @@ def test_engineering_report_resolved_risks_use_display_names_for_unknown_engine(
     assert "Neptune → Unmapped Engine" in section
 
 
-def test_decision_report_counts_resolved_risks(report: dict) -> None:
-    html = renderers.render_decision_report_html(report)
-    assert "2 more were resolved by the assignment." in html
+def test_the_pdf_counts_resolved_risks(report: dict) -> None:
+    assert "Resolved by the assignment: 2" in pdf_text(report)
 
 
 def test_no_resolved_risks_no_section(report: dict) -> None:
     report["risk_assessment"].pop("resolved_risks")
     assert "Resolved by the assignment" not in renderers.render_engineering_report_md(report)
-    assert "resolved by the assignment" not in renderers.render_decision_report_html(report)
+    assert "resolved by the assignment" not in pdf_text(report).lower()
 
 
 def test_resolved_risk_label_kept_when_resolved_onto_its_own_engine() -> None:
@@ -119,30 +119,27 @@ def test_engineering_report_says_kept_not_the_same_engine_twice(report: dict) ->
     assert "Aurora MySQL → Aurora MySQL" not in section
 
 
-def test_decision_report_states_resolved_count_when_no_open_risks_remain(report: dict) -> None:
-    """#434: with no open risks the "Risk posture" section used to disappear
-    whenever there were also no mitigation strategies, saying nothing about the
-    risks the assignment resolved -- "overall risk LOW" with no section at all
-    reads as "no migration risk"."""
+def test_the_pdf_states_resolved_count_when_no_open_risks_remain(report: dict) -> None:
+    """#434: with no open risks the risk section must still say what the
+    assignment resolved -- "overall risk LOW" with nothing else reads as "no
+    migration risk"."""
     report["risk_assessment"]["risks"] = []
     report["risk_assessment"]["mitigation_strategies"] = []
-    html = renderers.render_decision_report_html(report)
-    assert "No open migration risks; 2 were resolved by the assignment" in html
-    assert "see the Engineering Report" in html
-    assert renderers.NO_OPEN_RISKS_CAVEAT in html
+    text = pdf_text(report)
+    assert "No open migration risks; 2 resolved by the assignment." in text
+    assert " ".join(renderers.NO_OPEN_RISKS_CAVEAT.split()) in text
 
 
-def test_decision_report_says_so_with_the_caveat_when_truly_no_risks(report: dict) -> None:
-    """#645: as the deck's risk slide does, never an empty or missing section that
-    reads as "no migration risk"."""
+def test_the_pdf_says_so_with_the_caveat_when_truly_no_risks(report: dict) -> None:
+    """#645: never an empty or missing section that reads as "no migration risk"."""
     report["risk_assessment"]["risks"] = []
     report["risk_assessment"]["resolved_risks"] = []
     report["risk_assessment"]["mitigation_strategies"] = []
-    html = renderers.render_decision_report_html(report)
-    assert "Risk posture" in html
-    assert "No risks were identified in this analysis." in html
-    assert renderers.NO_OPEN_RISKS_CAVEAT in html
-    assert "Mitigation strategies" not in html
+    text = pdf_text(report)
+    assert "Risks" in text
+    assert "No risks were identified in this analysis." in text
+    assert " ".join(renderers.NO_OPEN_RISKS_CAVEAT.split()) in text
+    assert "Mitigation strategies" not in text
 
 
 def test_mitigation_repeating_the_description_is_not_rendered_twice(report: dict) -> None:

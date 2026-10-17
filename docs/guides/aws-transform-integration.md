@@ -41,7 +41,8 @@ orchestrator  (AGENT_TYPE=orchestrator)
      +-> analysis-<engine>     -> analysis-<target>/analysis.json (+ decision-trace, +er-diagram)
      +-> assignment-resolver   -> assignment/v1/assignment.json
      +-> schema-<engine>       -> schema-<engine>/v1/schema_output.json
-     +-> referee-synthesis     -> synthesis/v1/report.json (+ Decision & Engineering reports)
+     +-> referee-synthesis     -> synthesis/v1/report.json (+ PDF, Engineering report and
+                                  assessment data in deliverables/)
 ```
 
 `<engine>` is one of `dynamodb`, `documentdb`, `elasticache`, `opensearch`,
@@ -80,9 +81,9 @@ Analysis runs six engines from one table-driven core (`run_analysis_core` in
 `core.py`). DynamoDB and DocumentDB run the optional Bedrock LLM advisor and can
 take up to ~90 minutes on a large workload; the other four are purely
 deterministic and finish in minutes. Synthesis renders two audience-shaped
-reports (an executive Decision Report and a build-team Engineering Report)
-alongside the raw report JSON and publishes all three to the WebApp Artifacts
-panel.
+reports (the executive PDF report and a build-team Engineering Report)
+alongside the raw report JSON, publishes all three to the WebApp Artifacts
+panel, and keeps a durable copy of each as the job's `deliverables/` folder.
 
 ## How the orchestrator drives a subagent (A2A)
 

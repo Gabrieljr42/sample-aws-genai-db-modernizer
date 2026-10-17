@@ -23,7 +23,12 @@ from src.api.main import app
 from src.api.routes import results
 from src.api.services.local_execution import LocalExecutionService
 from src.api.services.local_s3 import LocalS3Service
-from src.report.deliverables import DELIVERABLES_DIR, FOLDER_ENTRIES, INDEX_FILENAME
+from src.report.deliverables import (
+    DELIVERABLES_DIR,
+    FOLDER_ENTRIES,
+    INDEX_FILENAME,
+    RETIRED_FOLDER_FILENAMES,
+)
 from src.storage.local_store import LocalArtifactStore
 
 client = TestClient(app)
@@ -35,10 +40,7 @@ CONTENT = {
     "engineering-report.md": b"# Engineering report\n",
     "assessment-data.json": b'{"facts": {}}',
     "index.md": b"# Database Modernizer Assessment Tool: deliverables for wordpress\n",
-    "decision-report.html": b"<html><script>alert(1)</script></html>",
-    "analysis-report.html": b"<html><script>alert(2)</script></html>",
 }
-HTML = ("decision-report.html", "analysis-report.html")
 
 
 @pytest.fixture
@@ -131,8 +133,6 @@ class TestDownloadDeliverable:
             ("engineering-report.md", "text/markdown"),
             ("assessment-data.json", "application/json"),
             ("index.md", "text/markdown"),
-            ("decision-report.html", "text/html"),
-            ("analysis-report.html", "text/html"),
         ],
     )
     def test_serves_each_type_with_its_media_type(self, root: Path, name: str, media: str) -> None:
@@ -209,20 +209,19 @@ class TestDownloadDeliverable:
         response = client.get("/api/v1/assessments/..%2Fwordpress/deliverables/assessment.pdf")
         assert response.status_code in (404, 422)
 
-    @pytest.mark.parametrize("name", HTML)
-    def test_an_html_report_is_an_attachment_sandboxed_and_not_sniffed(
+    @pytest.mark.parametrize("name", RETIRED_FOLDER_FILENAMES)
+    def test_a_retired_html_report_an_older_round_left_is_not_served(
         self, root: Path, name: str
     ) -> None:
-        """The HTML reports carry customer and model text: a browser must save
-        them, never render them on the API origin, and never run their scripts
-        even if it ignores the attachment disposition (#961 review)."""
+        """#987: a job rendered before the HTML reports were retired still has
+        them in its folder. They are not listed and never downloaded."""
+        (root / DB / JOB / DELIVERABLES_DIR / name).write_bytes(b"<html>old</html>")
         response = client.get(f"/api/v1/assessments/{JOB}/deliverables/{name}")
-        assert response.status_code == 200
-        assert response.headers["content-disposition"] == f'attachment; filename="{name}"'
-        assert response.headers["x-content-type-options"] == "nosniff"
-        assert response.headers["content-security-policy"] == "sandbox"
+        assert response.status_code == 404
+        assert b"old" not in response.content
+        assert name not in {f["filename"] for f in _listing()["files"]}
 
-    def test_a_non_html_file_carries_no_sandbox_policy(self, root: Path) -> None:
+    def test_no_file_carries_a_sandbox_policy_any_more(self, root: Path) -> None:
         response = client.get(f"/api/v1/assessments/{JOB}/deliverables/assessment.pdf")
         assert "content-security-policy" not in response.headers
 

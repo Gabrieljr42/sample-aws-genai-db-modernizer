@@ -916,9 +916,7 @@ def phase_report(artifact_root: str, job_id: str, db: str, llm_mode: str) -> dic
     result = run_report.run(job_id, db, artifact_root, None)
     if result["status"] == "error":
         _error("report", result["message"])
-    status = {
-        k: result[k] for k in ("status", "deliverables_dir", "errors", "warnings") if k in result
-    }
+    status = {k: result[k] for k in ("status", "deliverables_dir", "errors") if k in result}
     if result.get("deliverables_dir"):
         status["deliverables_dir"] = display_path(result["deliverables_dir"])
         _log_artifact("report", status["deliverables_dir"])

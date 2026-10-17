@@ -146,7 +146,7 @@ _SAFE_NAME_RE = re.compile(r"[A-Za-z0-9_.-]+")
 # non-deterministic assertions) falls into "contracts". Mirrors the four
 # suites described in ci/README.md / ci/e2e.sh.
 _JUNIT_CATEGORIES: tuple[tuple[str, str], ...] = (
-    ("test_report_html", "html"),
+    ("test_report_engineering", "engineering"),
     ("test_report_pdf", "pdf"),
     ("test_ui", "ui"),
 )
@@ -895,11 +895,11 @@ def check_transcript(
 
 
 def parse_junit_counts(path: Path) -> dict[str, dict[str, int]]:
-    """Bucket a junit XML's testcases into contracts/html/pdf/ui, counting
+    """Bucket a junit XML's testcases into contracts/engineering/pdf/ui, counting
     total and failed (failure or error child element) per bucket."""
     buckets: dict[str, dict[str, int]] = {
         "contracts": {"total": 0, "failed": 0},
-        "html": {"total": 0, "failed": 0},
+        "engineering": {"total": 0, "failed": 0},
         "pdf": {"total": 0, "failed": 0},
         "ui": {"total": 0, "failed": 0},
     }
@@ -969,7 +969,7 @@ def build_results_row(
     checks: dict[str, bool | None] = {
         "transcript": None,
         "contracts": None,
-        "html": None,
+        "engineering": None,
         "pdf": None,
         "ui": None,
         "judge": None,
@@ -1039,7 +1039,7 @@ def build_results_row(
             else:
                 checks[category] = buckets[category]["failed"] == 0
 
-    apply_junit(report_junit, ("contracts", "html", "pdf"))
+    apply_junit(report_junit, ("contracts", "engineering", "pdf"))
     if mode == "chat":
         checks["ui"] = None  # expected: chat mode never runs the UI suite
     else:
@@ -1055,13 +1055,15 @@ def build_results_row(
         checks["judge"] = bool(judge_payload.get("pass"))
         judge_section = {"mean": judge_payload.get("mean"), "scores": judge_payload.get("scores")}
 
-    required = ["transcript", "contracts", "html", "pdf", "judge"]
+    required = ["transcript", "contracts", "engineering", "pdf", "judge"]
     if mode != "chat":
         required.append("ui")
     overall_pass = (not missing_required) and all(checks.get(k) is True for k in required)
 
     return {
-        "schema_version": 1,
+        # 2 (#987): the "html" check became "engineering" when the HTML reports
+        # were retired.
+        "schema_version": 2,
         "timestamp": datetime.now(UTC).isoformat(),
         "git_sha": git_sha if git_sha is not None else _git_sha(),
         "mode": mode,

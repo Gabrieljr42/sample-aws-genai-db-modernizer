@@ -34,7 +34,7 @@ _RESULTS: list[PipelineResult] = []
 # param. pytest-playwright's `--browser chromium --browser webkit` makes
 # `browser_name` effectively parametrized too, and as test collection
 # interleaves `run`'s two sample ids with `browser_name`'s two browser ids
-# across tests.py/test_report_html.py/test_report_pdf.py, pytest tears down and
+# across the e2e test modules (test_report_pdf.py and the others), pytest tears down and
 # re-creates `run` far more than twice a session (13 times, measured with
 # `--setup-plan` on this suite) even though it only has 2 possible values. Each
 # teardown+setup re-executes the full deterministic pipeline (~13s), so that
@@ -140,9 +140,12 @@ def _version_sort_key(path: Path) -> tuple[int, str]:
 
 @pytest.fixture(scope="session", autouse=True)
 def _copy_deliverables_to_e2e_output() -> Iterator[None]:
-    """If E2E_OUTPUT is set, copy each run's synthesis/v*/ deliverables into
+    """If E2E_OUTPUT is set, copy each run's ``deliverables/`` folder into
     $E2E_OUTPUT/deliverables/<db>/ at session end, so CI can publish the
-    rendered HTML/PDF as a downloadable artifact without re-running anything.
+    rendered PDF and engineering report as a downloadable artifact without
+    re-running anything. The latest synthesis version's own files (report.json
+    and, in an LLM run, the model input and response) go to
+    $E2E_OUTPUT/deliverables/<db>/synthesis/ next to them.
     """
     yield
     output = os.environ.get("E2E_OUTPUT")
@@ -150,18 +153,22 @@ def _copy_deliverables_to_e2e_output() -> Iterator[None]:
         return
     dest_root = Path(output) / "deliverables"
     for result in _RESULTS:
-        synthesis_dir = result.job_dir() / "synthesis"
-        if not synthesis_dir.is_dir():
-            continue
         dest = dest_root / result.db
-        dest.mkdir(parents=True, exist_ok=True)
-        # Numeric sort, not lexical: "v10" must sort after "v2", not before.
-        for version_dir in sorted(synthesis_dir.glob("v*"), key=_version_sort_key):
-            if not version_dir.is_dir():
-                continue
-            for f in version_dir.iterdir():
+        folder = result.job_dir() / "deliverables"
+        if folder.is_dir():
+            dest.mkdir(parents=True, exist_ok=True)
+            for f in folder.iterdir():
                 if f.is_file():
                     shutil.copy2(f, dest / f.name)
+        synthesis_dir = result.job_dir() / "synthesis"
+        versions = sorted(
+            (v for v in synthesis_dir.glob("v*") if v.is_dir()), key=_version_sort_key
+        )
+        if versions:
+            (dest / "synthesis").mkdir(parents=True, exist_ok=True)
+            for f in versions[-1].iterdir():
+                if f.is_file():
+                    shutil.copy2(f, dest / "synthesis" / f.name)
 
 
 @pytest.fixture(scope="session")
@@ -242,12 +249,21 @@ def _terminate(proc: subprocess.Popen, log_file) -> None:
 
 @pytest.fixture(scope="session")
 def all_runs(e2e_root: Path) -> list[PipelineResult]:
-    """Every sample in ONE artifact root, so the UI lists every job. In external-job
-    mode (E2E_ARTIFACT_ROOT/E2E_DB/E2E_JOB set) there's only the one job to list."""
+    """Every sample in ONE artifact root, so the UI lists every job, plus a
+    wordpress job with a schema design (``tests/e2e/designed_run.py``). In
+    external-job mode (E2E_ARTIFACT_ROOT/E2E_DB/E2E_JOB set) there's only the one
+    job to list."""
     if _external_env() is not None:
         return [_external_job_result()]
     root = e2e_root / "ui-artifacts"
-    return [_run_pipeline_tracked(s, root, job_id=f"ui-{s[:4]}") for s in SAMPLES]
+    runs = [_run_pipeline_tracked(s, root, job_id=f"ui-{s[:4]}") for s in SAMPLES]
+    # The same wordpress job with a DynamoDB schema design, so the results page
+    # renders its design panels (explorer, trade-offs, PE notes) with no model.
+    from tests.e2e.designed_run import run_designed_wordpress
+
+    designed = run_designed_wordpress(root, "ui-desi")
+    _RESULTS.append(designed)
+    return [*runs, designed]
 
 
 @pytest.fixture(scope="session")

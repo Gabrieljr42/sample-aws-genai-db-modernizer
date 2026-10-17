@@ -19,12 +19,11 @@ DB, JOB = "discourse", "job-x"
 
 
 @pytest.fixture
-def seeded(tmp_path: Path, monkeypatch) -> Path:
+def seeded(tmp_path: Path) -> Path:
     from src.storage.local_store import LocalArtifactStore
 
     store = LocalArtifactStore(base_dir=str(tmp_path))
     store.write_json(f"{DB}/{JOB}/synthesis/v2/report.json", json.loads(FIXTURE.read_text()))
-    monkeypatch.setattr("src.report.analysis_report.default_graph_fetcher", lambda *_: False)
     return tmp_path
 
 
@@ -34,7 +33,7 @@ def test_phase_report_renders_the_deliverables_folder(seeded: Path, llm_mode, ca
 
     status = run_assessment.phase_report(str(seeded), JOB, DB, llm_mode)
 
-    assert status["status"] in ("complete", "partial"), status
+    assert status["status"] == "complete", status
     folder = seeded / DB / JOB / "deliverables"
     assert (folder / "assessment.pdf").exists()
     assert (folder / "index.md").exists()

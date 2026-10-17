@@ -2,20 +2,21 @@
 
 Round 2: a real-model run (schema design present, which the deterministic
 ``--llm-mode none`` samples never exercise) flagged 70+ findings in
-``report.json``, 20 in the engineering report and 16 in the analysis report,
+``report.json``, 20 in the engineering report and 16 in the interactive HTML
+report (retired in #987; the results page shows the same text),
 all false positives -- key templates (``wp_options:{option_name}``) and the
 engine id ElastiCache's alternative entry carries are legitimate
 customer-facing identifiers, not internal wording. That fix was to the guard
 (``ID_FIELD_PATHS``, the snake_case detector), never the deliverables.
 
 Round 3: the SAME real-model validation then found a genuine leak the guard
-was right to flag -- the interactive analysis report's "Aurora Design"
+was right to flag -- the interactive HTML report's "Aurora Design"
 section printed the raw ``Optimization.category`` code directly
 (``"read_replica: Aurora cluster"``, ``"io_optimized: Aurora MySQL
 cluster"``). That fix was to the deliverable (``src/shared/
-optimization_labels.py``, ``ExportReport.js``), not the guard -- see that
-module's docstring. The analysis-report fixture below is extended with this
-section so the deterministic suite covers it too.
+optimization_labels.py`` and its JS mirror, which the results page now uses),
+not the guard -- see that module's docstring. The rendered-page fixture below is
+extended with this section so the deterministic suite covers it too.
 
 Round 4: a THIRD real-model run (schema design again) flagged
 ``$.query_groups[35].access_patterns[0].description`` -- ordinary model-
@@ -46,15 +47,11 @@ every category the Aurora contracts allow is covered, not just the ones one
 particular run happened to produce.
 ``schema_design_engineering_report_excerpt.md`` is the "Migration map" table
 and the "### ElastiCache" target-schema table from the rendered engineering
-report (both show backtick-quoted key templates). ``schema_design_analysis_report_
-excerpt.txt`` is the ElastiCache access-pattern table from the analysis
-report's Playwright-rendered ``inner_text("body")`` (plain table-cell text,
-no backticks) -- the exact shape ``tests/e2e/test_report_html.py`` scans --
-plus the Aurora Design section's optimizations list, re-rendered through the
-FIXED ``ExportReport.js`` (jsdom ``textContent``, reformatted onto separate
-lines for readability; the real run's own saved HTML still has the round-3
-bug baked in, since it was generated before the fix, so it cannot be reused
-as-is for this part)."""
+report (both show backtick-quoted key templates). ``schema_design_rendered_page_
+excerpt.txt`` is the ElastiCache access-pattern table from the rendered page's
+``inner_text("body")`` (plain table-cell text, no backticks) -- the shape the
+browser checks scan -- plus the Aurora Design section's optimizations list with
+the readable category labels (reformatted onto separate lines for readability)."""
 
 from __future__ import annotations
 
@@ -74,8 +71,8 @@ def _engineering_excerpt() -> str:
     return (FIXTURES / "schema_design_engineering_report_excerpt.md").read_text()
 
 
-def _analysis_excerpt() -> str:
-    return (FIXTURES / "schema_design_analysis_report_excerpt.txt").read_text()
+def _page_excerpt() -> str:
+    return (FIXTURES / "schema_design_rendered_page_excerpt.txt").read_text()
 
 
 class TestRealModelReportJsonIsClean:
@@ -148,27 +145,27 @@ class TestRealModelEngineeringReportExcerptIsClean:
 
 class TestRealModelAnalysisReportExcerptIsClean:
     def test_elasticache_access_pattern_table_has_no_findings(self) -> None:
-        assert scan_text(_analysis_excerpt()) == []
+        assert scan_text(_page_excerpt()) == []
 
     def test_fixture_actually_has_key_templates_with_no_backticks(self) -> None:
-        """Unlike the Markdown report, the analysis report's rendered table
+        """Unlike the Markdown report, the rendered page's table
         cells carry no backticks at all -- the colon-not-followed-by-whitespace
         rule has to work without the code-span exemption's help here."""
-        text = _analysis_excerpt()
+        text = _page_excerpt()
         assert "wp_options:{option_name}" in text
         assert "`" not in text
 
     def test_fixture_shows_the_fixed_aurora_optimization_labels(self) -> None:
         """#587 round 3: the real leak -- confirms the fixture actually
         exercises the fixed shape, not a vacuously clean one."""
-        text = _analysis_excerpt()
+        text = _page_excerpt()
         assert "Read replica: Aurora cluster" in text
         assert "I/O-Optimized storage: Aurora MySQL cluster" in text
         assert "read_replica" not in text
         assert "io_optimized" not in text
 
     def test_a_planted_engine_id_leak_is_still_caught(self) -> None:
-        text = _analysis_excerpt() + "\nMoved to aurora_mysql because of a tie.\n"
+        text = _page_excerpt() + "\nMoved to aurora_mysql because of a tie.\n"
         findings = scan_text(text)
         assert [f.kind for f in findings] == ["engine_id"]
         assert findings[0].text == "aurora_mysql"

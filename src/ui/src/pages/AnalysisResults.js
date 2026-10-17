@@ -46,7 +46,6 @@ import UnservableQueriesCallout from "../components/UnservableQueriesCallout";
 import MigrationWavePlan from "../components/MigrationWavePlan";
 import DeliverablesPanel from "../components/DeliverablesPanel";
 import { buildQueryRoutingRows } from "../utils/queryRouting";
-import { generateHTMLReport } from "../utils/ExportReport";
 import { getCacheOverlay, ownerDistribution, formatCacheLayerLine, cacheOverlayNotes, targetEngineEntries, resolveCostBreakdown, ownerSchemaDesigns, cacheAccessPatternCount, addCacheOverlayNode, cacheLayerAccessPatterns } from "../utils/cacheLayer";
 import { summaryFallbackInfo } from "../utils/summaryFallback";
 import { fallbackWithheldReason } from "../utils/fallbackWithheldReason";
@@ -59,6 +58,7 @@ import { costBaselineStats } from "../utils/tcoAnalysis";
 // rather than this page's own hand-kept copy.
 import { ENGINE_LABELS } from "../utils/engineNames";
 import { WORKLOAD_FIT_DEFINITION } from "../utils/workloadFitLabels";
+import { optimizationLabel } from "../utils/optimizationLabels";
 import { openRiskCountAt, resolvedRiskCountOf, routingHistoryRecorded, routingKindsById, tradeOffsByTab, tradeOffTabLabel } from "../utils/reportFacts";
 
 
@@ -80,7 +80,7 @@ const ENGINE_BADGE_COLORS = {
   aurora: 'green',
 };
 
-// #373: mirrors src/report/decision_report.py's .risk/.sev CSS -- red for the
+// #373: the severity colours the retired HTML decision report used -- red for the
 // error-level severities (CRITICAL and HIGH, kept equally severe, #270),
 // amber for MEDIUM, green for LOW. `stopped` is an unrated severity (#270
 // round-1 review) -- grey, matching the deck's muted UNRATED accent.
@@ -387,8 +387,8 @@ const AnalysisResultsPage = memo(() => {
 
   // #269: whether this synthesis summary was replaced by its deterministic
   // fallback (a grounding check rejected the generated text against the final
-  // records, #205) -- the Decision Report already says so when it is
-  // (src/report/decision_report.py); this keeps the Results page in agreement with it.
+  // records, #205) -- the PDF report already says so when it is
+  // (src/report/pdf_report.py); this keeps the Results page in agreement with it.
   const summaryFallback = summaryFallbackInfo(
     synthesis?.summary_source,
     synthesis?.summary_validation_warnings,
@@ -416,7 +416,7 @@ const AnalysisResultsPage = memo(() => {
   // #358: cost breakdown keeps the cache layer's own cost card even though it
   // owns no workload share, and the projected total is the report's own
   // tco_analysis.projected_monthly_cost -- not a sum recomputed from a
-  // filtered subset -- so it matches the decision report and chat.
+  // filtered subset -- so it matches the PDF report and chat.
   const { items: costBreakdown, total: projectedCost } = useMemo(
     () => resolveCostBreakdown(synthesis?.tco_analysis, afterDist, cacheOverlay, synthesis?.facts),
     [synthesis, afterDist, cacheOverlay]
@@ -479,6 +479,32 @@ const AnalysisResultsPage = memo(() => {
     { href: `/analysis/monitor/summary/${jobId}`, text: t('analysis-results.breadcrumb.assessment') },
     { href: `/analysis/results/${jobId}`, text: t('analysis-results.breadcrumb.results') }
   ], [jobId, t]);
+
+  // Names for the layout's navigation landmark and its toggle buttons, so
+  // assistive tech can tell them apart (axe: button-name, landmark-unique).
+  // Accessible names for the explorer's pagers and single-select tables (axe:
+  // button-name on the arrow buttons, label on the selection radios).
+  const explorerPaginationLabels = useMemo(() => ({
+    nextPageLabel: t('analysis-results.query-routing.next-page'),
+    previousPageLabel: t('analysis-results.query-routing.previous-page'),
+    pageLabel: n => t('analysis-results.query-routing.page', { page: n }),
+    paginationLabel: t('analysis-results.explorer.pagination'),
+  }), [t]);
+  // Each table also gets its own name: a horizontally scrollable Cloudscape table
+  // is a region landmark, and two unnamed ones collide (axe: landmark-unique).
+  const explorerSelectionLabels = useCallback(tableLabel => ({
+    tableLabel,
+    selectionGroupLabel: t('analysis-results.explorer.selection-group'),
+    itemSelectionLabel: (data, item) => t('analysis-results.explorer.select-item', {
+      name: item.table || item.id || '',
+    }),
+  }), [t]);
+
+  const layoutAriaLabels = useMemo(() => ({
+    navigation: t('analysis-results.layout.navigation'),
+    navigationToggle: t('analysis-results.layout.navigation-toggle'),
+    navigationClose: t('analysis-results.layout.navigation-close'),
+  }), [t]);
 
 
   // ============================================
@@ -1081,106 +1107,6 @@ const AnalysisResultsPage = memo(() => {
     setSelectedQueryId(null);
   }, []);
 
-  // Export progress modal state
-  const [showExportProgress, setShowExportProgress] = useState(false);
-  const [exportProgress, setExportProgress] = useState({ current: 0, total: 4, message: '' });
-
-  const handleExportToHTML = useCallback(async () => {
-    try {
-      setShowExportProgress(true);
-      setExportProgress({ current: 0, total: 4, message: 'Starting export...' });
-
-      const apiManager = new ApiManager();
-
-      // Prepare all API calls
-      const apiCalls = [
-        {
-          id: 'results',
-          path: `/assessments/${jobId}/results`,
-          method: 'GET'
-        },
-        {
-          id: 'schema-designs',
-          path: `/assessments/${jobId}/schema-designs`,
-          method: 'GET'
-        },
-        {
-          id: 'query-journeys',
-          path: `/assessments/${jobId}/query-journeys?page=1&page_size=1000`,
-          method: 'GET'
-        }
-      ];
-
-      // Execute all API calls
-      setExportProgress({ current: 1, total: 4, message: 'Fetching data from APIs...' });
-      const responses = await apiManager.execute(apiCalls);
-
-      // Check for errors
-      if (!responses.results?.success) {
-        throw new Error('Failed to fetch analysis results');
-      }
-      if (!responses['schema-designs']?.success) {
-        throw new Error('Failed to fetch schema designs');
-      }
-
-      // Query journeys is optional - log warning if it fails but continue
-      let queryJourneysData = null;
-      if (responses['query-journeys']?.success) {
-        queryJourneysData = responses['query-journeys'];
-      } else {
-        console.warn('Failed to fetch query journeys:', responses['query-journeys']?.error);
-      }
-
-      // Step 4: Generate HTML
-      setExportProgress({ current: 3, total: 4, message: 'Generating HTML report...' });
-
-      const exportData = {
-        results: responses.results,
-        schemaDesigns: responses['schema-designs']?.schema_designs || [],
-        collector: collectorData,
-        jobId: jobId,
-        exportDate: new Date().toISOString(),
-        queryJourneys: queryJourneysData,
-      };
-
-      // Generate HTML content
-      const htmlContent = generateHTMLReport(exportData);
-
-      // Create and download file
-      setExportProgress({ current: 4, total: 4, message: 'Downloading file...' });
-      const blob = new Blob([htmlContent], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `analysis-report-${jobId}-${new Date().toISOString().split('T')[0]}.html`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      setShowExportProgress(false);
-
-      addFlashbarMessage({
-        type: 'success',
-        header: 'Export Successful',
-        content: 'Analysis report has been exported to HTML',
-        dismissible: true,
-        id: `success-${Date.now()}`
-      });
-    } catch (error) {
-      console.error('Error exporting to HTML:', error);
-      setShowExportProgress(false);
-
-      addFlashbarMessage({
-        type: 'error',
-        header: 'Export Failed',
-        content: error.message || 'Failed to export analysis report',
-        dismissible: true,
-        id: `error-${Date.now()}`
-      });
-    }
-  }, [jobId, collectorData, addFlashbarMessage]);
-
   const clearAllFilters = useCallback(() => {
     setEngineFilter([]);
     setOpFilter([]);
@@ -1390,6 +1316,7 @@ const AnalysisResultsPage = memo(() => {
         {sourceQueries.length > 0 && (
           <Container header={<Header variant="h3">{t('analysis-results.pattern-detail.source-queries', { count: sourceQueries.length })}</Header>}>
             <Table
+              ariaLabels={{ tableLabel: t('analysis-results.pattern-detail.source-queries', { count: sourceQueries.length }) }}
               columnDefinitions={[
                 {
                   id: 'query_id',
@@ -1642,6 +1569,7 @@ const AnalysisResultsPage = memo(() => {
 
                     {/* Access patterns */}
                     <Table
+                      ariaLabels={{ tableLabel: t('analysis-results.explorer.table-patterns') }}
                       columnDefinitions={[
                         {
                           id: 'pattern_id',
@@ -1901,6 +1829,7 @@ const AnalysisResultsPage = memo(() => {
           disableContentPaddings={false}
           navigationOpen={navigationOpen}
           onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
+          ariaLabels={layoutAriaLabels}
           breadcrumbs={<BreadcrumbGroup items={breadcrumbItems} />}
           navigation={
             <SideNavigation
@@ -1933,6 +1862,7 @@ const AnalysisResultsPage = memo(() => {
         disableContentPaddings={false}
         navigationOpen={navigationOpen}
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
+        ariaLabels={layoutAriaLabels}
         breadcrumbs={<BreadcrumbGroup items={breadcrumbItems} />}
         navigation={
           <SideNavigation
@@ -1952,10 +1882,7 @@ const AnalysisResultsPage = memo(() => {
               variant="h1"
               actions={
                 <SpaceBetween direction="horizontal" size="xs">
-                  <Button iconName="refresh" variant="normal" onClick={fetchData} loading={loading} />
-                  <Button iconName="download" variant="normal" onClick={handleExportToHTML}>
-                    {t('analysis-results.actions.export-to-html')}
-                  </Button>
+                  <Button iconName="refresh" variant="normal" onClick={fetchData} loading={loading} ariaLabel={t('common.actions.refresh')} />
                   <Button href={`/analysis/monitor/summary/${jobId}`}>{t('analysis-results.actions.back-to-assessment')}</Button>
                 </SpaceBetween>
               }
@@ -2364,6 +2291,7 @@ const AnalysisResultsPage = memo(() => {
                         currentPageIndex={currentPage}
                         pagesCount={Math.ceil(displayItems.length / PAGE_SIZE)}
                         onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+                        ariaLabels={explorerPaginationLabels}
                       />
                     </Box>
                   )}
@@ -2377,6 +2305,7 @@ const AnalysisResultsPage = memo(() => {
                       loading={loading}
                       variant="embedded"
                       selectionType="single"
+                      ariaLabels={explorerSelectionLabels(t('analysis-results.explorer.table-patterns'))}
                       selectedItems={selectedItems}
                       onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                       empty={
@@ -2397,6 +2326,7 @@ const AnalysisResultsPage = memo(() => {
                       loading={loading}
                       variant="embedded"
                       selectionType="single"
+                      ariaLabels={explorerSelectionLabels(t('analysis-results.explorer.table-sources'))}
                       selectedItems={selectedItems}
                       onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                       empty={
@@ -2415,6 +2345,7 @@ const AnalysisResultsPage = memo(() => {
                         currentPageIndex={currentPage}
                         pagesCount={Math.ceil(displayItems.length / PAGE_SIZE)}
                         onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+                        ariaLabels={explorerPaginationLabels}
                       />
                     </Box>
                   )}
@@ -2445,6 +2376,7 @@ const AnalysisResultsPage = memo(() => {
                         items={filteredCacheLayerPatterns}
                         variant="embedded"
                         selectionType="single"
+                        ariaLabels={explorerSelectionLabels(t('analysis-results.explorer.table-cache-patterns'))}
                         selectedItems={selectedItems}
                         onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                       />
@@ -2466,6 +2398,7 @@ const AnalysisResultsPage = memo(() => {
                         items={cacheSourceTableGroups}
                         variant="embedded"
                         selectionType="single"
+                        ariaLabels={explorerSelectionLabels(t('analysis-results.explorer.table-cache-sources'))}
                         selectedItems={selectedItems}
                         onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                       />
@@ -2809,6 +2742,12 @@ const AnalysisResultsPage = memo(() => {
                                           { id: 'type', header: t('analysis-results.aurora-design.col-aurora-type'), cell: c => c.auroraType },
                                         ]}
                                         items={table.columns}
+                                        ariaLabels={{
+                                          tableLabel: t('analysis-results.aurora-design.columns-table-label', {
+                                            engine: design.displayName,
+                                            table: table.tableName,
+                                          }),
+                                        }}
                                       />
                                       <KeyValuePairs
                                         columns={1}
@@ -2884,7 +2823,7 @@ const AnalysisResultsPage = memo(() => {
                                     style={{ borderLeft: '3px solid #0972d3', backgroundColor: '#f2f8fd', borderRadius: '4px' }}>
                                     <SpaceBetween size="xxs">
                                       <Box fontSize="body-s" fontWeight="bold">
-                                        {opt.target ? `${opt.category ? `${opt.category}: ` : ''}${opt.target}` : opt.category}
+                                        {opt.target ? `${opt.category ? `${optimizationLabel(opt.category)}: ` : ''}${opt.target}` : optimizationLabel(opt.category)}
                                       </Box>
                                       <Box fontSize="body-s">{opt.recommendation}</Box>
                                       {opt.rationale && (
@@ -2940,6 +2879,12 @@ const AnalysisResultsPage = memo(() => {
                                         },
                                       ]}
                                       items={group.queries}
+                                      ariaLabels={{
+                                        tableLabel: t('analysis-results.aurora-design.queries-table-label', {
+                                          engine: design.displayName,
+                                          table: group.sourceTable,
+                                        }),
+                                      }}
                                     />
                                   </ExpandableSection>
                                 ))}
@@ -3154,40 +3099,6 @@ const AnalysisResultsPage = memo(() => {
         )}
       </Modal>
 
-      {/* Export Progress Modal */}
-      <Modal
-        visible={showExportProgress}
-        header="Exporting Report"
-        size="medium"
-        closeAriaLabel="Close"
-      >
-        <SpaceBetween size="l">
-          <Box textAlign="center">
-            <StatusIndicator type="loading">
-              {exportProgress.message}
-            </StatusIndicator>
-          </Box>
-          <Box>
-            <div style={{
-              width: '100%',
-              height: '8px',
-              backgroundColor: '#e9ebed',
-              borderRadius: '4px',
-              overflow: 'hidden'
-            }}>
-              <div style={{
-                width: `${(exportProgress.current / exportProgress.total) * 100}%`,
-                height: '100%',
-                backgroundColor: '#0972d3',
-                transition: 'width 0.3s ease'
-              }} />
-            </div>
-          </Box>
-          <Box textAlign="center" color="text-body-secondary">
-            {t('analysis-results.export.progress-step', { current: exportProgress.current, total: exportProgress.total })}
-          </Box>
-        </SpaceBetween>
-      </Modal>
     </>
   );
 });

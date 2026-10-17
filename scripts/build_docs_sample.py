@@ -16,7 +16,7 @@ alongside the one MkDocs already rendered there.
 
 The files are the run's ``artifacts/<db>/<job>/deliverables/`` folder, copied
 as is: the same stable names every run gets (``assessment.pdf``,
-``decision-report.html``, ... -- ``src.report.deliverables.FOLDER_ENTRIES``), so a
+``engineering-report.md``, ... -- ``src.report.deliverables.FOLDER_ENTRIES``), so a
 link to the sample report survives a rebuild and the site lists exactly what a
 real run hands over. The engineering report, the one deliverable rendered as
 Markdown rather than HTML, is also rendered to ``engineering-report.html`` for
@@ -87,10 +87,12 @@ def _render_engineering_html(md_path: Path, dest: Path) -> Path | None:
 </style>
 </head>
 <body>
-<p><a href="./">&larr; Back to the sample report</a> &middot; <a href="engineering-report.md">Markdown source</a></p>
+<header><nav aria-label="Sample report"><a href="./">&larr; Back to the sample report</a> &middot; <a href="engineering-report.md">Markdown source</a></nav></header>
+<main>
 <article>
 {body}
 </article>
+</main>
 </body>
 </html>
 """

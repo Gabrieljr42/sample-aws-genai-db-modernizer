@@ -443,7 +443,7 @@ def test_finalize_script_reports_the_post_check(
 
 
 # ---------------------------------------------------------------------------
-# Fallback summary quality and the decision-report note
+# Fallback summary quality and the PDF report's note
 # ---------------------------------------------------------------------------
 
 
@@ -534,16 +534,16 @@ class TestFallbackSummary:
         assert build_fallback_summary({"engines": []}) is None
 
 
-def test_decision_report_notes_the_withheld_narrative(det) -> None:
-    from src.report.renderers import render_decision_report_html
+def test_the_pdf_notes_the_withheld_narrative(det) -> None:
+    from tests.unit.report.pdf_text import pdf_text
 
     apply_synthesis_llm_output(det, {"executive_summary": "Aurora MySQL serves shop.orders."})
     store = det["_store"]
     _write_synthesis_report(store, det, 2)
     report = store.read_json(f"{DB}/{JOB}/synthesis/v2/report.json")
-    html = render_decision_report_html(report)
-    assert "named a table under an engine that does not serve it" in html
-    assert "The target architecture combines" in html
+    text = pdf_text(report, trust_generated_summary=True)
+    assert "named a table under an engine that does not serve it" in text
+    assert "The target architecture combines" in text
 
     report["summary_source"] = "llm"
-    assert "named a table under an engine" not in render_decision_report_html(report)
+    assert "named a table under an engine" not in pdf_text(report, trust_generated_summary=True)

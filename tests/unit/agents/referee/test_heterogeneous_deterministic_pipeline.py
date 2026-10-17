@@ -38,10 +38,6 @@ DB = "adventureworks"
 JOB = "job-381"
 
 
-def _no_graph(*_args):
-    return False
-
-
 @pytest.fixture(scope="module")
 def pipeline_report(tmp_path_factory) -> tuple[LocalArtifactStore, dict, int]:
     """Run the deterministic pipeline end to end and return (store, report, version).
@@ -133,37 +129,27 @@ class TestAdventureWorksDeliverablesRender:
     def test_every_deliverable_renders_with_no_errors(self, pipeline_report) -> None:
         store, _, version = pipeline_report
         report_key = f"{DB}/{JOB}/synthesis/v{version}/report.json"
-        out = dl.render_deliverables(
-            store, JOB, DB, report_key, assignment_version=version, graph_fetcher=_no_graph
-        )
+        out = dl.render_deliverables(store, JOB, DB, report_key, assignment_version=version)
         assert out.errors == []
         names = {d.name for d in out.items}
-        assert {
-            "decision-report",
-            "engineering-report",
-            "analysis-report",
-            "executive-summary-pdf",
-        } <= names
+        assert names == {"engineering-report", "assessment-data", "executive-summary-pdf"}
 
-    def test_decision_and_analysis_html_render(self, pipeline_report) -> None:
+    def test_the_chosen_aurora_engine_reads_migration_target(self, pipeline_report) -> None:
         store, _, version = pipeline_report
         report_key = f"{DB}/{JOB}/synthesis/v{version}/report.json"
         out = {
             d.name: d
             for d in dl.render_deliverables(
-                store, JOB, DB, report_key, assignment_version=version, graph_fetcher=_no_graph
+                store, JOB, DB, report_key, assignment_version=version
             ).items
         }
-        decision_html = out["decision-report"].content
-        assert b"<html" in decision_html[:200] or decision_html.startswith(b"<!DOCTYPE html")
-        analysis_html = out["analysis-report"].content
-        assert b"<html" in analysis_html[:200] or analysis_html.startswith(b"<!DOCTYPE html")
-        # #287 round-1 review (C1): the Decision Report's architecture table renders
-        # each engine's role in a <td class=role> cell -- the chosen Aurora engine
-        # must read "Migration target" there, never "Retained" (SQL Server has no
-        # Aurora dialect of its own).
-        assert b"Migration target" in decision_html
-        assert b">Retained<" not in decision_html
+        md = out["engineering-report"].content.decode("utf-8")
+        # #287 round-1 review (C1): the engine table renders each engine's role --
+        # the chosen Aurora engine must read "Migration target" there, never
+        # "Retained" (SQL Server has no Aurora dialect of its own).
+        rows = [line for line in md.splitlines() if line.startswith("| Aurora ")]
+        assert rows and all("| Migration target |" in r for r in rows), rows
+        assert "| Retained |" not in md
 
     def test_pdf_renders(self, pipeline_report) -> None:
         store, _, version = pipeline_report
@@ -171,7 +157,7 @@ class TestAdventureWorksDeliverablesRender:
         out = {
             d.name: d
             for d in dl.render_deliverables(
-                store, JOB, DB, report_key, assignment_version=version, graph_fetcher=_no_graph
+                store, JOB, DB, report_key, assignment_version=version
             ).items
         }
         assert out["executive-summary-pdf"].content.startswith(b"%PDF")

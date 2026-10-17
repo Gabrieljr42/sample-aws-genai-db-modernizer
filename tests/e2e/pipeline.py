@@ -31,21 +31,19 @@ class PipelineResult:
     def job_dir(self) -> Path:
         return self.artifact_root / self.db / self.job_id
 
-    def deliverable(self, suffix: str) -> Path:
-        """First file under the synthesis dir whose name ends with ``suffix``."""
-        for p in self.report.get("paths", []):
-            if p.endswith(suffix):
-                return Path(p)
-        raise FileNotFoundError(f"no deliverable ending {suffix!r} in {self.report.get('paths')}")
-
-    def html(self, marker: str) -> Path:
-        """First HTML deliverable whose filename contains ``marker`` (e.g. ``"decision-report"``)."""
-        for p in self.report.get("paths", []):
-            if p.endswith(".html") and marker in p.rsplit("/", 1)[-1]:
+    def deliverable(self, filename: str) -> Path:
+        """One file of the job's ``deliverables/`` folder, by its stable name
+        (``src.report.deliverables.FOLDER_FILENAMES``, e.g. ``"assessment.pdf"``)."""
+        for p in self.report.get("deliverables", []):
+            if p.rsplit("/", 1)[-1] == filename:
                 return Path(p)
         raise FileNotFoundError(
-            f"no html deliverable matching {marker!r} in {self.report.get('paths')}"
+            f"no deliverable named {filename!r} in {self.report.get('deliverables')}"
         )
+
+    def report_json(self) -> Path:
+        """The synthesis ``report.json`` the deliverables were rendered from."""
+        return self.artifact_root / str(self.report["report"])
 
 
 def _env() -> dict[str, str]:

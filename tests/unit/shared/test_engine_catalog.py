@@ -89,7 +89,6 @@ class TestLoaderIsStrict:
         _write(tmp_path, "example", VALID.format(id="example", order=1))
         (entry,) = load_engine_catalog(tmp_path)
         assert entry.id == "example"
-        assert entry.colors.report_badge is None
 
     @pytest.mark.parametrize(
         "edit",
@@ -374,20 +373,6 @@ class TestConstantsAreTheCatalogsView:
         assert NON_OWNER_ENGINES == CACHE_ENGINES | SEARCH_ENGINES
         assert report_facts.SEARCH_ENGINES == {"opensearch"}
         assert report_facts.RELATIONAL_ENGINES == {"aurora", "aurora_mysql", "aurora_postgresql"}
-
-    def test_decision_report_badges(self) -> None:
-        from src.report import decision_report
-
-        assert decision_report._ENGINE_BADGE == {
-            "dynamodb": "#3b48cc",
-            "documentdb": "#0c7838",
-            "aurora_postgresql": "#9c5700",
-            "aurora_mysql": "#9c5700",
-            "elasticache": "#c62f25",
-            "opensearch": "#0e7c86",
-            "neptune": "#7048e8",
-            "keyspaces": "#8250df",
-        }
 
 
 class TestGeneratedUiModule:

@@ -10,7 +10,6 @@ system_of_record = true
 [colors]
 ui = "#3184e8"
 ui_badge = "blue"
-report_badge = "#3b48cc"
 
 [pricing]
 base_monthly = 0

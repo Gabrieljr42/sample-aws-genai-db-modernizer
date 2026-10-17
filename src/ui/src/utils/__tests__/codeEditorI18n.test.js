@@ -63,4 +63,11 @@ describe('codeEditorI18nStrings', () => {
     const strings = codeEditorI18nStrings(t, { errorsTab: 'Custom errors' });
     expect(strings.errorsTab).toBe('Custom errors');
   });
+
+  it('names the icon-only controls, so assistive tech can tell what they do (#987)', () => {
+    const strings = codeEditorI18nStrings(t);
+    expect(strings.preferencesButtonAriaLabel).toBe('Editor preferences');
+    expect(strings.resizeHandleAriaLabel).toBe('Resize the editor');
+    expect(strings.paneCloseButtonAriaLabel).toBe('Close');
+  });
 });

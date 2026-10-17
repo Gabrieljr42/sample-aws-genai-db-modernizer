@@ -1,9 +1,8 @@
 """The per-engine rationale reaches the reports readers (and the judge) open (#152).
 
 Synthesis builds it from the routed workload ("90% mean fit across 98 queries (22
-rated tables), led by key-value lookups (36 of 98)"); the decision report's
-recommended-architecture table and the engineering report's Target engines table
-show it.
+rated tables), led by key-value lookups (36 of 98)"); the engineering report's
+Target engines table shows it, and the PDF report prints the same table.
 """
 
 from __future__ import annotations
@@ -37,28 +36,29 @@ def _report() -> dict[str, Any]:
     }
 
 
-def test_decision_report_shows_each_engines_rationale() -> None:
-    html = renderers.render_decision_report_html(_report())
-    assert "<th>Why</th>" in html
-    for text in (DDB, AURORA, OS):  # no HTML-special characters, so verbatim
-        assert f"<td class=why>{text}</td>" in html
+def test_the_pdf_shows_each_engines_rationale() -> None:
+    from tests.unit.report.pdf_text import pdf_text
+
+    text = pdf_text(_report())
+    for rationale in (DDB, AURORA):
+        assert " ".join(rationale.split()) in text
 
 
 def test_engineering_report_lists_the_target_engines_with_their_rationale() -> None:
     md = renderers.render_engineering_report_md(_report())
     assert "## Target engines" in md
-    assert "| Engine | Role | Workload | Why |" in md
+    assert "| Engine | Role | Workload | Scope | Why |" in md
     for text in (DDB, AURORA, OS):
         assert text in md
 
 
-def test_rationale_is_escaped_in_html() -> None:
+def test_rationale_is_escaped_in_markdown() -> None:
     rep = _report()
-    rep["ranking"][0]["rationale"] = "<script>x</script>"
-    rep["recommended_architecture"]["databases"][0]["rationale"] = "<script>x</script>"
-    html = renderers.render_decision_report_html(rep)
-    assert "<script>x</script>" not in html
-    assert "&lt;script&gt;x&lt;/script&gt;" in html
+    rep["ranking"][0]["rationale"] = "<script>x</script> | y"
+    rep["recommended_architecture"]["databases"][0]["rationale"] = "<script>x</script> | y"
+    md = renderers.render_engineering_report_md(rep)
+    assert "<script>x</script>" not in md
+    assert "&lt;script&gt;x&lt;/script&gt; \\| y" in md
 
 
 def test_legacy_list_rationale_reads_as_text() -> None:

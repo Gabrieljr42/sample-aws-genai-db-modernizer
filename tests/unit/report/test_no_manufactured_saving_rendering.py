@@ -1,7 +1,7 @@
 """The deliverables state a retirement saving only for an engine the source runs today (#949).
 
 ``tco_analysis.retired_engine_savings`` (synthesis contract 1.25) lists the engines the
-source runs today that the plan retires; the decision and engineering reports print
+source runs today that the plan retires; the PDF and engineering reports print
 those rows and nothing else. ``tco_analysis.eliminated_engine_costs``, which a report
 before 1.25 filled with every dropped candidate engine, is never read as a saving: such a
 report still loads, and its candidates read back as ``considered_not_recommended``.
@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from src.contracts.synthesis_output import SynthesisOutputContract
-from src.report.renderers import render_decision_report_html, render_engineering_report_md
+from src.report.renderers import render_engineering_report_md
 from src.shared.engines_in_use import considered_not_recommended, retired_engine_savings
+from tests.unit.report.pdf_text import pdf_text
 
 FIXTURE = Path(__file__).parent / "fixtures" / "wordpress_no_schema_design_report.json"
 
@@ -39,13 +40,13 @@ def _report(tco: dict[str, Any], **extra: Any) -> dict[str, Any]:
 
 
 class TestRetiredEngineSavingIsShown:
-    def test_decision_report(self) -> None:
-        html = render_decision_report_html(
+    def test_pdf_report(self) -> None:
+        text = pdf_text(
             _report(
                 {"retired_engine_savings": [{"database": "elasticache", "monthly_cost_usd": 88.5}]}
             )
         )
-        assert "Retired by this plan: $88.50/mo (ElastiCache)" in html
+        assert "Retired by this plan: $88.50/mo (ElastiCache)" in text
 
     def test_engineering_report(self) -> None:
         md = render_engineering_report_md(
@@ -62,11 +63,11 @@ class TestALegacyCandidateCostIsNeverASaving:
             {"eliminated_engine_costs": [{"database": "documentdb", "monthly_cost_usd": 367.39}]}
         )
 
-    def test_decision_report_shows_no_retirement_line(self) -> None:
-        html = render_decision_report_html(self._legacy())
-        assert "$367.39" not in html
-        assert "Already removed from this comparison" not in html
-        assert "Retired by this plan" not in html
+    def test_pdf_report_shows_no_retirement_line(self) -> None:
+        text = pdf_text(self._legacy())
+        assert "$367.39" not in text
+        assert "Already removed from this comparison" not in text
+        assert "Retired by this plan" not in text
 
     def test_engineering_report_shows_no_retirement_line(self) -> None:
         md = render_engineering_report_md(self._legacy())
@@ -108,6 +109,6 @@ class TestOldReportsStillLoad:
             {"engine": "opensearch", "absorbed_by": None},
         ]
         assert retired_engine_savings(dumped) == []
-        html = render_decision_report_html(dumped)
-        assert "Already removed from this comparison" not in html
-        assert "Retired by this plan" not in html
+        for text in (pdf_text(dumped), render_engineering_report_md(dumped)):
+            assert "Already removed from this comparison" not in text
+            assert "Retired by this plan" not in text

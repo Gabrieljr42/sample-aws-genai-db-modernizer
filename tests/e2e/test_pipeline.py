@@ -8,6 +8,7 @@ import re
 import pytest
 from pydantic import BaseModel
 
+from src.report.deliverables import FOLDER_FILENAMES
 from tests.e2e.pipeline import PipelineResult
 
 EXPECTED_ENGINES = {
@@ -37,35 +38,23 @@ def test_triage_selects_the_expected_engines(run: PipelineResult) -> None:
 
 
 @pytest.mark.deterministic
-def test_report_journeys_match_collected_queries(run: PipelineResult) -> None:
-    assert run.report["journeys"] == run.steps["collect"]["queries"]
-
-
 def test_report_has_all_deliverables(run: PipelineResult) -> None:
     r = run.report
-    assert r["errors"] == [] and r["warnings"] == []
-    names = sorted(p.rsplit("/", 1)[-1] for p in r["files"])
-    assert "summary-executive-report.pdf" in names
-    assert not [n for n in names if n.endswith(".pptx")]
-    for kind, ext in (
-        ("decision-report", ".html"),
-        ("analysis-report", ".html"),
-        ("engineering-report", ".md"),
-    ):
-        assert any(f"_{kind}_" in n and n.endswith(ext) for n in names), (kind, names)
+    assert r["errors"] == []
+    names = sorted(p.rsplit("/", 1)[-1] for p in r["deliverables"])
+    assert names == sorted(FOLDER_FILENAMES)
 
 
 @pytest.mark.deterministic
 def test_deliverables_folder_holds_exactly_the_documented_set(run: PipelineResult) -> None:
     """One folder with the customer files and nothing else (no model I/O, no
-    traces, no versioned folders); the names are the documented ones."""
+    traces, no versioned folders); the names are the documented ones. The
+    decision and analysis HTML reports are retired (#987)."""
     folder = run.job_dir() / "deliverables"
     assert run.report["deliverables_dir"] == str(folder.resolve())
     assert sorted(p.name for p in folder.iterdir()) == [
-        "analysis-report.html",
         "assessment-data.json",
         "assessment.pdf",
-        "decision-report.html",
         "engineering-report.md",
         "index.md",
     ]
@@ -76,9 +65,24 @@ def test_deliverables_folder_holds_exactly_the_documented_set(run: PipelineResul
     # Branding: the only product name in the folder is "Database Modernizer
     # Assessment Tool" (the English verb "transforms" in report prose is fine).
     for p in folder.iterdir():
-        if p.suffix in (".md", ".html", ".json"):
+        if p.suffix in (".md", ".json"):
             text = p.read_text(encoding="utf-8")
             assert not re.search(r"AWS Transform|\bATX\b", text), p.name
+
+
+@pytest.mark.deterministic
+def test_no_deliverable_copy_is_written_under_the_versioned_synthesis_folders(
+    run: PipelineResult,
+) -> None:
+    """#987: ``synthesis/v<N>/`` holds the pipeline's own files (``report.json`` and,
+    in an LLM run, the model input and response), never a copy of a deliverable."""
+    pipeline_files = {"report.json", "llm_input.json", "llm_response.json"}
+    extra = sorted(
+        str(p.relative_to(run.job_dir()))
+        for p in (run.job_dir() / "synthesis").glob("v*/*")
+        if p.name not in pipeline_files
+    )
+    assert extra == []
 
 
 def test_contract_artifacts_validate(run: PipelineResult) -> None:
@@ -89,9 +93,7 @@ def test_contract_artifacts_validate(run: PipelineResult) -> None:
     from src.contracts.analysis_output import AnalysisOutputContract
     from src.contracts.assignment_models import Assignment
     from src.contracts.aurora_mysql_model_output import AuroraMySQLModelOutputContract
-    from src.contracts.aurora_postgresql_model_output import (
-        AuroraPostgresqlModelOutputContract,
-    )
+    from src.contracts.aurora_postgresql_model_output import AuroraPostgresqlModelOutputContract
     from src.contracts.collector_output import CollectorOutputContract
     from src.contracts.documentdb_model_output import DocumentDBModelOutputContract
     from src.contracts.dynamodb_model_output import DynamoDBModelOutputContract
@@ -170,9 +172,8 @@ def test_contract_artifacts_validate(run: PipelineResult) -> None:
     SynthesisOutputContract.model_validate(_read(run.artifact_root / run.report["report"]))
 
     # In external mode (a real headless run), a successful job must have produced
-    # journeys and a clean report -- these are not pipeline-shape assumptions, they
+    # a clean report -- these are not pipeline-shape assumptions, they
     # are the bar any real run has to clear.
-    assert run.report["warnings"] == []
     assert run.report["errors"] == []
 
 

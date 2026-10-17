@@ -355,9 +355,9 @@ def run_synthesis_deterministic(
                 )
         # #589: a KEPT engine never produces a consolidation or recommendation
         # (nothing moved), so without this it left no trace in report.json at
-        # all -- the engineering report's "Migration trade-offs" section (and
-        # the Decision Report's trade-off-derived callouts) only ever learn
-        # about a sanity sweep decision through this list.
+        # all -- the "Migration trade-offs" sections of the engineering report
+        # and the PDF report only ever learn about a sanity sweep decision
+        # through this list.
         for sd in reality_check_summary["sweep_decisions"]:
             if sd.get("decision") != "kept":
                 continue
@@ -738,8 +738,7 @@ def _write_synthesis_report(
         # summary_deterministic's prose.
         "source_table_count": source_table_count(data),
         # #503: the actual queries behind AssignmentSummary.tie_unresolved_count,
-        # so the decision report and the engineering report can list them
-        # too, not just the gate.
+        # so the engineering report can list them too, not just the gate.
         "tied_queries": [
             {
                 "query_id": qa["query_id"],

@@ -58,8 +58,8 @@ new finding.
   the printed `routing_snapshot`/`routing_baseline` diff and explain *why*
   each query moved from the scores in the trace, per ADR-031 Decision 2 --
   don't just report pass/fail.
-- **Deliverables agree.** For any new figure, confirm the decision report,
-  engineering report, deck/PDF and UI render the same number from
+- **Deliverables agree.** For any new figure, confirm the PDF report, the
+  engineering report and the UI render the same number from
   `report.json` -- `test_deliverable_figures.py` only knows the figures it
   was already written for.
 - **Customer wording and escaping.** New customer- or LLM-facing text uses

@@ -412,14 +412,14 @@ def test_parse_junit_counts_buckets_by_classname(tmp_path: Path) -> None:
         path,
         [
             ("tests.e2e.test_pipeline", "test_contracts_hold", False),
-            ("tests.e2e.test_report_html", "test_renders", False),
-            ("tests.e2e.test_report_html", "test_links_work", True),
+            ("tests.e2e.test_report_engineering", "test_renders", False),
+            ("tests.e2e.test_report_engineering", "test_links_work", True),
             ("tests.e2e.test_report_pdf", "test_pdf_has_text", False),
         ],
     )
     buckets = run.parse_junit_counts(path)
     assert buckets["contracts"] == {"total": 1, "failed": 0}
-    assert buckets["html"] == {"total": 2, "failed": 1}
+    assert buckets["engineering"] == {"total": 2, "failed": 1}
     assert buckets["pdf"] == {"total": 1, "failed": 0}
     assert buckets["ui"] == {"total": 0, "failed": 0}
 
@@ -474,7 +474,7 @@ def test_results_all_green_passes(tmp_path: Path) -> None:
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -493,7 +493,7 @@ def test_results_all_green_passes(tmp_path: Path) -> None:
     assert row["checks"] == {
         "transcript": True,
         "contracts": True,
-        "html": True,
+        "engineering": True,
         "pdf": True,
         "ui": None,
         "judge": True,
@@ -503,7 +503,7 @@ def test_results_all_green_passes(tmp_path: Path) -> None:
     assert row["tokens_in"] == 10000
     assert row["tokens_out"] == 2500
     assert row["duration_s"] == 45.0
-    assert row["schema_version"] == 1
+    assert row["schema_version"] == 2
     assert row["git_sha"] == "abc1234"
     assert row["judge"] == {"mean": 5.0, "scores": {"grounded": 5}}
 
@@ -516,7 +516,7 @@ def test_results_ui_mode_requires_ui_junit(tmp_path: Path) -> None:
         report_junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -544,7 +544,7 @@ def test_results_ui_mode_missing_ui_junit_fails(tmp_path: Path) -> None:
         report_junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -568,7 +568,7 @@ def test_results_missing_transcript_summary_is_null_and_fails(tmp_path: Path) ->
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -594,7 +594,7 @@ def test_results_transcript_error_fails(tmp_path: Path) -> None:
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -626,7 +626,7 @@ def test_results_missing_junit_file_is_null_and_fails(tmp_path: Path) -> None:
         judge_path=judge,
     )
     assert row["checks"]["contracts"] is None
-    assert row["checks"]["html"] is None
+    assert row["checks"]["engineering"] is None
     assert row["checks"]["pdf"] is None
     assert row["pass"] is False
 
@@ -639,7 +639,7 @@ def test_results_junit_failures_counted(tmp_path: Path) -> None:
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", True),  # failure
+            ("tests.e2e.test_report_engineering", "test_x", True),  # failure
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -653,7 +653,7 @@ def test_results_junit_failures_counted(tmp_path: Path) -> None:
         pytest_junit_paths=[junit],
         judge_path=judge,
     )
-    assert row["checks"]["html"] is False
+    assert row["checks"]["engineering"] is False
     assert row["pass"] is False
 
 
@@ -665,7 +665,7 @@ def test_results_missing_judge_file_is_null_and_fails(tmp_path: Path) -> None:
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -689,7 +689,7 @@ def test_results_judge_error_fails(tmp_path: Path) -> None:
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -715,7 +715,7 @@ def test_results_judge_failing_score_fails(tmp_path: Path) -> None:
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -756,7 +756,7 @@ def test_cli_results_writes_file_and_exits_zero_on_pass(
         junit,
         [
             ("tests.e2e.test_pipeline", "test_x", False),
-            ("tests.e2e.test_report_html", "test_x", False),
+            ("tests.e2e.test_report_engineering", "test_x", False),
             ("tests.e2e.test_report_pdf", "test_x", False),
         ],
     )
@@ -1069,7 +1069,7 @@ def test_corrupt_junit_marks_its_buckets_false(tmp_path: Path) -> None:
         git_sha="abc",
     )
     assert row["checks"]["contracts"] is False
-    assert row["checks"]["html"] is False
+    assert row["checks"]["engineering"] is False
     assert row["checks"]["pdf"] is False
     assert row["checks"]["ui"] is False
     assert row["pass"] is False
@@ -1208,7 +1208,7 @@ def test_e2e_llm_rejects_artifact_root_override_outside_dry_run(tmp_path: Path) 
     assert "E2E_LLM_ARTIFACT_ROOT" in proc.stderr
     results = json.loads((tmp_path / "llm-chat-wordpress" / "results.json").read_text())
     assert results == {
-        "schema_version": 1,
+        "schema_version": 2,
         "pass": False,  # nosec B105 -- "pass" is the run's pass/fail field, not a password
         "error": "artifact-root-check failed before the run",
     }

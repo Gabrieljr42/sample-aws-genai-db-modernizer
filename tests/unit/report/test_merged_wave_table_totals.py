@@ -72,36 +72,34 @@ def test_no_deliverable_total_exceeds_the_source_table_count(report: dict[str, A
     assert migrated_total <= source_total
     assert migrated_total == 181  # 108 (dynamodb) + 73 (documentdb), the real owned split
 
-    html = renderers.render_decision_report_html(report)
-    tile_n = int(re.search(r"<p>Tables migrate</p><p class=val>(\d+)</p>", html).group(1))
-    assert tile_n <= source_total
-    assert tile_n == migrated_total
-
     md = renderers.render_engineering_report_md(report)
+    total_n = int(
+        re.search(r"^\| Total \| \| [^|]* \| (\d+) tables? migrates? \|", md, re.M).group(1)
+    )
+    assert total_n <= source_total
+    assert total_n == migrated_total
+
     # The engineering report's own per-engine Scope-equivalent (the roadmap
     # wave card) must also never claim more tables than exist.
     for m in re.finditer(r"(\d+) source tables?:", md):
         assert int(m.group(1)) <= source_total
 
 
-def test_decision_report_and_architecture_rows_agree_on_the_split(report: dict[str, Any]) -> None:
-    """The two per-engine Scope cells, read off the rendered decision report
-    HTML, must match the deck's own per-engine figures -- the
+def test_engineering_report_and_architecture_rows_agree_on_the_split(
+    report: dict[str, Any],
+) -> None:
+    """The two per-engine Scope cells, read off the rendered engineering report,
+    must match the architecture rows' own per-engine figures -- the
     "deliverables agree" invariant, specifically for the merged wave."""
-    html = renderers.render_decision_report_html(report)
-    # #572: the badge now shows the display name, not the raw engine id.
+    md = renderers.render_engineering_report_md(report)
     dynamo_row = re.search(
-        r"<span class=badge[^>]*>DynamoDB</span></td><td class=role>Migration target</td>"
-        r"<td data-figure=workload>[\d.]+%</td><td data-figure=scope>(\d+) source tables?</td>",
-        html,
+        r"^\| DynamoDB \| Migration target \| [\d.]+% \| (\d+) source tables? \|", md, re.M
     )
     doc_row = re.search(
-        r"<span class=badge[^>]*>DocumentDB</span></td><td class=role>Migration target</td>"
-        r"<td data-figure=workload>[\d.]+%</td><td data-figure=scope>(\d+) source tables?</td>",
-        html,
+        r"^\| DocumentDB \| Migration target \| [\d.]+% \| (\d+) source tables? \|", md, re.M
     )
-    assert dynamo_row is not None, html
-    assert doc_row is not None, html
+    assert dynamo_row is not None, md
+    assert doc_row is not None, md
     assert int(dynamo_row.group(1)) == 118
     assert int(doc_row.group(1)) == 82
 

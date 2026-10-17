@@ -1,8 +1,8 @@
 """Every deliverable shows the same figures as report.json (#573).
 
-AGENTS.md "Deliverables agree": the decision report, the engineering report,
-the executive summary PDF, and the interactive analysis report (the UI
-export) all render one synthesis ``report.json``. Reviews kept finding figures
+AGENTS.md "Deliverables agree": the engineering report and the PDF report
+render one synthesis ``report.json`` (the UI reads the same file; the decision
+and interactive analysis HTML reports were retired in #987). Reviews kept finding figures
 that differed between them, or that were impossible: a card cut at 90
 characters dropped a figure, a merged wave counted its tables twice ("400
 tables migrate" out of 311 analyzed), wave headlines and gate counts did not
@@ -32,18 +32,14 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page
 
 from src.shared.report_facts import compute_report_facts
 from tests.e2e.deliverable_figures import (
     SEVERITIES,
     Figures,
-    analysis_figures,
-    decision_figures,
     engineering_figures,
     expected_figures,
     final_architecture,
@@ -51,6 +47,7 @@ from tests.e2e.deliverable_figures import (
     md_plain,
     migrating,
     norm,
+    pdf_figures,
     pdf_page_texts,
     report_invariant_violations,
 )
@@ -67,17 +64,9 @@ KNOWN: dict[tuple[str, str, str], str] = {}
 
 
 def _report_json(run: PipelineResult) -> dict[str, Any]:
-    """The report.json the deliverables were rendered from (same directory)."""
-    report: dict[str, Any] = json.loads((run.deliverable(".md").parent / "report.json").read_text())
+    """The report.json the deliverables were rendered from."""
+    report: dict[str, Any] = json.loads(run.report_json().read_text())
     return report
-
-
-def _open(page: Page, path: Path) -> None:
-    page.route(
-        "**/*", lambda r: r.continue_() if r.request.url.startswith("file://") else r.abort()
-    )
-    page.goto(path.as_uri())
-    page.wait_for_load_state("networkidle")
 
 
 def _waves(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -106,35 +95,10 @@ def _common_required(report: dict[str, Any], exp: dict[str, Any]) -> set[str]:
     return req
 
 
-def _decision_required(report: dict[str, Any], exp: dict[str, Any]) -> set[str]:
-    req = (
-        _common_required(report, exp)
-        | _whole_schema_required(exp)
-        | {"cost:total", "engine_count", "tables_migrate", "tied"}
-    )
+def _pdf_required(report: dict[str, Any], exp: dict[str, Any]) -> set[str]:
+    req = _common_required(report, exp) - {k for k in exp if k.startswith("cached_reads:")}
+    req |= {"cost:total", "tables_migrate", "tied"}
     req |= {f"cost:{e}" for e in final_architecture(report)}
-    req |= {k for k in exp if k.startswith("tables:")}
-    for w in _waves(report):
-        req.add(f"wave{w['wave']}:queries")
-        if w.get("table_count"):
-            req.add(f"wave{w['wave']}:served")
-        if migrating(w) and w.get("table_owners"):
-            req |= {f"wave{w['wave']}:moving", f"wave{w['wave']}:synced"}
-    return req
-
-
-def _analysis_required(report: dict[str, Any], exp: dict[str, Any]) -> set[str]:
-    req = (
-        _common_required(report, exp) | _whole_schema_required(exp) | {"cost:total", "engine_count"}
-    )
-    req |= {f"cost:{e}" for e in final_architecture(report)}
-    req |= {k for k in exp if k.startswith("queries:")}
-    for w in _waves(report):
-        req.add(f"wave{w['wave']}:queries")
-        if w.get("table_count"):
-            req.add(f"wave{w['wave']}:served")
-        if migrating(w) and w.get("table_owners"):
-            req |= {f"wave{w['wave']}:moving", f"wave{w['wave']}:synced"}
     return req
 
 
@@ -142,9 +106,10 @@ def _engineering_required(report: dict[str, Any], exp: dict[str, Any]) -> set[st
     req = (
         _common_required(report, exp)
         | _whole_schema_required(exp)
-        | {"cost:total", "engine_count", "tied"}
+        | {"cost:total", "engine_count", "tied", "tables_migrate"}
     )
     req |= {f"queries:{e}" for e in final_architecture(report) if e.startswith("aurora")}
+    req |= {k for k in exp if k.startswith("tables:")}
     for w in _waves(report):
         req.add(f"wave{w['wave']}:queries")
         if w.get("table_count"):
@@ -235,34 +200,17 @@ def _rc_titles(report: dict[str, Any]) -> list[str]:
     ]
 
 
-def test_every_deliverable_shows_the_reality_check_decisions(
-    page: Page, run: PipelineResult
-) -> None:
+def test_every_deliverable_shows_the_reality_check_decisions(run: PipelineResult) -> None:
     """#595: the reality check's own trade-offs (consolidations, kept engines,
     recommended patterns) appear in every deliverable that shows trade-offs or
     engine decisions, not only in the engineering report."""
     report = _report_json(run)
     titles = _rc_titles(report)
     assert titles, "the sample's reality check made no decision to show"
-    _open(page, run.html("decision-report"))
-    shown = {
-        int(i)
-        for li in page.locator("[data-figure=reality-check-decisions] li[data-decision]").all()
-        for i in [li.get_attribute("data-decision")]
-        if i is not None
-    }
-    for li in page.locator("[data-figure=engines-not-used] li[data-decisions]").all():
-        shown |= {int(i) for i in (li.get_attribute("data-decisions") or "").split()}
-    expected = {
-        int(d["index"]) for d in (report.get("facts") or {}).get("reality_check_decisions") or []
-    }
-    assert shown == expected, "decision report"
     texts = {
-        "engineering report": md_plain(run.deliverable(".md").read_text()),
-        "PDF": " ".join(pdf_page_texts(str(run.deliverable("summary-executive-report.pdf")))),
+        "engineering report": md_plain(run.deliverable("engineering-report.md").read_text()),
+        "PDF": " ".join(pdf_page_texts(str(run.deliverable("assessment.pdf")))),
     }
-    _open(page, run.html("analysis-report"))
-    texts["analysis report"] = norm(page.locator("#tradeoffs-container").text_content() or "")
     for deliverable, text in texts.items():
         if deliverable == "PDF":
             # The PDF's fonts lack the arrow, so it reads "to".
@@ -273,25 +221,15 @@ def test_every_deliverable_shows_the_reality_check_decisions(
         assert not missing, f"{deliverable} does not show {missing}"
 
 
-def test_decision_report_figures(page: Page, run: PipelineResult) -> None:
+def test_pdf_report_figures(run: PipelineResult) -> None:
     report = _report_json(run)
-    _open(page, run.html("decision-report"))
-    _settle(
-        run.db, "decision report", _problems(report, decision_figures(page), _decision_required)
-    )
-
-
-def test_analysis_report_figures(page: Page, run: PipelineResult) -> None:
-    report = _report_json(run)
-    _open(page, run.html("analysis-report"))
-    _settle(
-        run.db, "analysis report", _problems(report, analysis_figures(page), _analysis_required)
-    )
+    text = " ".join(pdf_page_texts(str(run.deliverable("assessment.pdf"))))
+    _settle(run.db, "PDF", _problems(report, pdf_figures(text), _pdf_required))
 
 
 def test_engineering_report_figures(run: PipelineResult) -> None:
     report = _report_json(run)
-    figs = engineering_figures(run.deliverable(".md").read_text())
+    figs = engineering_figures(run.deliverable("engineering-report.md").read_text())
     _settle(run.db, "engineering report", _problems(report, figs, _engineering_required))
 
 
@@ -304,7 +242,7 @@ def test_the_trace_appendix_agrees_with_the_unresolved_ties(run: PipelineResult)
     trace = (report.get("facts") or {}).get("query_trace") or {}
     if not trace.get("listed_query_count"):
         pytest.skip("this sample lists no query trace")
-    md = run.deliverable(".md").read_text()
+    md = run.deliverable("engineering-report.md").read_text()
     appendix = md[md.index("## Appendix: per-query routing decisions") :]
     open_ties = int((report.get("facts") or {}).get("tied_query_count") or 0)
     assert trace["open_tie_query_count"] == open_ties

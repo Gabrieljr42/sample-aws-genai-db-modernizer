@@ -80,8 +80,8 @@ describe('ownerSchemaDesigns (#361: the explorer must not count cache patterns a
   });
 
   // #405: a legacy report (no cache_overlay at all) has ElastiCache as a real
-  // owner -- its design must stay in, matching src/report/analysis_report.py
-  // (which only strips a design when cache_overlay.engine names it).
+  // owner -- its design must stay in (a design is only stripped when
+  // cache_overlay.engine names it).
   test('legacy artifact (no overlay): elasticache design passes straight through', () => {
     expect(ownerSchemaDesigns(designs, false)).toEqual(designs);
   });
@@ -346,7 +346,7 @@ describe('targetEngineEntries (#358 Results page "Target engines")', () => {
   });
 });
 
-describe('isKeptCostEngine (#358, shared with the standalone export\'s mirrored predicate)', () => {
+describe('isKeptCostEngine (#358)', () => {
   test('an owner engine is kept', () => {
     expect(isKeptCostEngine('dynamodb', { dynamodb: 82 }, 'elasticache')).toBe(true);
   });
@@ -385,7 +385,7 @@ describe('resolveCostBreakdown (#358 Results page "Cost breakdown" + "Projected 
       REPORT_FIXTURE.cache_overlay
     );
     expect(total).toBe(823.72);
-    // Matches the decision report / chat total: DynamoDB + Aurora MySQL + OpenSearch + ElastiCache.
+    // Matches the PDF report / chat total: DynamoDB + Aurora MySQL + OpenSearch + ElastiCache.
     expect(total).toBeCloseTo(98.41 + 318.8 + 240.96 + 165.55, 2);
   });
 

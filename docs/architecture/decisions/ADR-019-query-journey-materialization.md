@@ -9,8 +9,8 @@
 > serially caused an ~11-minute write stall and artifact-API `ThrottlingException`.
 > The per-query read-model now lives in the LadybugDB context graph (ADR-023),
 > built at two single-writer pipeline boundaries and published as a downloadable
-> `.lbug` artifact. Readers (`analysis_report`, the query-journeys API) serve
-> from the graph, retaining a fallback to these journey artifacts only for jobs
+> `.lbug` artifact. Readers (the query-journeys API; the interactive HTML report
+> also did until it was retired in #987) serve from the graph, retaining a fallback to these journey artifacts only for jobs
 > that predate the graph. The `materialize_*` functions and the `JOURNEY_MODE`
 > flag that gated them have been removed. This ADR is retained as the historical
 > record of the original design.

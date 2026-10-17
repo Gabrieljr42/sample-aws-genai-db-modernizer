@@ -1,9 +1,9 @@
 """Engine display names are the one shared, AWS-branded source of truth (#221).
 
-``src.report.analysis_report.ENGINE_LABELS`` and the hand-kept mirror in
-``src/ui/src/utils/ExportReport.js`` had drifted into non-brand casing
-("Elasticache", "AuroraPostgresql", "AuroraMySQL"); every renderer now reads this
-module instead of keeping its own dict (#239).
+The interactive HTML report's engine label table and its hand-kept JS mirror (both
+retired in #987) had drifted into non-brand casing ("Elasticache",
+"AuroraPostgresql", "AuroraMySQL"); every renderer now reads this module instead of
+keeping its own dict (#239).
 """
 
 from __future__ import annotations

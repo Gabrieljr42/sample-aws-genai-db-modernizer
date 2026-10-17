@@ -4,9 +4,10 @@
 Usage:
     uv run python ci/llm/judge.py --artifact-root R --db D --job J --out judge.json
 
-Scores the deliverables staged next to a synthesis report (``report.json``, the
-decision report HTML, the engineering report Markdown, and -- when present and
-``pypdf`` is installed -- the executive summary PDF) against the six criteria
+Scores the deliverables in the job's ``deliverables/`` folder (the PDF report
+``assessment.pdf``, read when ``pypdf`` is installed, and the engineering report
+``engineering-report.md``), with the facts taken from the synthesis
+``report.json`` they were rendered from, against the six criteria
 in ``ci/llm/rubric.md`` (``grounded``, ``justified_engines``, ``cost``,
 ``risks``, ``roadmap``, ``tone``), by asking the same CLI and auth as the
 headless `/modernize` run to grade them.
@@ -17,8 +18,8 @@ Prompt inputs
   the fields the criteria are checked against (``ci/llm/judge_facts.py``),
   using the synthesis ``llm_input.json`` ``effective_architecture`` and the
   matching ``assignment/v{N}/assignment.json`` when present.
-* the decision report text, the PDF text (one ``[page N: title]`` marker per
-  slide) and the engineering report with mermaid fences removed, in full.
+* the PDF text (one ``[page N: title]`` marker per page) and the engineering
+  report with mermaid fences removed, in full.
 
 The whole prompt is capped at ``PROMPT_CHAR_CEILING`` characters. Below it
 nothing is cut; above it the largest inputs are cut first, per section, with
@@ -81,7 +82,6 @@ import secrets
 import subprocess  # nosec B404 -- intentional subprocess use to invoke the claude CLI
 import sys
 from collections.abc import Callable, Iterator
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -125,10 +125,9 @@ PROMPT_INPUTS: tuple[tuple[str, str], ...] = (
         "## facts -- ground truth (structured extract of report.json, plus the "
         "synthesis effective_architecture when available)",
     ),
-    ("decision_html", "## decision_report -- Decision report (text extracted from HTML)"),
     (
         "pdf",
-        "## executive_pdf -- Executive summary PDF (text, one [page N: title] marker per slide)",
+        "## executive_pdf -- PDF report (text, one [page N: title] marker per page)",
     ),
     (
         "engineering_md",
@@ -189,16 +188,25 @@ def load_rubric(path: Path) -> tuple[float, int, str]:
 
 
 # ---------------------------------------------------------------------------
-# Deliverable location (synthesis/v*/, highest numeric version)
+# Deliverable location: deliverables/ for the scored files, the latest
+# synthesis/v*/ for report.json and the model input the facts come from
 # ---------------------------------------------------------------------------
+
+# The job's customer folder and the stable names of the two files scored, as
+# ``src.report.deliverables.FOLDER_ENTRIES`` writes them (pinned by
+# tests/unit/ci/test_judge_inputs.py; spelled out so the judge runs as a plain
+# script without the repo on ``sys.path``).
+DELIVERABLES_DIR = "deliverables"
+PDF_FILENAME = "assessment.pdf"
+ENGINEERING_FILENAME = "engineering-report.md"
 
 
 def find_synthesis_dir(artifact_root: Path, db: str, job: str) -> Path:
     """Return the synthesis directory for ``db``/``job``, preferring the
     highest-numbered ``synthesis/v{N}/`` present, falling back to the legacy
-    unversioned ``referee-synthesis/`` (mirrors
-    ``src.report.analysis_report.synthesis_report_key``'s version preference,
-    without needing a ``LocalArtifactStore`` for a plain filesystem walk)."""
+    unversioned ``referee-synthesis/`` (the same version preference as
+    ``src.report.deliverables.synthesis_report_key``, without needing a
+    ``LocalArtifactStore`` for a plain filesystem walk)."""
     job_dir = artifact_root / db / job
     synthesis_root = job_dir / "synthesis"
     versions: list[tuple[int, Path]] = []
@@ -218,14 +226,16 @@ def find_synthesis_dir(artifact_root: Path, db: str, job: str) -> Path:
 
 
 def locate_deliverables(artifact_root: Path, db: str, job: str) -> dict[str, Path | None]:
-    """Return the paths of the deliverables to grade.
+    """Return the paths of the deliverables to grade and of the facts' sources.
 
-    ``report.json``, the decision report, and the engineering report are
-    rendered unconditionally by ``render_deliverables`` whenever synthesis
-    succeeded, so a missing one here is a clear setup error (exit 2). The PDF
-    is optional there too (an executive-summary rendering failure still lets
-    the rest of the deliverables stage) and is treated the same way here:
-    ``None`` when absent, recorded as a note rather than an error.
+    The scored files are the job's ``deliverables/`` folder: the PDF report and
+    the engineering report, which the render step (``scripts/run_report.py``)
+    writes there for the latest assignment version. Either one missing is a
+    setup error (exit 2): the run did not produce what a customer reads. The
+    facts come from the latest synthesis version's ``report.json`` (the same
+    data those files were rendered from), its ``llm_input.json`` and the
+    assignment version synthesis ran on, which are pipeline files, not
+    deliverables.
     """
     synthesis_dir = find_synthesis_dir(artifact_root, db, job)
 
@@ -233,15 +243,13 @@ def locate_deliverables(artifact_root: Path, db: str, job: str) -> dict[str, Pat
     if not report_path.is_file():
         raise JudgeError(f"missing report.json in {synthesis_dir}")
 
-    decision_matches = sorted(synthesis_dir.glob("*decision-report*.html"))
-    if not decision_matches:
-        raise JudgeError(f"missing decision report (*decision-report*.html) in {synthesis_dir}")
-
-    engineering_matches = sorted(synthesis_dir.glob("*engineering-report*.md"))
-    if not engineering_matches:
-        raise JudgeError(f"missing engineering report (*engineering-report*.md) in {synthesis_dir}")
-
-    pdf_matches = sorted(synthesis_dir.glob("*.pdf"))
+    folder = artifact_root / db / job / DELIVERABLES_DIR
+    engineering = folder / ENGINEERING_FILENAME
+    if not engineering.is_file():
+        raise JudgeError(f"missing engineering report ({ENGINEERING_FILENAME}) in {folder}")
+    pdf = folder / PDF_FILENAME
+    if not pdf.is_file():
+        raise JudgeError(f"missing PDF report ({PDF_FILENAME}) in {folder}")
 
     # Optional ground-truth inputs for the facts block: the synthesis LLM
     # input (its effective_architecture is the per-engine table scope) and
@@ -255,9 +263,8 @@ def locate_deliverables(artifact_root: Path, db: str, job: str) -> dict[str, Pat
 
     return {
         "report_json": report_path,
-        "decision_html": decision_matches[0],
-        "engineering_md": engineering_matches[0],
-        "pdf": pdf_matches[0] if pdf_matches else None,
+        "engineering_md": engineering,
+        "pdf": pdf,
         "llm_input": llm_input if llm_input.is_file() else None,
         "assignment": assignment,
     }
@@ -266,52 +273,6 @@ def locate_deliverables(artifact_root: Path, db: str, job: str) -> dict[str, Pat
 # ---------------------------------------------------------------------------
 # Input extraction
 # ---------------------------------------------------------------------------
-
-
-class _TextExtractor(HTMLParser):
-    """Minimal HTML-to-text: drops tags and <script>/<style> contents, keeps
-    everything else. ``<h1>``/``<h2>`` text is prefixed with ``#``/``##`` so
-    the judge can cite a section by name and truncation can keep every
-    heading. ``HTMLParser`` converts character references to text by default,
-    so entities need no separate handling."""
-
-    _HEADINGS = {"h1": "# ", "h2": "## "}
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._chunks: list[str] = []
-        self._skip_depth = 0
-        self._heading: str | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in ("script", "style"):
-            self._skip_depth += 1
-        elif tag in self._HEADINGS:
-            self._heading = self._HEADINGS[tag]
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ("script", "style") and self._skip_depth > 0:
-            self._skip_depth -= 1
-        elif tag in self._HEADINGS:
-            self._heading = None
-
-    def handle_data(self, data: str) -> None:
-        if self._skip_depth == 0:
-            text = data.strip()
-            if text:
-                if self._heading:
-                    text = self._heading + text
-                    self._heading = None
-                self._chunks.append(text)
-
-    def text(self) -> str:
-        return "\n".join(self._chunks)
-
-
-def html_to_text(html: str) -> str:
-    parser = _TextExtractor()
-    parser.feed(html)
-    return parser.text()
 
 
 def read_pdf_text(path: Path | None) -> tuple[str, str | None]:
@@ -337,7 +298,7 @@ def read_pdf_text(path: Path | None) -> tuple[str, str | None]:
 
 def extract_pdf_pages(path: Path, pypdf: Any) -> list[tuple[str | None, str]]:
     """Return ``(title, raw_text)`` per page. The title is the page's
-    largest-font text (the slide title on the rendered deck), or ``None``."""
+    largest-font text (the section heading on the rendered report), or ``None``."""
     pages: list[tuple[str | None, str]] = []
     for page in pypdf.PdfReader(str(path)).pages:
         raw, title = _page_text_and_title(page)
@@ -358,10 +319,12 @@ def _page_text_and_title(page: Any) -> tuple[str, str | None]:
     return raw, title or None
 
 
-# Footer boilerplate repeated on every slide; dropped so it doesn't eat budget.
+# Page furniture repeated on every page of the PDF report
+# (``src.report.pdf_report.FOOTER`` and its "Page N of M"); dropped so it doesn't
+# eat budget. Pinned to the renderer's footer by tests/unit/ci/test_judge_inputs.py.
 _PDF_BOILERPLATE_RE = re.compile(
-    r"©\s*\d{4}\s*,?\s*Amazon Web Services, Inc\. or its affiliates\.(?: All rights reserved\.)?"
-    r"(?:\s*Amazon Confidential and Trademark\.)?"
+    r"Copyright Amazon\.com, Inc\. or its affiliates\. All Rights Reserved\.\s*"
+    r"For informational purposes only\.|\bPage \d+ of \d+\b"
 )
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 
@@ -868,7 +831,7 @@ def build_prompt_with_stats(
     source size, the size included, and what (if anything) was truncated.
 
     Order: task, rubric (inputs, rules, anchors), untrusted-data rule, the
-    four blocks, then the rubric's evidence pointers, the trusted cut list,
+    three blocks, then the rubric's evidence pointers, the trusted cut list,
     the reminder and the response format. The prompt stays under ``ceiling``
     unless the fixed parts alone exceed it. ``facts`` gets its budget first;
     the deliverables share the rest, largest cut first."""
@@ -883,7 +846,6 @@ def build_prompt_with_stats(
     )
     pdf_text, pdf_note = read_pdf_text(deliverables.get("pdf"))
     sources: dict[str, str] = {
-        "decision_html": html_to_text(_read_text(deliverables["decision_html"])),  # type: ignore[arg-type]
         "pdf": pdf_text if not pdf_note else f"(skipped: {pdf_note})",
         "engineering_md": strip_mermaid(_read_text(deliverables["engineering_md"])),  # type: ignore[arg-type]
     }
@@ -912,9 +874,9 @@ def build_prompt_with_stats(
             + cut_list,
             "Reminder: " + UNTRUSTED_DATA_INSTRUCTION.replace("NONCE", nonce),
             "Every note must cite where its evidence is: the deliverable "
-            "(facts, decision_report, executive_pdf, engineering_report) and the section, "
-            'slide or field (e.g. "engineering_report > Risk register", '
-            '"executive_pdf page 7: Migration Sequencing", '
+            "(facts, executive_pdf, engineering_report) and the section, "
+            'page or field (e.g. "engineering_report > Risk register", '
+            '"executive_pdf > Migration wave plan", '
             '"facts.engines[dynamodb].tables_served").',
             "Respond with ONLY a JSON object of this exact shape, integer scores 1-5, "
             "no prose outside the JSON object:\n"

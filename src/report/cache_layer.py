@@ -7,8 +7,6 @@ from typing import Any
 from src.shared.cache_pattern_labels import cache_pattern_label
 from src.shared.engine_names import display_engine
 from src.shared.migration_wave_engines import CACHE_ENGINES as _WAVE_CACHE_ENGINES
-from src.shared.migration_wave_engines import RELATIONAL_ENGINES as _WAVE_RELATIONAL_ENGINES
-from src.shared.migration_wave_engines import cache_front_description
 
 from . import escaping
 from .formatting import fmt_num, plural_noun
@@ -33,73 +31,6 @@ def cache_wave_note(front: str) -> str:
 def cache_layer_text(n: int, share: float) -> str:
     """``20 cached reads · 83.4% of calls`` (#296)."""
     return f"{n} cached {plural_noun(n, 'read')} \u00b7 {fmt_num(share, 1)}% of calls"
-
-
-def _cache_note(engines: list[dict[str, Any]], report: dict[str, Any]) -> str:
-    """The recommendation note for the cache layer (#296).
-
-    #321 review (finding 6): names the engine the cache *actually* fronts,
-    taken from the resolved roadmap's own cache wave (``fronts``, via
-    ``_moves_from_label``) -- not re-derived from the architecture's engine
-    roles. The architecture-role version answered "is there an Aurora engine
-    in this report" rather than "what does the cache wave say it fronts",
-    which silently disagreed with a report whose stored waves predate #321
-    (cache still fronting the legacy source, not Aurora) or are otherwise
-    out of the usual order. Falls back to "the current source database"
-    only when there is no cache wave to ask (no cache overlay at all).
-    """
-    esc = escaping.html_text
-    caches = [e for e in engines if e["role"] == "Cache layer"]
-    names = ", ".join(esc(display_engine(e["engine"])) for e in caches)
-    counted = [e for e in caches if e.get("cached_queries") is not None]
-    cache_wave = next(
-        (
-            w
-            for w in resolve_migration_waves(report)
-            if w.get("engines") and w["engines"][0] in _WAVE_CACHE_ENGINES
-        ),
-        None,
-    )
-    fronted = cache_wave.get("fronts") if cache_wave else None
-    if fronted in _WAVE_RELATIONAL_ENGINES:
-        # Review of #375: say both stages when the cache's final owner
-        # differs from the relational engine wave 2 fronts it with here --
-        # the same shared helper every other deliverable's cache-fronting
-        # sentence calls, so none of them can disagree about it.
-        cache_overlay = report.get("cache_overlay") or {}
-        front = esc(cache_front_description(fronted, cache_overlay.get("owners")))
-    elif fronted:
-        front = esc(_moves_from_label(fronted))
-    else:
-        front = "the current source database"
-    # #424: the safety net's notes (dropped cached reads the schema design did
-    # not cover, with their own before/after numbers) ran after the gate --
-    # without them here, this is the only place the decision report describes
-    # the cache layer's final scope, and it would silently disagree with the
-    # number shown at the assignment gate. #459 review: ``safety_net_notes``
-    # only, never the full ``notes`` (which also carries customer-edit notes
-    # with full query hashes and the legacy-migration note -- internal,
-    # engineering report only).
-    overlay_notes = " ".join(
-        esc(x) for x in (report.get("cache_overlay") or {}).get("safety_net_notes") or []
-    )
-    if not counted:
-        base = f"<b>{names}</b> is an additive cache layer."
-        return f"{base} {overlay_notes}" if overlay_notes else base
-    # One clause per cache engine, each its own facts (#615): never a sum here.
-    one = len(caches) == 1
-    fronts = "; ".join(
-        f"{'it' if one else esc(display_engine(e['engine']))} fronts "
-        f"{e['cached_queries']} hot {plural_noun(e['cached_queries'], 'read')} "
-        f"({esc(fmt_num(e['cached_call_share'], 1))}% of calls)"
-        for e in counted
-    )
-    note = (
-        f"<b>{names}</b> is an additive cache layer: {fronts} cache-aside and owns "
-        "none of the workload: the engines listed above still own every cached read. "
-        + cache_wave_note(front)
-    )
-    return f"{note} {overlay_notes}" if overlay_notes else note
 
 
 def _cache_layer_md(report: dict[str, Any]) -> list[str]:

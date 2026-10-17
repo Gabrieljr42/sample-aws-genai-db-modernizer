@@ -1,13 +1,13 @@
-"""The decision report and the engineering report both show unresolved
-engine ties (#503) -- the same per-query fact the approval gate already
-shows from ``QueryAssignment.tied_engines``.
+"""The engineering report shows unresolved engine ties (#503) -- the same
+per-query fact the approval gate already shows from
+``QueryAssignment.tied_engines``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.report.renderers import render_decision_report_html, render_engineering_report_md
+from src.report.renderers import render_engineering_report_md
 
 
 def _report(tied_queries: list[dict[str, Any]] | None) -> dict[str, Any]:
@@ -75,30 +75,3 @@ class TestEngineeringReportShowsTiedQueries:
         # A report synthesized before this field existed (None, not []).
         md = render_engineering_report_md(_report(None))
         assert "Unresolved engine ties" not in md
-
-
-class TestDecisionReportShowsTiedQueries:
-    def test_lists_each_tied_query_with_display_names(self) -> None:
-        html = render_decision_report_html(_report(_ONE_TIED))
-        assert "Pending engine choices" in html
-        assert "q1" in html
-        assert "DocumentDB" in html
-        assert "DynamoDB" in html
-        assert "ADR-031" not in html
-        assert "tie_unresolved" not in html
-
-    def test_heading_pluralizes_correctly(self) -> None:
-        one = render_decision_report_html(_report(_ONE_TIED))
-        three = render_decision_report_html(_report(_THREE_TIED))
-        assert "Pending engine choices (1 query)" in one
-        assert "Pending engine choices (3 queries)" in three
-        assert "querys" not in one
-        assert "querys" not in three
-
-    def test_omits_the_section_when_there_are_no_ties(self) -> None:
-        html = render_decision_report_html(_report([]))
-        assert "Pending engine choices" not in html
-
-    def test_omits_the_section_when_the_field_is_absent(self) -> None:
-        html = render_decision_report_html(_report(None))
-        assert "Pending engine choices" not in html

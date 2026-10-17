@@ -39,10 +39,8 @@ def _report(run: PipelineResult) -> dict[str, Any]:
 
 def _texts(run: PipelineResult) -> dict[str, str]:
     return {
-        "decision report": run.html("decision-report").read_text(),
-        "engineering report": md_plain(run.deliverable(".md").read_text()),
-        "analysis report": run.html("analysis-report").read_text(),
-        "pdf": "\n".join(pdf_page_texts(str(run.deliverable(".pdf")))),
+        "engineering report": md_plain(run.deliverable("engineering-report.md").read_text()),
+        "pdf": "\n".join(pdf_page_texts(str(run.deliverable("assessment.pdf")))),
     }
 
 
@@ -101,10 +99,9 @@ def test_retiring_an_engine_the_source_runs_is_still_a_saving(
     rc = json.loads((in_use_run.job_dir() / "reality-check" / "output.json").read_text())
     assert [c["saved_cost_estimate"] for c in rc["consolidations"]] == [367.39, 0.0, 0.0]
     texts = _texts(in_use_run)
-    assert "Retired by this plan: $367.39/mo (DocumentDB)" in texts["decision report"]
-    assert "Retired by this plan: $367.39/mo (DocumentDB)" in texts["engineering report"]
-    for where in ("decision report", "engineering report", "analysis report"):
-        assert "Removes $367.39/mo by retiring DocumentDB" in texts[where], where
+    for where in ("pdf", "engineering report"):
+        assert "Retired by this plan: $367.39/mo (DocumentDB)" in texts[where], where
+    assert "Removes $367.39/mo by retiring DocumentDB" in texts["engineering report"]
 
 
 def test_recording_an_engine_in_use_changes_no_routing(

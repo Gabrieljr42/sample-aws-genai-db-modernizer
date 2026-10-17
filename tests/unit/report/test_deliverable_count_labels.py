@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.report import architecture, renderers
+from tests.unit.report.pdf_text import pdf_text
 
 
 def _ap(pid: str, engine: str, in_scope: bool = True) -> dict[str, Any]:
@@ -95,10 +96,10 @@ class TestAccessPatternScope:
     def test_without_query_groups_nothing_is_labelled(self) -> None:
         assert renderers.label_in_scope_access_patterns(RUN5_SUMMARY, {}) == RUN5_SUMMARY
 
-    def test_decision_report_fallback_summary_says_in_scope(self) -> None:
+    def test_pdf_fallback_summary_says_in_scope(self) -> None:
         rep = {**_design_report(), "summary_deterministic": RUN5_SUMMARY}
-        html = renderers.render_decision_report_html(rep)
-        assert "dynamodb: 15 target tables, 47 in-scope access patterns" in html
+        text = pdf_text(rep, trust_generated_summary=False)
+        assert "dynamodb: 15 target tables, 47 in-scope access patterns" in text
 
 
 def _leaderboard_export() -> dict[str, Any]:
@@ -195,12 +196,12 @@ class TestSharedSourceTables:
         assert rows["aurora_mysql"]["scope"] == "2 source tables"
         assert rows["elasticache"]["scope"] == "2 key designs"
 
-    def test_decision_report_total_still_sums_mapped_tables(self) -> None:
-        html = renderers.render_decision_report_html(_shared_tables_report())
-        assert "19 source tables (21 incl. shared)" in html
-        assert "21 tables migrate" in html
-        assert "<p>Tables migrate</p><p class=val>21</p>" in html
-        assert "1921" not in html
+    def test_the_engine_table_total_still_sums_mapped_tables(self) -> None:
+        md = renderers.render_engineering_report_md(_shared_tables_report())
+        assert "| 19 source tables (21 incl. shared) |" in md
+        assert "| 21 tables migrate |" in md
+        assert "1921" not in md
+        assert "21 tables migrate" in pdf_text(_shared_tables_report())
 
 
 def _risk(rid: str, sev: str, n_queries: int, engine: str = "dynamodb") -> dict[str, Any]:
@@ -269,13 +270,13 @@ class TestUnlabelledCounts:
         md = renderers.render_engineering_report_md(rep)
         assert "## Migration map (21 tables)" in md
 
-    def test_decision_report_separates_open_and_resolved_risks(self) -> None:
-        html = renderers.render_decision_report_html(_mapped_report(), trust_generated_summary=True)
+    def test_pdf_separates_open_and_resolved_risks(self) -> None:
+        text = pdf_text(_mapped_report(), trust_generated_summary=True)
         # #270: only non-zero severities are named -- all 8 fixture risks are
-        # MEDIUM, so "0 high" no longer appears.
-        assert "8 open migration risks (8 medium) across migration complexity" in html
-        assert "4 more were resolved by the assignment." in html
-        assert "4 resolved by the assignment)" not in html
+        # MEDIUM, so "0 high" never appears.
+        assert "Open risks: 8 (8 medium)" in text
+        assert "Resolved by the assignment: 4" in text
+        assert "4 resolved by the assignment)" not in text
 
     def test_summary_risk_sentence_separates_open_and_resolved(self) -> None:
         out = renderers.label_resolved_risks(_mapped_report()["summary_deterministic"])
@@ -306,12 +307,12 @@ class TestNumberFormatting:
         assert "| 1,234.5 |" in md
         assert "17.4604" not in md
 
-    def test_decision_report_rounds_workload_share(self) -> None:
+    def test_engineering_report_rounds_workload_share(self) -> None:
         rep = _shared_tables_report()
         rep["ranking"][0]["workload_percent"] = 58.900000000000006
-        html = renderers.render_decision_report_html(rep)
-        assert "<td data-figure=workload>58.9%</td>" in html
-        assert "58.900000" not in html
+        md = renderers.render_engineering_report_md(rep)
+        assert "| 58.9% |" in md
+        assert "58.900000" not in md
 
 
 class TestReviewFollowUps:
@@ -323,14 +324,15 @@ class TestReviewFollowUps:
             "3 open risk(s) (overall: LOW); 1 more was resolved by the assignment."
         )
 
-    def test_shared_tables_footnote_in_decision_report(self) -> None:
-        html = renderers.render_decision_report_html(_shared_tables_report())
-        assert "including tables also served by another engine" in html
+    def test_shared_tables_footnote_in_the_engine_notes(self) -> None:
+        md = renderers.render_engineering_report_md(_shared_tables_report())
+        assert "including tables also served by another engine" in md
+        assert "including tables also served by another engine" in pdf_text(_shared_tables_report())
 
     def test_no_footnote_without_shared_tables(self) -> None:
         rep = _shared_tables_report()
         rep["schema_designs"]["dynamodb"]["tables"] = []
-        assert "also served by another engine" not in renderers.render_decision_report_html(rep)
+        assert "also served by another engine" not in renderers.render_engineering_report_md(rep)
 
 
 class TestFmtNumEdges:
@@ -455,10 +457,10 @@ class TestLabelsWrittenAtSource:
 
     def test_each_label_appears_once_in_every_deliverable(self) -> None:
         rep = _new_summary_report()
-        html = renderers.render_decision_report_html(rep)
+        text = pdf_text(rep, trust_generated_summary=False)
         for label in self.LABELS:
-            assert html.count(label) == 1, (label, "decision report")
-        assert "in-scope in-scope" not in html
-        assert "open open" not in html
-        assert "risk(s)" not in html
-        assert "more more" not in html
+            assert text.count(label) == 1, (label, "PDF report")
+        assert "in-scope in-scope" not in text
+        assert "open open" not in text
+        assert "risk(s)" not in text
+        assert "more more" not in text

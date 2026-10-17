@@ -1,4 +1,5 @@
-"""Issue #524: the deck's and decision report's per-engine Scope column showed
+"""Issue #524: the deck's and decision report's per-engine Scope column (now the
+engineering report's and the PDF report's) showed
 "0 source tables" for DynamoDB while the same deliverables' "Tables migrate"
 tile, and the migration roadmap, both said 8 source tables migrate to it.
 
@@ -79,22 +80,21 @@ def test_architecture_engines_falls_back_to_the_migration_wave_count(
     assert dynamodb["scope"] == "8 source tables"
 
 
-def test_decision_report_scope_tile_and_roadmap_agree(report: dict[str, Any]) -> None:
-    html = renderers.render_decision_report_html(report)
-    tile_n = int(re.search(r"<p>Tables migrate</p><p class=val>(\d+)</p>", html).group(1))
+def test_engineering_report_scope_total_and_roadmap_agree(report: dict[str, Any]) -> None:
+    md = renderers.render_engineering_report_md(report)
+    total_n = int(
+        re.search(r"^\| Total \| \| [^|]* \| (\d+) tables? migrates? \|", md, re.M).group(1)
+    )
     row = re.search(
-        r"<span class=badge[^>]*>DynamoDB</span></td><td class=role>Migration target</td>"
-        r"<td data-figure=workload>[\d.]+%</td><td data-figure=scope>(\d+) source tables?</td>",
-        html,
+        r"^\| DynamoDB \| Migration target \| [\d.]+% \| (\d+) source tables? \|", md, re.M
     )
-    assert row is not None, html
+    assert row is not None, md
     scope_n = int(row.group(1))
-    roadmap = re.search(
-        r"<p data-wave=\"\d+\"><b>Wave \d+:[^<]*DynamoDB</b>.*?(\d+) source tables?</span>\.", html
-    )
-    assert roadmap is not None, html
+    wave = md[md.index("DynamoDB", md.index("## Migration roadmap")) :]
+    roadmap = re.search(r"^- (\d+) source tables?:", wave, re.M)
+    assert roadmap is not None, md
     roadmap_n = int(roadmap.group(1))
-    assert scope_n == tile_n == roadmap_n == 8
+    assert scope_n == total_n == roadmap_n == 8
 
 
 def test_designed_engine_with_zero_mapped_tables_keeps_its_own_figure(

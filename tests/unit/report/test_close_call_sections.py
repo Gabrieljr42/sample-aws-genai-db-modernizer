@@ -1,4 +1,4 @@
-"""Close calls in the decision and engineering reports (#730).
+"""Close calls in the engineering report and the PDF report (#730).
 
 ``facts.close_calls`` groups the queries an engine won by less than the
 close-call margin over another engine the plan keeps; both reports state
@@ -13,8 +13,9 @@ from typing import Any
 
 import pytest
 
-from src.report.renderers import render_decision_report_html, render_engineering_report_md
+from src.report.renderers import render_engineering_report_md
 from src.shared.report_facts import CLOSE_CALL_IDS_SHOWN, compute_report_facts
+from tests.unit.report.pdf_text import pdf_text
 
 MD_HEADING = "## Close calls"
 
@@ -69,37 +70,21 @@ def report() -> dict[str, Any]:
     return _report(ROWS)
 
 
-def _section_html(html: str) -> str:
-    start = html.index("<section data-figure=close-calls>")
-    return html[start : html.index("</section>", start)]
-
-
 def _section_md(md: str) -> str:
     start = md.index(MD_HEADING)
     end = md.find("\n## ", start + 1)
     return md[start:] if end == -1 else md[start:end]
 
 
-def test_the_decision_report_states_each_pair_and_how_to_move_them(report) -> None:
-    section = _section_html(render_decision_report_html(report))
+def test_the_pdf_states_each_pair_and_how_to_move_them(report) -> None:
+    text = pdf_text(report)
     # The headline is the real close calls; the settled ties are stated apart.
-    assert "Close calls (3 queries), plus 2 exact ties a rule settled" in section
-    assert "less than 5 points" in section
-    assert (
-        "2 queries went to DynamoDB by less than 5 points over Aurora MySQL "
-        "(a gap of 1 to 4 points); DynamoDB also won 1 exact tie with Aurora MySQL that a "
-        "routing rule settled" in section
-    )
-    assert (
-        "1 exact tie between Aurora MySQL and DocumentDB went to Aurora MySQL by a routing "
-        "rule. DocumentDB can serve it." in section
-    )
-    assert "1 is compared on its co-dependency group" in section
-    assert "1 query went to Aurora MySQL by less than 5 points over DynamoDB" in section
-    assert "assignment review" in section
-    assert "Why this engine" in section
-    # Short: the engineering report names the queries.
-    assert "q-a" not in section
+    assert "Close calls (3 queries), plus 2 exact ties a rule settled" in text
+    assert "less than 5 points" in text
+    assert "DynamoDB Aurora MySQL 2 1 to 4 1 1" in text
+    assert "Aurora MySQL DocumentDB 0 - 1 0" in text
+    assert "assignment review" in text
+    assert "Why this engine" in text
 
 
 def test_the_engineering_report_tables_the_same_pairs(report) -> None:
@@ -113,13 +98,13 @@ def test_the_engineering_report_tables_the_same_pairs(report) -> None:
 
 
 def test_the_reports_agree_on_every_pair(report) -> None:
-    html = _section_html(render_decision_report_html(report))
+    text = pdf_text(report)
     md = _section_md(render_engineering_report_md(report))
     for pair in report["facts"]["close_calls"]["engine_pairs"]:
-        assert f'data-pair-queries="{pair["pair_query_count"]}"' in html
         assert f"| {pair['pair_query_count']} |" in md
         for qid in pair["query_ids"]:
             assert f"`{qid}`" in md
+            assert qid in text
 
 
 def test_more_than_the_cap_names_the_closest_and_counts_the_rest() -> None:
@@ -135,7 +120,7 @@ def test_more_than_the_cap_names_the_closest_and_counts_the_rest() -> None:
 @pytest.mark.parametrize("rows", [None, []])
 def test_no_section_without_close_calls(rows) -> None:
     report = _report(rows)
-    assert "data-figure=close-calls" not in render_decision_report_html(report)
+    assert "Close calls (" not in pdf_text(report)
     assert MD_HEADING not in render_engineering_report_md(report)
 
 
@@ -144,10 +129,10 @@ def test_the_renderers_print_the_stored_facts_not_their_own_count(report) -> Non
     doctored["facts"]["close_calls"]["close_call_query_count"] = 99
     doctored["facts"]["close_calls"]["settled_tie_count"] = 0
     doctored["facts"]["close_calls"]["engine_pairs"][0]["pair_query_count"] = 42
-    html = _section_html(render_decision_report_html(doctored))
+    text = pdf_text(doctored)
     md = _section_md(render_engineering_report_md(doctored))
-    assert "Close calls (99 queries)" in html and md.startswith("## Close calls (99 queries)")
-    assert "42 queries went to DynamoDB" in html
+    assert "Close calls (99 queries)" in text and md.startswith("## Close calls (99 queries)")
+    assert "DynamoDB Aurora MySQL 42" in text
     assert "| DynamoDB | Aurora MySQL | 42 |" in md
 
 
@@ -159,8 +144,9 @@ def test_query_ids_are_escaped() -> None:
     assert row.count(" | ") == 6  # the id's pipe does not open a cell
 
 
-def test_an_unknown_engine_id_is_escaped_in_the_decision_report() -> None:
-    hostile = _report([_row("q1", 'x"><script>', "aurora_mysql", 1.0)])
-    html = _section_html(render_decision_report_html(hostile))
-    assert "<script>" not in html
-    assert "&lt;script&gt;" in html
+def test_an_unknown_engine_id_is_escaped_in_the_engineering_report() -> None:
+    hostile = _report([_row("q1", 'x"><script>|', "aurora_mysql", 1.0)])
+    md = _section_md(render_engineering_report_md(hostile))
+    assert "<script>" not in md
+    row = next(line for line in md.splitlines() if "q1" in line)
+    assert row.count(" | ") == 6  # the engine id's pipe does not open a cell

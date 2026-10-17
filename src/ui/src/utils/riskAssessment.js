@@ -15,7 +15,7 @@
  * view's risk count can never disagree with the decision/engineering reports'
  * (#201).
  *
- * Severity styling mirrors `decision_report.py::_risk_tile_class`: CRITICAL is at
+ * Severity styling follows the retired HTML decision report's: CRITICAL is at
  * least as severe as HIGH (both map to `error`/red), never downgraded to a
  * plain warning (#270: the deleted `ReportResults.js` page's bug, where
  * CRITICAL fell back to the same styling as a warning and had no tab of its

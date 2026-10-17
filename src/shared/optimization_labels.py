@@ -1,22 +1,12 @@
 """Display strings for Aurora ``Optimization.category`` (#587 round 3).
 
-A real-model run (schema design present) rendered the raw category code
-directly in the interactive analysis report's "Aurora Design" section --
+A real-model run (schema design present) showed the raw category code --
 ``"read_replica: Aurora cluster"``, ``"io_optimized: Aurora MySQL cluster"`` --
-instead of a readable label. Shared between the three places that render an
-Aurora optimization's category:
-
-- ``src/ui/src/utils/optimizationLabels.js`` (its JS mirror, imported by
-  ``src/ui/src/utils/ExportReport.js``'s standalone HTML export), kept in sync
-  with this module by ``tests/unit/report/test_optimization_labels_js_sync.py``,
-  the same way ``src/ui/src/utils/engineNames.js`` is kept in sync with
-  ``src.shared.engine_names`` by ``test_engine_names_js_sync.py``;
-- ``src/report/analysis_report.py``'s own ``OPTIMIZATION_LABELS`` constant,
-  injected as a JS const into the ATX-rendered interactive report the same
-  way ``ENGINE_LABELS`` is (``src/report/templates/analysis_report.js`` is
-  lifted verbatim from ``ExportReport.js`` by
-  ``scripts/sync_report_template.py``, so fixing the React source and
-  re-running that script is enough to fix both).
+instead of a readable label. The results page's "Aurora Design" section reads
+the labels from ``src/ui/src/utils/optimizationLabels.js``, its JS mirror, kept in
+sync with this module by ``tests/unit/report/test_optimization_labels_js_sync.py``,
+the same way ``src/ui/src/utils/engineNames.js`` is kept in sync with
+``src.shared.engine_names`` by ``test_engine_names_js_sync.py``.
 
 Every ``category`` the Aurora schema-design contracts allow needs an entry
 here: ``Optimization.category`` is declared identically in

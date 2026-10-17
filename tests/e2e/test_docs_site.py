@@ -149,3 +149,71 @@ def test_no_nav_link_returns_404(page: Page, docs_site: str) -> None:
         checked.add(url)
         resp = page.request.get(url)
         assert resp.status < 400, f"{url} returned {resp.status}"
+
+
+# ---------------------------------------------------------------------------
+# The sample engineering report page (#987): the retired HTML reports were
+# rendered in a browser, offline, for leaked placeholders, horizontal overflow
+# and accessibility. The help site's rendering of the engineering report is the
+# HTML that remains, so it gets the same checks.
+# ---------------------------------------------------------------------------
+
+ENGINEERING_PAGE = "sample/engineering-report.html"
+BLOCKING_IMPACTS = ("critical", "serious", "moderate")
+
+
+def _open_offline(page: Page, url: str, origin: str) -> dict[str, list[str]]:
+    """Load ``url`` with every request off the site blocked; collect errors."""
+    events: dict[str, list[str]] = {"console": [], "pageerror": [], "blocked": []}
+    page.on("console", lambda m: events["console"].append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: events["pageerror"].append(str(e)))
+
+    def guard(route) -> None:  # type: ignore[no-untyped-def]
+        if route.request.url.startswith(origin):
+            route.continue_()
+        else:
+            events["blocked"].append(route.request.url)
+            route.abort()
+
+    page.route("**/*", guard)
+    page.goto(url)
+    page.wait_for_load_state("networkidle")
+    return events
+
+
+def test_sample_engineering_report_renders_cleanly_offline(page: Page, docs_site: str) -> None:
+    from src.tools.validation.customer_text_guard import scan_text
+
+    events = _open_offline(page, f"{docs_site}/{ENGINEERING_PAGE}", docs_site)
+    assert events == {"console": [], "pageerror": [], "blocked": []}
+    text = page.inner_text("body")
+    for heading in ("Engineering Report", "Target engines", "Migration roadmap"):
+        assert heading in text, heading
+    leaked = [w for w in ("undefined", "NaN", "null") if re.search(rf"\b{w}\b", text)]
+    leaked += [s for s in ("[object Object]", "{{") if s in text]
+    assert leaked == []
+    findings = scan_text(text, "sample-engineering-report:body")
+    assert findings == [], [(f.kind, f.text, f.excerpt) for f in findings]
+
+
+@pytest.mark.parametrize("width", [1280, 1920])
+def test_sample_engineering_report_has_no_horizontal_overflow(
+    page: Page, docs_site: str, width: int
+) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    _open_offline(page, f"{docs_site}/{ENGINEERING_PAGE}", docs_site)
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+
+
+def test_sample_engineering_report_has_no_moderate_or_worse_accessibility_violations(
+    page: Page, docs_site: str
+) -> None:
+    from axe_playwright_python.sync_playwright import Axe
+
+    _open_offline(page, f"{docs_site}/{ENGINEERING_PAGE}", docs_site)
+    violations = Axe().run(page).response["violations"]
+    blocking = [v["id"] for v in violations if v.get("impact") in BLOCKING_IMPACTS]
+    assert blocking == [], blocking
+    # One <main>, every piece of content in a landmark, no skipped heading level.
+    found = {v["id"] for v in violations} & {"landmark-one-main", "region", "heading-order"}
+    assert found == set(), sorted(found)

@@ -1,26 +1,27 @@
 """Render every customer deliverable from one synthesis report.
 
 Single entry point shared by the local scripts and the AWS Transform integration.
-It only renders; the caller decides where items go (``stage`` = write next to the
-report, ``publish`` = hand to a delivery channel). No LLM calls; content is a pure
-function of the artifacts apart from the export timestamp.
+It only renders; the caller decides where items go: every item is a file of the
+job's ``deliverables/`` folder (``FOLDER_ENTRIES``), and ``publish`` marks the ones
+handed to a delivery channel. No LLM calls; content is a pure function of the
+report apart from the provenance timestamp.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from . import analysis_report, pdf_report, renderers
-from .analysis_report import GraphFetcher
+from . import pdf_report, renderers
 
 logger = logging.getLogger(__name__)
 
-FileType = Literal["HTML", "MARKDOWN", "JSON", "PDF"]
+FileType = Literal["MARKDOWN", "JSON", "PDF"]
 
 
 def _select_frame(
@@ -61,12 +62,11 @@ def _raising_frame(exc: BaseException) -> str:
 
 @dataclass(frozen=True)
 class Deliverable:
-    name: str  # stable id, e.g. "decision-report"
+    name: str  # stable id, e.g. "engineering-report"
     content: bytes
     file_type: FileType
-    label: str  # human title, e.g. "Decision Report — discourse"
-    filename: str  # download / on-disk filename
-    stage: bool  # write a durable copy next to report.json
+    label: str  # human title, e.g. "Engineering Report — discourse"
+    filename: str  # download filename on the delivery channel
     publish: bool  # hand to the delivery channel
 
 
@@ -106,22 +106,17 @@ FOLDER_ENTRIES: tuple[FolderEntry, ...] = (
         "Assessment Data (JSON)",
         "Tools and scripts: the complete machine-readable assessment",
     ),
-    FolderEntry(
-        "decision-report",
-        "decision-report.html",
-        "Decision report (HTML)",
-        "Decision makers: recommendation, ranking and reasoning",
-    ),
-    FolderEntry(
-        "analysis-report",
-        "analysis-report.html",
-        "Interactive analysis report (HTML)",
-        "Architects and engineers: per-engine detail and each query's path",
-    ),
 )
 FOLDER_FILENAMES: tuple[str, ...] = (
     *(e.filename for e in FOLDER_ENTRIES),
     INDEX_FILENAME,
+)
+# Files an older round wrote into the folder for deliverables since retired (#987:
+# the decision and interactive analysis HTML reports). The render step removes
+# them, so a re-rendered folder never offers a report the index no longer lists.
+RETIRED_FOLDER_FILENAMES: tuple[str, ...] = (
+    "decision-report.html",
+    "analysis-report.html",
 )
 
 
@@ -165,14 +160,58 @@ def render_folder_index(
     return "\n".join(lines)
 
 
+def synthesis_report_key(
+    store: Any, database_name: str, job_id: str, assignment_version: int
+) -> str:
+    """Return the synthesis report key, preferring the highest version present.
+
+    ``synthesis_handler`` writes ``synthesis/v{N}/report.json`` when
+    ``assignment_version > 0`` and ``referee-synthesis/report.json`` at 0. The
+    requested version is tried first, then any other version found under
+    ``synthesis/``, then the unversioned path -- so this works for an AWS Transform
+    job and a v0 local run without the caller having to know which.
+    """
+    candidates: list[str] = []
+    if assignment_version > 0:
+        candidates.append(f"{database_name}/{job_id}/synthesis/v{assignment_version}/report.json")
+
+    prefix = f"{database_name}/{job_id}/synthesis/"
+    try:
+        found: list[tuple[int, str]] = []
+        for raw_key in store.list_prefix(prefix):
+            m = re.search(r"/synthesis/v(\d+)/report\.json$", raw_key)
+            if m:
+                found.append((int(m.group(1)), raw_key))
+        candidates.extend(k for _, k in sorted(found, reverse=True))
+    except Exception as exc:  # noqa: BLE001 - listing is best-effort
+        logger.debug("Could not list %s: %s", prefix, exc)
+
+    candidates.append(f"{database_name}/{job_id}/referee-synthesis/report.json")
+
+    for key in candidates:
+        if store.exists(key):
+            return key
+    raise FileNotFoundError(
+        f"No synthesis report found for job {job_id!r} under "
+        f"'{database_name}/{job_id}/' (tried {', '.join(dict.fromkeys(candidates))})."
+    )
+
+
+def folder_key(database_name: str, job_id: str, filename: str) -> str:
+    """Store key of one file of the job's deliverables folder."""
+    return f"{database_name}/{job_id}/{DELIVERABLES_DIR}/{filename}"
+
+
 @dataclass
 class DeliverableSet:
     items: list[Deliverable] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    # Query journeys embedded in the analysis report, or None when that report
-    # itself failed to build (see ``errors``) and no count exists.
-    journeys: int | None = None
+
+    def folder_files(self) -> list[tuple[FolderEntry, Deliverable]]:
+        """Each rendered item with the folder entry it is written as, in
+        ``FOLDER_ENTRIES`` order; an entry that failed to render is absent."""
+        by_name = {d.name: d for d in self.items}
+        return [(e, by_name[e.name]) for e in FOLDER_ENTRIES if e.name in by_name]
 
 
 def render_deliverables(
@@ -181,20 +220,18 @@ def render_deliverables(
     database_name: str,
     report_key: str,
     assignment_version: int = 1,
-    graph_fetcher: GraphFetcher | None = None,
 ) -> DeliverableSet:
     """Render all deliverables for ``report_key``.
 
-    Raises ``FileNotFoundError`` if the report itself is missing. The interactive
-    analysis report and the executive summary are optional: a failure in either is
-    recorded in ``errors`` and the rest are still returned.
+    Raises ``FileNotFoundError`` if the report itself is missing. The PDF report
+    is optional: a failure is recorded in ``errors`` and the rest are still
+    returned.
 
-    Each entry in ``errors`` and ``warnings`` is also logged here; callers should
-    forward them, not re-log them. An ``errors`` entry wraps a caught exception's
-    own message, which can echo the report's content (#146), so WARNING only gets
-    the artifact name, the exception type and the raising frame -- never the
-    message (#143); ``exc_info=True`` at DEBUG carries the full traceback.
-    ``warnings`` are static, deterministic text, so they go to WARNING in full.
+    Each entry in ``errors`` is also logged here; callers should forward them,
+    not re-log them. An ``errors`` entry wraps a caught exception's own message,
+    which can echo the report's content (#146), so WARNING only gets the artifact
+    name, the exception type and the raising frame -- never the message (#143);
+    ``exc_info=True`` at DEBUG carries the full traceback.
     """
     if not store.exists(report_key):
         raise FileNotFoundError(f"synthesis report not found: {report_key}")
@@ -208,28 +245,15 @@ def render_deliverables(
 
     out = DeliverableSet()
 
-    decision = prov("decision-report", "html")
     engineering = prov("engineering-report", "md")
     data = prov("assessment-data", "json")
     out.items += [
-        Deliverable(
-            "decision-report",
-            renderers.render_decision_report_html(
-                report, trust_generated_summary=trust, prov=decision
-            ).encode("utf-8"),
-            "HTML",
-            f"Decision Report — {database_name}",
-            decision["filename"],
-            stage=True,
-            publish=True,
-        ),
         Deliverable(
             "engineering-report",
             renderers.render_engineering_report_md(report, prov=engineering).encode("utf-8"),
             "MARKDOWN",
             f"Engineering Report — {database_name}",
             engineering["filename"],
-            stage=True,
             publish=True,
         ),
         # The published JSON is wrapped with an identity envelope; the object at
@@ -242,68 +266,24 @@ def render_deliverables(
             "JSON",
             f"Assessment Data (raw) — {database_name}",
             data["filename"],
-            stage=False,
             publish=True,
         ),
     ]
 
-    export_data: dict | None = None
     try:
-        export_data = analysis_report.build_export_data(
-            store,
-            job_id,
-            database_name,
-            assignment_version=assignment_version,
-            graph_fetcher=graph_fetcher,
-        )
-        analysis = prov("analysis-report", "html")
-        html = analysis_report.render_analysis_report_html(
-            export_data, filename=analysis["filename"]
-        )
+        pdf = pdf_report.render_executive_summary_pdf(report, trust_generated_summary=trust)
         out.items.append(
-            Deliverable(
-                "analysis-report",
-                html.encode("utf-8"),
-                "HTML",
-                f"Interactive Analysis Report — {database_name}",
-                analysis["filename"],
-                stage=True,
-                publish=True,
-            )
-        )
-        out.journeys = (export_data.get("queryJourneys") or {}).get("total")
-        if out.journeys == 0:
-            out.warnings.append(
-                "analysis-report: 0 query journeys embedded (graph unavailable or "
-                "the job has no collector output)"
-            )
-    except Exception as e:  # noqa: BLE001 - optional deliverable
-        out.errors.append(f"analysis-report: {type(e).__name__}: {e}")
-        logger.debug("deliverable skipped: analysis-report", exc_info=True)
-        logger.warning(
-            "deliverable skipped: analysis-report (%s at %s)",
-            type(e).__name__,
-            _raising_frame(e),
-        )
-
-    try:
-        pdf = pdf_report.render_executive_summary_pdf(
-            report, export_data, trust_generated_summary=trust
-        )
-        out.items.append(
-            # Fixed name, unlike the other deliverables above: this is the reusable
-            # executive deliverable, called the same thing in every engagement. The
-            # job it belongs to is already in the key prefix (synthesis/v<N>/...), so
-            # no per-round stem is needed on disk. The label still carries the round
-            # (#146, #147 tracks the on-disk/download name too) so the panel can
-            # tell rounds apart without opening the file.
+            # Fixed download name, unlike the other deliverables above: this is the
+            # reusable executive deliverable, called the same thing in every
+            # engagement. The label still carries the round (#146, #147 tracks the
+            # download name too) so the panel can tell rounds apart without
+            # opening the file.
             Deliverable(
                 "executive-summary-pdf",
                 pdf,
                 "PDF",
                 f"Executive Summary Report — {database_name} (v{assignment_version})",
                 pdf_report.FILENAME,
-                stage=True,
                 publish=True,
             )
         )
@@ -316,6 +296,4 @@ def render_deliverables(
             _raising_frame(e),
         )
 
-    for warn in out.warnings:
-        logger.warning("deliverable warning: %s", warn)
     return out

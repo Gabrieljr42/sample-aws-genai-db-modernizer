@@ -41,16 +41,14 @@ async def get_results(job_id: str = Depends(job_id_param)):
     if not synthesis:
         raise HTTPException(status_code=404, detail="Results not available yet")
 
-    # One wave source (#225): the UI and the HTML export it
-    # feeds (ExportReport.js) read this same payload, so a
+    # One wave source (#225): the UI reads this same payload, so a
     # report written before #225 must show the same fallback roadmap the
-    # decision report and engineering report already derive, not an empty one.
+    # PDF report and engineering report already derive, not an empty one.
     if not synthesis.get("migration_waves"):
         synthesis["migration_waves"] = resolve_migration_waves(synthesis) or None
-    # #615 (ADR-032): the UI and its HTML exports read every figure from
-    # synthesis.facts; a report synthesized before that field existed gets the
-    # same block here, from the same function, so no export falls back to a
-    # formula of its own.
+    # #615 (ADR-032): the UI reads every figure from synthesis.facts; a report
+    # synthesized before that field existed gets the same block here, from the
+    # same function, so the UI never falls back to a formula of its own.
     if not isinstance(synthesis.get("facts"), dict):
         synthesis["facts"] = report_facts(synthesis)
 
@@ -73,7 +71,6 @@ _MEDIA_TYPES = {
     ".pdf": "application/pdf",
     ".md": "text/markdown",
     ".json": "application/json",
-    ".html": "text/html",
 }
 
 
@@ -131,10 +128,10 @@ async def download_deliverable(
     job_id: str = Depends(job_id_param), filename: str = Depends(validated_filename)
 ):
     """Download one file of the job's ``deliverables/`` folder (#957). Only a
-    file the folder's definition names is served, from inside that folder.
-    Always as an attachment with ``nosniff``; an HTML report also gets
-    ``Content-Security-Policy: sandbox``, so no browser runs its scripts on the
-    API origin even if it ignores the attachment disposition."""
+    file the folder's definition names is served, from inside that folder,
+    always as an attachment with ``nosniff``. A retired HTML report an older
+    round left in the folder is not a name the definition carries, so it is
+    never served (#987)."""
     db_name = _deliverables_db_name(job_id)
     if not sfn_service:
         raise HTTPException(status_code=503, detail="Services not configured")
@@ -146,8 +143,6 @@ async def download_deliverable(
         raise HTTPException(status_code=404, detail="Deliverable not available")
     name = os.path.basename(path)
     headers = {"X-Content-Type-Options": "nosniff"}
-    if name.endswith(".html"):
-        headers["Content-Security-Policy"] = "sandbox"
     return FileResponse(
         path,
         media_type=_MEDIA_TYPES.get(os.path.splitext(name)[1], "application/octet-stream"),
