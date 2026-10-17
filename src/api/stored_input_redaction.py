@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from src.api.secret_guard import redact_credential_shapes, strip_secrets
+from src.shared.contract_versioning import stamp_artifact_version
 from src.storage.local_store import LocalArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,8 @@ def _redact_one(store: LocalArtifactStore, key: str, clean: Callable[[Any], Any]
     cleaned = clean(data)
     if cleaned == data:
         return False
-    store.write_json(key, cleaned)
+    # A rewrite: a contract file (answers.json) says today's version (#1018).
+    store.write_json(key, stamp_artifact_version(key, cleaned))
     return True
 
 

@@ -896,7 +896,8 @@ def run_schema_merge(
     )
     if checked != merged:
         merged = checked
-        store.write_json(f"{base_key}/schema_output.json", merged)
+        output_key = f"{base_key}/schema_output.json"
+        store.write_json(output_key, stamp_artifact_version(output_key, merged))
     violations = report.violations + merge_failures(merged)
     report = ScopeReport(violations, report.warnings + merge_warnings(merged))
 

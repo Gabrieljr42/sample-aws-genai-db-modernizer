@@ -73,6 +73,8 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from src.shared.contract_versioning import stamp_artifact_version
+
 logger = logging.getLogger(__name__)
 
 _STATUS_MARKER = "_status.json"
@@ -328,7 +330,8 @@ def mark_assignment_reviewed(store, db_name: str, job_id: str, inferred_from: st
                 "phase": "assignment_review",
                 "status": "completed",
             }
-            store.write_json(meta_path, meta)
+            # A rewrite in place, at today's version (#1018).
+            store.write_json(meta_path, stamp_artifact_version(meta_path, meta))
             return
 
         if is_assignment_reviewed(store, db_name, job_id):
