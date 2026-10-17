@@ -657,6 +657,7 @@ Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_comm
 ### standard-crud
 
 Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases`.
+Segment weighting: per table. A table's score weighs this pattern by the calls of the segment's queries that access that table, not the whole segment.
 
 - Aurora PostgreSQL, fit 60 (aurora-common-10): Standard single-table CRUD operations \(SELECT/INSERT/UPDATE/DELETE\) at moderate frequency. These are valid relational workloads — Aurora handles them efficiently with connection pooling and buffer cache.
 - Aurora MySQL, fit 60 (aurora-common-10): Standard single-table CRUD operations \(SELECT/INSERT/UPDATE/DELETE\) at moderate frequency. These are valid relational workloads — Aurora handles them efficiently with connection pooling and buffer cache.
