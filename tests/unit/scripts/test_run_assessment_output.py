@@ -393,10 +393,15 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # 75 and Aurora's 70), key lookups to DynamoDB, and wordpress's one time-bucket
     # report to OpenSearch: aurora_mysql -13, documentdb +15, dynamodb -3, opensearch +1
     # (every moved query is in the #728 switch PR).
+    # #494 slice 2 (each query's own per-engine cost dimension): the per-engine cost
+    # bands are gone and every engine scores 96-100 on cost here, so 4 key-scoped reads
+    # lose DynamoDB's old small-table credit and 1 its Aurora tie, and go to DocumentDB
+    # (its cost weight is 15%): dynamodb -4, aurora_mysql -1, documentdb +5 (every moved
+    # query is in the #494 slice 2 PR).
     assert rc["before_distribution"] == {
-        "dynamodb": 36,
-        "aurora_mysql": 47,
-        "documentdb": 23,
+        "dynamodb": 32,
+        "aurora_mysql": 46,
+        "documentdb": 28,
         "opensearch": 1,
     }
     assert sum(rc["before_distribution"].values()) == sum(rc["after_distribution"].values())

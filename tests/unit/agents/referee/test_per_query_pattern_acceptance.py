@@ -15,6 +15,8 @@ They read only the routing path every production caller uses
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -95,8 +97,14 @@ def _collector(*queries):
 
 
 def _score(query, engine, collector, analysis):
+    """The query's score, with its cost dimension held fixed: these tests are about the
+    pattern dimension (criterion 4b is narrowed to it), and the cost dimension shares an
+    engine's standing cost over the queries it could serve (#494), so a query added to
+    the workload moves it by design. ``test_per_query_cost.py`` tests the cost dimension,
+    including that no other query's pattern moves it."""
     ctx = ScoringContext.from_pipeline({engine: analysis}, None, collector)
-    return score_query_for_engine(query, engine, ctx).score
+    with patch.object(ScoringContext, "servable_queries", lambda self, engine: frozenset()):
+        return score_query_for_engine(query, engine, ctx).score
 
 
 def test_784_more_relational_evidence_on_a_table_never_lowers_aurora():

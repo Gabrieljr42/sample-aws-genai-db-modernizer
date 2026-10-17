@@ -321,6 +321,7 @@ def run_reality_check(
         source_compatible_engine,
         settled_counts,
         customer_kept_engines=kept_by_customer,
+        cost_model=scoring_ctx.cost_model,
     )
 
     # -------------------------------------------------------------------

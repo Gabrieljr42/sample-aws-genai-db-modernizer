@@ -11,6 +11,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 
+from src.agents.referee.query_cost import QueryCostModel
 from src.agents.referee.reality_check_rules import (
     TARGET_ENGINE_COUNT,
     UNIQUE_DELTA_THRESHOLD,
@@ -44,6 +45,8 @@ def _evaluate_engine_removal(
     tied_engines_by_qid: Mapping[str, list[str]] | None = None,
     orphaned_qas: list[dict] | None = None,
     source_compatible_engine: str | None = None,
+    *,
+    cost_model: QueryCostModel | None = None,
 ) -> tuple[bool, dict, float]:
     """Phase 1's per-engine question (#502 review): judged on ``engine``'s
     own native queries alone, using the resolver's own per-query scores
@@ -61,8 +64,20 @@ def _evaluate_engine_removal(
     unless at least one native query scores it ``UNIQUE_DELTA_THRESHOLD``
     points above every engine that could take it, and -- once more than
     ``TARGET_ENGINE_COUNT`` engines are already committed -- that unique
-    value is worth the fixed cost of keeping it (the engine's burden and
+    value is worth the cost of keeping it (the engine's burden and
     per-unique-query cut-off come from its catalog pricing table, #494).
+
+    The burden is engine-aware (#494 slice 2): the engine's standing cost, plus
+    the extra-engine burden, plus the net variable cost of its own native
+    queries -- what each costs to run on ``engine`` at its per-request prices,
+    less what it would cost on the engine it would move to (its best-scoring
+    eligible alternative, the cheapest of them when several tie), from
+    ``cost_model`` (``ScoringContext.cost_model``, :mod:`src.agents.referee.
+    query_cost`). A request-priced engine serving a hot query weighs more than
+    its standing cost says; one that runs its queries more cheaply than where
+    they would go weighs less, below 0 when keeping it saves more than it
+    costs, so it is the last removable engine to go. With no ``cost_model`` the
+    net variable cost is 0 (the flat burden).
 
     ``orphaned_qas`` (#485 review) are the native queries of engines
     ALREADY removed earlier in this same settling pass -- one flat,
@@ -144,6 +159,8 @@ def _evaluate_engine_removal(
     # Split-group members (#894): ``engine`` cannot keep them as one unit, so
     # they are left out of Decision 13's every-query check as well.
     split: list[str] = []
+    # The net variable cost of keeping ``engine`` for the queries it would give up.
+    net_variable = 0.0
 
     for qa in native_qas:
         qid = qa["query_id"]
@@ -182,10 +199,14 @@ def _evaluate_engine_removal(
         best_alt = max(alt_scores.values())
         delta = this_score - best_alt
         deltas.append(delta)
+        destinations = [alt for alt, score in alt_scores.items() if score == best_alt]
         if delta >= 0:
-            best_rivals_by_qid[qid] = [
-                alt for alt, score in alt_scores.items() if score == best_alt
-            ]
+            best_rivals_by_qid[qid] = destinations
+        if cost_model is not None and qid in query_map:
+            query = query_map[qid]
+            net_variable += cost_model.variable_monthly(query, engine) - min(
+                cost_model.variable_monthly(query, alt) for alt in destinations
+            )
         if delta >= UNIQUE_DELTA_THRESHOLD:
             unique_by_score.append(qid)
         else:
@@ -203,7 +224,7 @@ def _evaluate_engine_removal(
         "avg_delta": round(avg_delta, 1),
     }
 
-    total_burden = engine_base_cost(engine) + extra_engine_burden(engine)
+    total_burden = engine_base_cost(engine) + extra_engine_burden(engine) + net_variable
     rank_key = total_burden / max(len(unique_by_score), 1)
 
     if irreplaceable or orphan_stranded:
@@ -348,6 +369,7 @@ def _settle_committed_engines(
     settled_counts: Mapping[str, int] | None = None,
     *,
     customer_kept_engines: Iterable[str] = (),
+    cost_model: QueryCostModel | None = None,
 ) -> tuple[set[str], dict[str, dict]]:
     """Phase 1 (#502 review): settle which engines earn a place, independent
     of the order they happen to be evaluated in.
@@ -430,6 +452,7 @@ def _settle_committed_engines(
                 tied_engines_by_qid,
                 orphaned_qas,
                 source_compatible_engine,
+                cost_model=cost_model,
             )
             # #502 review: no engine is "primary" anymore -- every engine is
             # judged the same way. The contract field stays (a breaking

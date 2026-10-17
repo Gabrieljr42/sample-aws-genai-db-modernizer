@@ -124,11 +124,16 @@ def test_aurora_choice_is_a_close_call_tipped_by_workload_features(
     and KnowledgeArticle): the text-search class rates Aurora PostgreSQL 80 (pg_trgm)
     and Aurora MySQL 45 (no index serves a leading wildcard), 14 points each; and the
     ``TicketMessage`` thread CTE, whose recursive-CTE credit (#985: Aurora PostgreSQL 95,
-    Aurora MySQL 90) the per-query score keeps, 2 points."""
+    Aurora MySQL 90) the per-query score keeps, 2 points.
+
+    #494 slice 2 (each query's own cost dimension): 7260 to 7290. Both Aurora engines
+    have the same $250 standing cost, could serve the same queries and bill no request,
+    so every query's cost on them is the same (97: $2.63 a query) and both totals rise
+    by 271 from the tables' cost bands; the 30-point lead is unchanged."""
     choice = _assignment(trailgear_run, 1)["aurora_engine_choice"]
     assert choice["source_engine"] == "sqlserver"
     mysql, pg = choice["totals"]["aurora_mysql"], choice["totals"]["aurora_postgresql"]
-    assert (mysql, pg) == (6989.0, 7019.0)
+    assert (mysql, pg) == (7260.0, 7290.0)
     assert abs(pg - mysql) <= 0.05 * max(mysql, pg), "close enough for features to decide"
     assert choice["margin"] == round(pg - mysql, 2)
     assert choice["engine"] == "aurora_postgresql"
@@ -195,7 +200,10 @@ def test_category_group_scores_documentdb_below_aurora(trailgear_run: PipelineRe
 
     #728: both queries are aggregations by their own class (Aurora PostgreSQL 85,
     DocumentDB 75), not their table's patterns, so the group scores 81 to 61 (DocumentDB
-    71 less the same 10)."""
+    71 less the same 10).
+
+    #494 slice 2: each query's cost dimension is its own (Aurora PostgreSQL 97,
+    DocumentDB 98), not ProductCategory's cost band, so the group scores 82 to 62.5."""
     snapshot = measure(trailgear_run.job_dir())["queries"]
     members = [
         _qid(trailgear_run, "COUNT(c.[CategoryID]) AS [Children]"),
@@ -206,7 +214,7 @@ def test_category_group_scores_documentdb_below_aurora(trailgear_run: PipelineRe
     assert {f["e"] for f in first} == {"aurora_postgresql"}
     group = first[0]["grp"]
     assert first[1]["grp"] == group, "both queries are one group"
-    assert (group["scores"]["aurora_postgresql"], group["scores"]["documentdb"]) == (81.0, 61.0)
+    assert (group["scores"]["aurora_postgresql"], group["scores"]["documentdb"]) == (82.0, 62.5)
     v1 = _by_id(_assignment(trailgear_run, 1))
     for q in members:
         assert v1[q]["tied_engines"] == []
@@ -230,14 +238,21 @@ def test_the_shipment_queries_no_longer_tie(trailgear_run: PipelineResult) -> No
     80, Aurora PostgreSQL 75, DocumentDB 65. The read and the UPDATE by ``TrackingNumber`` (an index's leading column with no
     cardinality statistics, a non-unique key) are key-scoped reads (DocumentDB 85,
     DynamoDB 75, Aurora 70 for the pattern dimension), and Aurora PostgreSQL's other
-    dimensions make it 71 against DocumentDB's 67 and DynamoDB's 65. None ties."""
+    dimensions make it 71 against DocumentDB's 67 and DynamoDB's 65. None ties.
+
+    #494 slice 2: each query's cost dimension is its own, not dbo.Shipment's cost band
+    (Aurora PostgreSQL 97, DynamoDB 100 for the read and UPDATE, DocumentDB 98), so the
+    read and the UPDATE score DynamoDB 72, Aurora PostgreSQL 75, DocumentDB 74, and the
+    INSERT DynamoDB 87, Aurora PostgreSQL 79, DocumentDB 72. Same engines, no tie. Other
+    trailgear queries now reach a pending choice again (see the next test), so the
+    deliverables list those, and none of these three."""
     expected = {
         "FROM [Shipment] WHERE [TrackingNumber] = @TrackingNumber": (
-            (65, 71, 67),
+            (72, 75, 74),
             "aurora_postgresql",
         ),
-        "INSERT INTO [Shipment]": ((80, 75, 65), "dynamodb"),
-        "UPDATE [Shipment] SET [DeliveredDate]": ((65, 71, 67), "aurora_postgresql"),
+        "INSERT INTO [Shipment]": ((87, 79, 72), "dynamodb"),
+        "UPDATE [Shipment] SET [DeliveredDate]": ((72, 75, 74), "aurora_postgresql"),
     }
     snapshot = measure(trailgear_run.job_dir())["queries"]
     final = _by_id(_assignment(trailgear_run, _final_version(trailgear_run)))
@@ -249,9 +264,8 @@ def test_the_shipment_queries_no_longer_tie(trailgear_run: PipelineResult) -> No
         assert final[q]["tied_engines"] == [], q
 
     report = _json(trailgear_run.artifact_root / trailgear_run.report["report"])
-    assert report["tied_queries"] == []
-    decision = trailgear_run.html("decision-report").read_text()
-    assert "Pending engine choices" not in decision
+    tied = {t["query_id"] for t in report["tied_queries"]}
+    assert not tied & {_qid(trailgear_run, text) for text in expected}
 
 
 def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineResult) -> None:
@@ -268,17 +282,49 @@ def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineR
     read (DynamoDB 76, Aurora PostgreSQL and DocumentDB 75) and goes to DynamoDB. The
     sample no longer reaches this path; re-resolving a tie whose engine the check
     removes stays covered by
-    ``tests/unit/test_reality_check.py::TestReResolvingAnUnresolvedTieInPhaseTwo``."""
+    ``tests/unit/test_reality_check.py::TestReResolvingAnUnresolvedTieInPhaseTwo``.
+
+    #494 slice 2 (each query's own cost dimension): with the tables' cost bands gone
+    every engine scores 97-100 on cost here, and six first-assignment scores tie exactly.
+    A SQL Server source has no source-compatible engine, so each is a placeholder pick
+    (Decision 12). DocumentDB does not survive the reality check, so the four ties with
+    one surviving engine clear onto it; the two three-way ties keep the two survivors,
+    Aurora PostgreSQL and DynamoDB. The ProductCategory read by ``ParentCategoryID``
+    (DocumentDB 77, Aurora PostgreSQL and DynamoDB 76) and a ProductReview read
+    (DocumentDB 79, Aurora PostgreSQL and DynamoDB 78) are first-assigned to DocumentDB
+    and tie the two survivors when it goes. The MERGE stays on Aurora PostgreSQL."""
     v1 = _by_id(_assignment(trailgear_run, 1))
     final = _by_id(_assignment(trailgear_run, _final_version(trailgear_run)))
-    assert [q for q, qa in v1.items() if qa.get("tied_engines")] == []
+    pg, doc, ddb = "aurora_postgresql", "documentdb", "dynamodb"
+    first_ties = {
+        "DELETE TOP (5000) FROM [UserSession]": [pg, doc],
+        "SELECT s.[SessionToken], j.[ProductID], j.[Quantity] FROM [UserSession]": [pg, doc],
+        "SELECT h.[Status], h.[ChangedDate] FROM [OrderStatusHistory]": [pg, doc],
+        "SELECT [WarehouseID], [OnHand], [Reserved] FROM [StockLevel]": [doc, ddb],
+        "FROM [PurchaseOrder] po WHERE po.[SupplierID]": [pg, doc, ddb],
+        "FROM [PurchaseOrderLine] pol WHERE pol.[PurchaseOrderID]": [pg, doc, ddb],
+    }
+    assert {q: qa["tied_engines"] for q, qa in v1.items() if qa.get("tied_engines")} == {
+        _qid(trailgear_run, text): engines for text, engines in first_ties.items()
+    }
+    final_ties = {
+        "FROM [PurchaseOrder] po WHERE po.[SupplierID]",
+        "FROM [PurchaseOrderLine] pol WHERE pol.[PurchaseOrderID]",
+        "[ParentCategoryID], [Name], [Slug] FROM [ProductCategory]",
+        "SELECT TOP (10) r.[ReviewID], r.[Rating], r.[Title], r.[CreatedDate]",
+    }
+    assert {q: qa["tied_engines"] for q, qa in final.items() if qa.get("tied_engines")} == {
+        _qid(trailgear_run, text): [pg, ddb] for text in final_ties
+    }
+    assert doc not in {qa["assigned_engine"] for qa in final.values()}
     merge = _qid(trailgear_run, "MERGE [StockLevel] AS tgt")
-    category = _qid(trailgear_run, "[ParentCategoryID], [Name], [Slug] FROM [ProductCategory]")
-    assert (final[merge]["assigned_engine"], final[category]["assigned_engine"]) == (
-        "aurora_postgresql",
-        "dynamodb",
-    )
-    assert final[merge]["tied_engines"] == final[category]["tied_engines"] == []
+    assert final[merge]["assigned_engine"] == pg
+    assert final[merge]["tied_engines"] == []
+    report = _json(trailgear_run.artifact_root / trailgear_run.report["report"])
+    assert {t["query_id"] for t in report["tied_queries"]} == {
+        _qid(trailgear_run, text) for text in final_ties
+    }
+    assert "Pending engine choices" in trailgear_run.html("decision-report").read_text()
 
 
 # ---------------------------------------------------------------------------

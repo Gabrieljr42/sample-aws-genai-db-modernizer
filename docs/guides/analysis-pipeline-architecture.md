@@ -298,6 +298,8 @@ This is computed once per table and passed to both generic and target-specific s
 
 Each dimension scores 0–100. Points are awarded for specific evidence thresholds (e.g., calls_per_second >= 10 → +15 to pattern_match). See `scoring.py` for the full point tables.
 
+These are the per-table scores the deliverables summarise. Routing scores each query, not each table: a query's pattern dimension is its own access-pattern class score and its cost dimension is its own estimated monthly cost on the engine (its share of the engine's standing cost plus its own variable cost, from the engine file's `[pricing]` table; `src/agents/referee/query_cost.py`, ADR-031 Decision 5). Only complexity and performance come from the query's tables.
+
 ### Target-Specific Adjustments
 
 Each agent adds a thin layer of target-specific bonuses and penalties **on top of** the base scores. The function signature:

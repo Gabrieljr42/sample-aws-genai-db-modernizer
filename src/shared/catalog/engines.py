@@ -37,8 +37,14 @@ Fields:
   engine beyond the target engine count; ``max_burden_per_unique_query`` is the cut-off
   above which that burden per uniquely-served query makes the engine removable;
   ``acu_price_per_hour``, ``storage_price_per_gb_month`` and ``instance_hourly`` (instance
-  type to hourly price) are the unit prices cost estimation multiplies. An engine with
-  no ``pricing`` table gets the ``EnginePricing`` defaults.
+  type to hourly price) are the unit prices cost estimation multiplies.
+  ``read_unit_price_per_million`` / ``read_unit_bytes`` and
+  ``write_unit_price_per_million`` / ``write_unit_bytes`` are an engine's per-request
+  prices (USD per million units, and the bytes one unit reads or writes); an engine
+  billed by capacity has none. ``reads_billed_on_cache_miss_only``: a read served from
+  the engine's buffer cache is not billed. The per-query cost dimension
+  (``src.agents.referee.query_cost``, #494) and the cost estimates read them. An engine
+  with no ``pricing`` table gets the ``EnginePricing`` defaults.
 """
 
 from __future__ import annotations
@@ -83,6 +89,20 @@ class EnginePricing(BaseModel):
     acu_price_per_hour: float | None = Field(default=None, ge=0)
     storage_price_per_gb_month: float | None = Field(default=None, ge=0)
     instance_hourly: dict[str, float] = Field(default_factory=dict)
+    read_unit_price_per_million: float | None = Field(default=None, ge=0)
+    read_unit_bytes: int | None = Field(default=None, gt=0)
+    write_unit_price_per_million: float | None = Field(default=None, ge=0)
+    write_unit_bytes: int | None = Field(default=None, gt=0)
+    reads_billed_on_cache_miss_only: bool = False
+
+    @model_validator(mode="after")
+    def _a_unit_price_has_its_unit_size(self) -> EnginePricing:
+        for side in ("read", "write"):
+            priced = getattr(self, f"{side}_unit_price_per_million") is not None
+            sized = getattr(self, f"{side}_unit_bytes") is not None
+            if priced != sized:
+                raise ValueError(f"{side}_unit_price_per_million needs {side}_unit_bytes")
+        return self
 
 
 class EngineEntry(BaseModel):

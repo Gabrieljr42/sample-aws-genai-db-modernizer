@@ -25,7 +25,7 @@ from src.agents.referee.query_scoring import ScoringContext
 from src.agents.referee.reality_check_place import _place_settled_queries
 from src.agents.referee.tie_break import group_tie
 from src.contracts.model_flag import ModelFlag
-from tests.unit.agents.referee.fixed_scores import fixed_model, flat_row
+from tests.unit.agents.referee.fixed_scores import fixed_cost_model, fixed_model, flat_row
 
 # ---------------------------------------------------------------------------
 # The rule
@@ -247,7 +247,11 @@ def _context(scores: Mapping[str, Mapping[str, float]]) -> ScoringContext:
                 "table_recommendations"
             ].append(flat_row(f"t_{qid}", score))
     # Through the per-query scorer (#728): tests/unit/agents/referee/fixed_scores.py.
-    return ScoringContext(analysis_outputs=analysis, pattern_model=fixed_model(scores))
+    return ScoringContext(
+        analysis_outputs=analysis,
+        pattern_model=fixed_model(scores),
+        cost_model=fixed_cost_model(scores),
+    )
 
 
 class TestTheSweepIntersectsTheTies:

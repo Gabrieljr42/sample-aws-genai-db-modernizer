@@ -424,8 +424,10 @@ class TestTheQueryScoresItsOwnPattern:
             _rec("d.topics", 70, weights=DDB_WEIGHTS),
             _rec("d.categories", 100, weights=DDB_WEIGHTS),
         )
-        # pattern 75 (key-scoped on DynamoDB), complexity 80, performance 60, cost 70.
-        expected = int(75 * 0.6 + 80 * 0.2 + 60 * 0.05 + 70 * 0.15)
+        # pattern 75 (key-scoped on DynamoDB), complexity 80, performance 60. Cost is the
+        # query's own (#494), not the tables' 70: DynamoDB has no standing cost and one
+        # read a second costs it $0.32 a month, a cost score of 100.
+        expected = int(75 * 0.6 + 80 * 0.2 + 60 * 0.05 + 100 * 0.15)
         assert _score(JOIN, "dynamodb", {"dynamodb": analysis}) == expected
 
     def test_a_partition_range_read_takes_dynamodbs_query_rating(self):
@@ -639,8 +641,11 @@ class TestTheSwitchIsTheRoutingPath:
         assert trace.by_query["lookup"]["access_class"] == KEY_LOOKUP
         assert trace.by_query["join"]["access_class"] == KEY_SCOPED
         ladder = trace.by_query["lookup"]["engines"]
-        assert ladder["dynamodb"] == int(100 * 0.6 + 80 * 0.2 + 60 * 0.05 + 70 * 0.15)
-        assert ladder["aurora_postgresql"] == int(80 * 0.4 + 80 * 0.3 + 60 * 0.2 + 70 * 0.1)
+        # The cost dimension is the query's own (#494): DynamoDB has no standing cost
+        # (100); Aurora PostgreSQL's $250 is shared by the workload's two queries, $125
+        # each, 100 * 100 / (100 + 125) = 44.
+        assert ladder["dynamodb"] == int(100 * 0.6 + 80 * 0.2 + 60 * 0.05 + 100 * 0.15)
+        assert ladder["aurora_postgresql"] == int(80 * 0.4 + 80 * 0.3 + 60 * 0.2 + 44 * 0.1)
 
     def test_the_assignment_handler_writes_no_shadow(self, tmp_path):
         from src.agents.referee import assignment_handler
@@ -752,8 +757,10 @@ class TestTheSwitchIsTheRoutingPath:
         assert ctx.pattern_model.keys.tables == {}
         # With no keys a pinned column addresses nothing: an ad hoc filter (DynamoDB 0).
         assert ctx.pattern_model.classification(LOOKUP).name == AD_HOC_FILTER
+        # Cost is the query's own (#494): DynamoDB has no standing cost, one read a
+        # second costs $0.32 a month, a cost score of 100.
         assert score_query_for_engine(LOOKUP, "dynamodb", ctx).score == int(
-            0 * 0.4 + 80 * 0.3 + 60 * 0.2 + 70 * 0.1
+            0 * 0.4 + 80 * 0.3 + 60 * 0.2 + 100 * 0.1
         )
 
 

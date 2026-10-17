@@ -43,6 +43,7 @@ from src.agents.referee.capability_registry import (
     triage_query_capabilities,
 )
 from src.agents.referee.engine_exclusions import check_exclusions
+from src.agents.referee.query_cost import QueryCost, QueryCostModel
 from src.agents.referee.query_pattern import QueryPatternModel
 from src.agents.referee.substring_match import scan_adjustments
 from src.contracts.analysis_output import ScoreBreakdown
@@ -73,6 +74,7 @@ def compute_query_confidence(
     analysis: Mapping,
     *,
     pattern_model: QueryPatternModel,
+    cost_score: int,
 ) -> int:
     """Base confidence (0-100) for a query->engine pair (ADR-031 Decision 2 step 4).
 
@@ -81,10 +83,13 @@ def compute_query_confidence(
     its tables' pattern scores: a table's ``pattern_match_score`` and
     ``confidence_score`` are not read for a classified query at all, so no other
     query on the same table, and no pattern found on it, can move this query's
-    pattern dimension (#784, #885). The other three dimensions -- complexity,
-    performance and cost -- are still each of the query's own tables'
-    (``tables_accessed``, #302), combined with the weights that engine's analysis used
-    for the table; the base is the mean over those tables. No all-tables fallback: a
+    pattern dimension (#784, #885). The cost dimension is the query's own cost on
+    ``engine`` (``cost_score``, :meth:`ScoringContext.cost_score`, ADR-031 Decision 5,
+    #494): its share of the engine's standing cost and its own variable cost, never
+    its tables' engine-blind cost band. Complexity and performance are still each of
+    the query's own tables' (``tables_accessed``, #302), combined with the weights
+    that engine's analysis used for the table; the base is the mean over those
+    tables. No all-tables fallback: a
     classified query with no rated table of its own scores 0. A pattern-only engine
     (``PATTERN_ONLY_ENGINES``, #475) whose catalog gives the query's class no score
     scores 0: a table-wide classification earned by another query is no evidence
@@ -96,7 +101,8 @@ def compute_query_confidence(
     table the facade can see: ``SET``, ``EXEC`` of a procedure, ``SELECT fn(...)``)
     or ``unparsed`` (a data statement the SQL facade cannot read) -- has no class
     score, so it keeps the pre-switch rule (:func:`_unclassified_confidence`), as
-    ADR-031 Decision 14 Amendment 5 states.
+    ADR-031 Decision 14 Amendment 5 states: its tables' confidence, their cost band
+    included. ``cost_score`` is not read for it.
     """
     if not pattern_model.has_class_score(query):
         return _unclassified_confidence(query_id, query, engine, analysis)
@@ -111,6 +117,7 @@ def compute_query_confidence(
             continue
         breakdown = dict(rec["score_breakdown"])
         breakdown["pattern_match_score"] = pattern_score
+        breakdown["cost_score"] = cost_score
         weights = dict(pattern_model.weights.get((engine, table_id)) or DEFAULT_WEIGHTS)
         scores.append(compute_confidence(ScoreBreakdown(**breakdown), weights))
     return int(sum(scores) / len(scores)) if scores else 0
@@ -365,6 +372,40 @@ class ScoringContext:
     # one triage's capability detection reads them in. :meth:`from_pipeline`
     # fills it from ``collector``; empty reads them in the generic dialect.
     source_engine: str = ""
+    # The per-query cost dimension (ADR-031 Decision 5, #494): the collection's
+    # workload and row widths. :meth:`from_pipeline` builds it from the collector; the
+    # bare default has no workload, so each scored query carries an engine's whole
+    # standing cost.
+    cost_model: QueryCostModel = field(default_factory=QueryCostModel)
+
+    def servable_queries(self, engine: str) -> frozenset[str]:
+        """The workload's query ids ``engine`` could serve: past its hard exclusion
+        and capability gates (Decision 2 step 2), and, for an engine that is not a
+        system of record, not a write or a locking read (step 3's rule; a cache serves
+        the reads it fronts although it owns none). A model's flag is not counted
+        (Decision 11), so a flag never moves the standing share of any other query."""
+        from src.agents.referee.cache_overlay import (
+            NON_SYSTEM_OF_RECORD_ENGINES,
+            is_locking_read,
+            is_write_query,
+        )
+
+        def serves(query: Mapping) -> bool:
+            if engine in NON_SYSTEM_OF_RECORD_ENGINES and (
+                is_write_query(query) or is_locking_read(query)
+            ):
+                return False
+            return _structural_gate(query, engine, self) is None
+
+        return self.cost_model.servable(engine, serves)
+
+    def query_cost(self, query: Mapping, engine: str) -> QueryCost:
+        """``query``'s estimated monthly cost on ``engine`` (``query_cost``)."""
+        return self.cost_model.cost(query, engine, self.servable_queries(engine))
+
+    def cost_score(self, query: Mapping, engine: str) -> int:
+        """``query``'s cost dimension on ``engine`` (0-100, ADR-031 Decision 5)."""
+        return self.cost_model.score(query, engine, self.servable_queries(engine))
 
     def with_flag_gaps(self, gaps: Mapping[str, Iterable[str]]) -> ScoringContext:
         """A copy whose ``flag_gaps`` also carries ``gaps`` (merged per query)."""
@@ -444,6 +485,7 @@ class ScoringContext:
             query_capabilities=query_capabilities,
             pattern_model=QueryPatternModel.from_pipeline(collector, analysis_outputs),
             source_engine=source_engine_of(collector),
+            cost_model=QueryCostModel.from_collector(collector),
         )
 
 
@@ -516,6 +558,32 @@ def score_query_for_engine(query: Mapping, engine: str, ctx: ScoringContext) -> 
     ``(query, engine, ctx)`` without either side re-deriving it a second way.
     """
     query_id = str(query.get("query_id") or "")
+    gated = _structural_gate(query, engine, ctx)
+    if gated is not None:
+        return gated
+    if engine in ctx.flag_gaps.get(query_id, frozenset()):
+        return EngineScore(
+            score=None,
+            gate_reason=f"{display_engine(engine)} was flagged as unable to serve this query",
+            gate_kind=GATE_KIND_MODEL_FLAG,
+        )
+    analysis = ctx.analysis_outputs.get(engine) or {}
+    base = compute_query_confidence(
+        query_id,
+        query,
+        engine,
+        analysis,
+        pattern_model=ctx.pattern_model,
+        cost_score=ctx.cost_score(query, engine),
+    )
+    penalty = ctx.anti_pattern_map.get((query_id, engine), 0)
+    return EngineScore(score=float(max(0, base - penalty)))
+
+
+def _structural_gate(query: Mapping, engine: str, ctx: ScoringContext) -> EngineScore | None:
+    """The hard exclusion and capability gates (ADR-031 Decision 2 step 2) for
+    ``(query, engine)``: the gated :class:`EngineScore`, or ``None`` when neither fires."""
+    query_id = str(query.get("query_id") or "")
     query_text = query.get("query_text", "")
     exclusion = check_exclusions(query_id, query_text, engine, ctx.source_engine)
     if exclusion:
@@ -536,15 +604,4 @@ def score_query_for_engine(query: Mapping, engine: str, ctx: ScoringContext) -> 
             ),
             gate_kind=GATE_KIND_CAPABILITY,
         )
-    if engine in ctx.flag_gaps.get(query_id, frozenset()):
-        return EngineScore(
-            score=None,
-            gate_reason=f"{display_engine(engine)} was flagged as unable to serve this query",
-            gate_kind=GATE_KIND_MODEL_FLAG,
-        )
-    analysis = ctx.analysis_outputs.get(engine) or {}
-    base = compute_query_confidence(
-        query_id, query, engine, analysis, pattern_model=ctx.pattern_model
-    )
-    penalty = ctx.anti_pattern_map.get((query_id, engine), 0)
-    return EngineScore(score=float(max(0, base - penalty)))
+    return None

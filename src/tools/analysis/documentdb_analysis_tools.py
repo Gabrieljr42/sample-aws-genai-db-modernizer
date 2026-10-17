@@ -23,6 +23,7 @@ from src.contracts.analysis_output import (
     TableRecommendation,
     WorkloadAnalysis,
 )
+from src.shared import catalog
 from src.tools.analysis.documentdb_pattern_catalog import (
     DOCUMENTDB_ANTI_PATTERNS,
     DOCUMENTDB_PATTERNS,
@@ -753,7 +754,10 @@ def estimate_documentdb_costs(
 
     read_ios_per_month = total_read_cps * 86400 * 30
     write_ios_per_month = total_write_cps * 86400 * 30
-    io_cost = ((read_ios_per_month + write_ios_per_month) / 1_000_000) * 0.20
+    # The I/O price is the engine file's (``src/catalog/engines/documentdb.toml``, #494);
+    # this estimate charges one I/O a call, read or write, as it always has.
+    io_price = catalog.pricing("documentdb").read_unit_price_per_million or 0.0
+    io_cost = ((read_ios_per_month + write_ios_per_month) / 1_000_000) * io_price
 
     storage_cost = max(total_size_gb, 0.01) * 0.10
 

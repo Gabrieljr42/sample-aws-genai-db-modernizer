@@ -18,7 +18,7 @@ from src.agents.referee.query_scoring import ScoringContext, score_query_for_eng
 from src.agents.referee.tie_break import TIE_KIND_SOURCE_COMPATIBLE
 from src.contracts.model_flag import ModelFlag
 from src.contracts.reality_check_output import FlagDecision
-from tests.unit.agents.referee.fixed_scores import fixed_model, flat_row
+from tests.unit.agents.referee.fixed_scores import fixed_cost_model, fixed_model, flat_row
 
 
 def _query_map(*query_ids: str, **overrides: dict) -> dict[str, dict]:
@@ -46,7 +46,11 @@ def _context(scores: dict[str, dict[str, float]]) -> ScoringContext:
             analysis.setdefault(engine, {"table_recommendations": []})[
                 "table_recommendations"
             ].append(flat_row(f"t_{qid}", score))
-    return ScoringContext(analysis_outputs=analysis, pattern_model=fixed_model(scores))
+    return ScoringContext(
+        analysis_outputs=analysis,
+        pattern_model=fixed_model(scores),
+        cost_model=fixed_cost_model(scores),
+    )
 
 
 def _flag(qids: list[str], engine: str, category: str = "client_side_join") -> ModelFlag:

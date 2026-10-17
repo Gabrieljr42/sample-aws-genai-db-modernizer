@@ -21,7 +21,7 @@ from src.agents.referee.reality_check_handler import apply_reality_check_llm_out
 from src.agents.referee.tie_break import break_tie
 from src.contracts.model_flag import FlaggableEngine, FlagReason, ModelFlag
 from src.shared.engine_names import ENGINE_DISPLAY_NAMES
-from tests.unit.agents.referee.fixed_scores import fixed_model, flat_row
+from tests.unit.agents.referee.fixed_scores import fixed_cost_model, fixed_model, flat_row
 
 # Engines a plain SELECT may land on with no specialty signal (OpenSearch only
 # absorbs search/aggregation queries, ElastiCache owns nothing).
@@ -45,7 +45,11 @@ def _context(scores: dict[str, dict[str, int]]) -> ScoringContext:
                 "table_recommendations"
             ].append(flat_row(f"t_{qid}", score))
     # Through the per-query scorer (#728): tests/unit/agents/referee/fixed_scores.py.
-    return ScoringContext(analysis_outputs=analysis, pattern_model=fixed_model(scores))
+    return ScoringContext(
+        analysis_outputs=analysis,
+        pattern_model=fixed_model(scores),
+        cost_model=fixed_cost_model(scores),
+    )
 
 
 def _flag(qid: str, engine: str, *, category: str = "other", explanation: str = "gap") -> dict:

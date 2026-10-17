@@ -183,10 +183,14 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     # (65 of 107): the keyed DynamoDB detectors move 7 queries to DynamoDB and 5 back.
     # 64% after the #728 switch (68 of 107): each query scores its own access-pattern
     # class, and the reality check moves 10 key-scoped and ad hoc reads back to Aurora
-    # MySQL and 7 to DynamoDB (the per-query list is in the switch PR).
+    # MySQL and 7 to DynamoDB (the per-query list is in the switch PR). 65% after #494
+    # slice 2 (70 of 107): each query's cost dimension is its own, so two wp_terms
+    # joins lose DynamoDB's old small-table cost credit, are first-assigned to
+    # DocumentDB, and the reality check moves them to Aurora MySQL (a join leaving
+    # DocumentDB never lands on DynamoDB).
     assert arch["rationale"] == (
         "Hybrid architecture: Aurora MySQL retained as the relational core "
-        "(64% of queries); DynamoDB for key-value access; ElastiCache for "
+        "(65% of queries); DynamoDB for key-value access; ElastiCache for "
         "caching hot data. Schema design was not run, so no tables are "
         "allocated yet."
     )

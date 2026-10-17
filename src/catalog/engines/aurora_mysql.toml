@@ -16,6 +16,8 @@ report_badge = "#9c5700"
 base_monthly = 250
 extra_engine_burden_monthly = 300
 max_burden_per_unique_query = 100
+# Aurora I/O-Optimized bills no I/O per request, so no read or write unit price: a
+# query's traffic runs on the capacity its standing cost pays for (#494).
 acu_price_per_hour = 0.12
 storage_price_per_gb_month = 0.10
 
