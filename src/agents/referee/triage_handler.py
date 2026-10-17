@@ -12,6 +12,7 @@ from src.contracts.triage_output import (
     TriageSignalRecord,
 )
 from src.storage.artifact_store import ArtifactStore
+from src.tools.sql.query_facts import remember_collected_facts
 
 
 def run_triage(job_id: str, database_name: str, store: ArtifactStore) -> None:
@@ -25,6 +26,7 @@ def run_triage(job_id: str, database_name: str, store: ArtifactStore) -> None:
     # Read collector output
     collector_key = f"{database_name}/{job_id}/collector/output.json"
     collector_output: dict = store.read_json(collector_key)
+    remember_collected_facts(collector_output)
     tables = collector_output.get("database_schema", {}).get("tables", [])
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     print(f"[triage] Loaded collector: {len(tables)} tables, {len(queries)} queries")

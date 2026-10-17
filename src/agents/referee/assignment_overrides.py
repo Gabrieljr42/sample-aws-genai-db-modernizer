@@ -68,6 +68,7 @@ from src.storage.assignment_versioning import (
     assignment_artifact_path,
     resolve_effective_assignment_version,
 )
+from src.tools.sql.query_facts import remember_collected_facts
 
 
 class _Store(Protocol):
@@ -386,6 +387,7 @@ def _load_for_edit(
     ledger = ledger_for(raw.get("query_assignments") or []) if new_version else None
     collector_key = f"{database_name}/{job_id}/collector/output.json"
     collector_output = store.read_json(collector_key) if store.exists(collector_key) else {}
+    remember_collected_facts(collector_output)
     triage_key = f"{database_name}/{job_id}/referee-triage/triage.json"
     triage = store.read_json(triage_key) if store.exists(triage_key) else {}
     analysis_outputs = _read_analysis_outputs(store, database_name, job_id)

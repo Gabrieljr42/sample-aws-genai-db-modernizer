@@ -22,7 +22,7 @@ from src.tools.sql.bulk_load import is_bulk_load
 from src.tools.validation.ingestion_limits import check_collection_counts, check_file_size
 
 if TYPE_CHECKING:
-    from src.tools.sql.facade import SqlFacts, TableReferences
+    from src.tools.sql.facade import SqlReading, TableReferences
     from src.tools.sql.shadow import TableShadow
 
 logger = logging.getLogger(__name__)
@@ -464,8 +464,8 @@ def _facade_table_ids(
     known_table_names: set[str],
     table_schemas: Mapping[str, set[str]],
     case_folded: Mapping[str, tuple[str, ...]] | None = None,
-) -> tuple[list[str], TableReferences, SqlFacts]:
-    """One query's table ids and query-shape facts from the sqlglot facade
+) -> tuple[list[str], TableReferences, SqlReading]:
+    """One query's table ids and the facade's reading from the sqlglot facade
     (#553, #796), from one parse.
 
     The facade picks the dialect from ``source_engine`` and falls back to the
@@ -473,7 +473,7 @@ def _facade_table_ids(
     contract; if it does anyway, the regex answers are used, labelled
     ``fallback_reason="facade_error"``, and a warning is logged, so a parser
     bug can't fail a collection. Returns the resolved ids, the facade's table
-    references and its facts.
+    references and its whole reading (the facts the pattern stores, #934).
     """
     from src.tools.sql import facade
 
@@ -495,7 +495,7 @@ def _facade_table_ids(
         case_folded,
         _quoted_names(refs, source_engine),
     )
-    return ids, refs, reading.facts
+    return ids, refs, reading
 
 
 _POSTGRES_ENGINES = frozenset({"postgresql", "postgres"})
@@ -603,6 +603,8 @@ def _transform_queries(
     import hashlib
     import re
 
+    from src.tools.sql.stored_facts import stored_reading
+
     patterns = []
     fallbacks: Counter[str] = Counter()
     case_folded = _case_folded_names(known_table_names, source_engine)
@@ -618,7 +620,7 @@ def _transform_queries(
 
         # Table references come from the sqlglot facade (src/tools/sql/facade.py),
         # with the regex scan as its fallback, resolved to collection table ids.
-        tables_accessed, refs, facts = _facade_table_ids(
+        tables_accessed, refs, reading = _facade_table_ids(
             str(digest),
             query_text,
             source_engine,
@@ -629,6 +631,7 @@ def _transform_queries(
         )
         if refs.fallback_reason:
             fallbacks[refs.fallback_reason] += 1
+        facts = reading.facts
 
         # Extract query type
         type_re = re.compile(r"^\s*(SELECT|INSERT|UPDATE|DELETE|MERGE|REPLACE)\b", re.I)
@@ -692,6 +695,7 @@ def _transform_queries(
                 ),
                 "has_aggregations": facts.has_aggregation,
                 "has_subqueries": facts.has_subquery,
+                "parsed_facts": stored_reading(query_text, source_engine, reading),
                 "errors": r.get("sum_errors") or 0,
                 "warnings": r.get("sum_warnings") or 0,
                 "first_seen": r.get("first_seen"),
