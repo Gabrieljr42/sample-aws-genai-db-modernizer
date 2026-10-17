@@ -6,6 +6,9 @@ phase records, and progression state.
 
 Version History:
 - 1.0 (2026-04-01): Initial version — Phase 1A phased execution models
+- 1.1 (2026-10-17, #972): Added ``contract_version`` to ``PhaseProgression``,
+  the contracts written to disk (ADR-008 Decision 1). A file without it was
+  written at 1.0, and still loads.
 """
 
 from datetime import datetime
@@ -76,6 +79,10 @@ class PhaseRecord(BaseModel):
 
 class PhaseProgression(BaseModel):
     """Full progression state for a job across all phases."""
+
+    contract_version: str = Field(
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     job_id: str = Field(..., description="Unique job identifier")
     current_phase: Phase = Field(..., description="Phase currently active or most recently active")

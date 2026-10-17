@@ -739,6 +739,8 @@ def apply_assignment_overrides(
     new_version = current_version + 1
     new_assignment = current.model_copy(
         update={
+            # #972: a new file, so today's version, not the loaded one's.
+            "contract_version": Assignment.model_fields["contract_version"].default,
             "version": new_version,
             "status": AssignmentStatus.CUSTOMER_MODIFIED,
             "source": source,
@@ -848,7 +850,13 @@ def mark_assignment_customer_approved(
     current = Assignment.model_validate(store.read_json(path))
     if current.status in (AssignmentStatus.CUSTOMER_MODIFIED, AssignmentStatus.CUSTOMER_APPROVED):
         return current
-    updated = current.model_copy(update={"status": AssignmentStatus.CUSTOMER_APPROVED})
+    # #972: rewritten by today's code, so it says today's version.
+    updated = current.model_copy(
+        update={
+            "status": AssignmentStatus.CUSTOMER_APPROVED,
+            "contract_version": Assignment.model_fields["contract_version"].default,
+        }
+    )
     store.write_json(path, updated.model_dump(mode="json"))
     return updated
 

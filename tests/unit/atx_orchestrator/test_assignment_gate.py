@@ -446,6 +446,18 @@ class TestFeasibilityGate:
         assert any(f["kind"] == "co_dependency_split" for f in accepted), accepted
         assert v1["status"] == "customer_approved"
 
+    def test_accepting_risks_rewrites_the_file_at_the_current_contract_version(self, store) -> None:
+        """#972: after the gate, the rewritten file says today's version (the approval stamp)."""
+        from src.contracts.assignment_models import Assignment
+
+        self._make_blocking_codep_split(store)
+        key = f"{DB}/{JOB}/assignment/v1/assignment.json"
+        store.write_json(key, {**store.read_json(key), "contract_version": "1.14"})
+        with patch("src.atx_orchestrator.tools._make_store", return_value=store):
+            tools.finalize_assignment_review(JOB, DB, "", accept_feasibility_risks=True)
+        current = Assignment.model_fields["contract_version"].default
+        assert store.read_json(key)["contract_version"] == current
+
     def test_feasible_routing_approves_normally(self, store) -> None:
         # Reads and writes co-located on dynamodb -> no blocking finding.
         store.write_json(

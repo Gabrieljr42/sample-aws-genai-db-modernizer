@@ -585,7 +585,7 @@ Each decision names the guard test that fails when the code stops following it. 
 
 | Decision | Enforced by |
 |---|---|
-| 1. Every contract carries a `contract_version` | none yet -- #972 (contracts written to disk with none)<br>none yet -- #973 (the DynamoDB decision trace is untyped) |
+| 1. Every contract carries a `contract_version` | `tests/contract/test_written_contracts_versioned.py::test_every_written_model_carries_contract_version`<br>`tests/contract/test_written_contracts_legacy_load.py::test_a_file_written_before_the_version_still_loads`<br>`tests/unit/agents/referee/test_derived_versions_carry_contract_version.py`<br>none yet -- #1006 (five contracts still declare the version without the MAJOR.MINOR pattern)<br>none yet -- #973 (the DynamoDB decision trace is untyped) |
 | 2. The agent version is a separate field | none yet -- #974 (writers still use a literal) |
 | 3. Contract versions are MAJOR.MINOR, and a shape change moves the version | `tests/contract/test_schema_snapshot.py::test_schema_snapshot_file_matches_a_fresh_rebuild`<br>`tests/unit/scripts/test_contract_schema_snapshot.py`<br>`tests/contract/test_value_set_snapshot.py::test_value_set_snapshot_matches_a_fresh_rebuild` |
 | 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR | none yet -- #971 |
@@ -708,6 +708,7 @@ Release v2.0.0 (user-facing, breaking changes)
 |---------|------|--------|---------|
 | 1.0 | 2026-02-02 | Architecture Team | Initial decision |
 | 1.1 | 2026-10-16 | Architecture Team | Numbered the decisions, added the Enforcement table, replaced the adapter decision with accept-MINOR/refuse-MAJOR readers (#970), replaced the version matrix with a pointer |
+| 1.2 | 2026-10-17 | Architecture Team | Decision 1 guarded: every contract written to disk carries a `contract_version` (#972) |
 
 ---
 

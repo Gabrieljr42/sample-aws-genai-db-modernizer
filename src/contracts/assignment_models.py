@@ -110,6 +110,12 @@ Version History:
 - 1.14 (2026-10-15, #787): No change of its own. ``Assignment.moves`` embeds
   ``Move``, whose evidence gained ``group_gates`` and whose rule gained
   ``fallback.no_group_owner`` (move ledger 1.5).
+- 1.15 (2026-10-17, #972): Added ``Assignment.contract_version`` (ADR-008
+  Decision 1): ``assignment.json`` now records its version. A file without
+  the field was written at 1.14 or earlier, and still loads. ``Move`` and
+  ``FeasibilityFinding`` stay versioned through ``Assignment``.
+  ``ValidationResult`` (``validation.json``) carries its own
+  ``contract_version``, starting at 1.0.
 """
 
 from datetime import datetime
@@ -374,6 +380,10 @@ class PostSchemaReroute(BaseModel):
 class Assignment(BaseModel):
     """Complete versioned assignment artifact."""
 
+    contract_version: str = Field(
+        default="1.15", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
+
     job_id: str = Field(..., description="Unique job identifier")
     version: int = Field(..., ge=1, description="Monotonically increasing version number")
     status: AssignmentStatus = Field(..., description="Origin status of this assignment")
@@ -484,6 +494,10 @@ class Assignment(BaseModel):
 
 class ValidationResult(BaseModel):
     """Result of validating an assignment."""
+
+    contract_version: str = Field(
+        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     valid: bool = Field(..., description="Whether the assignment passed validation")
     warnings: list[str] = Field(

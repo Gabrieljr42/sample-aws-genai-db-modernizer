@@ -52,7 +52,7 @@ from src.agents.referee.reality_check_request import (
 )
 from src.agents.referee.reality_check_summary import finalize_executive_summary
 from src.agents.referee.tie_break import settled_counts
-from src.contracts.assignment_models import AssignmentSource
+from src.contracts.assignment_models import Assignment, AssignmentSource
 from src.contracts.model_flag import ResponseContractError, validation_error_note
 from src.contracts.move_ledger import MoveActor, MovePass, ReasonCode
 from src.contracts.reality_check_model_response import (
@@ -530,6 +530,9 @@ def write_reality_check_result(
 
     revised_assignment = {
         **result["assignment"],
+        # #972: this file is written now, so it carries today's version, never
+        # the spread version's (an older one, or none before 1.15).
+        "contract_version": Assignment.model_fields["contract_version"].default,
         "version": new_version,
         "previous_version": assignment_version,
         "source": AssignmentSource.REALITY_CHECK.value,

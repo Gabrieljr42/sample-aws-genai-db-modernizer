@@ -88,7 +88,7 @@
       "post_schema_routing",
       "reality_check"
     ],
-    "version": "1.14"
+    "version": "1.15"
   },
   "assignment_models.AssignmentStatus": {
     "module": "assignment_models",
@@ -99,7 +99,7 @@
       "reroute_rolled_back",
       "rerouted_after_approval"
     ],
-    "version": "1.14"
+    "version": "1.15"
   },
   "capability_ids": {
     "module": "triage_output",
@@ -551,7 +551,7 @@
       "neptune",
       "opensearch"
     ],
-    "version": "1.14"
+    "version": "1.15"
   },
   "feasibility_models.FindingKind": {
     "module": "feasibility_models",
@@ -665,7 +665,7 @@
       "schema_design",
       "synthesis"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "phase_models.PhaseStatus": {
     "module": "phase_models",
@@ -678,7 +678,7 @@
       "not_started",
       "skipped"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "query_trace.TraceBasis": {
     "module": "query_trace",
@@ -823,6 +823,6 @@
       "NOTE",
       "REASSIGN"
     ],
-    "version": "1.0"
+    "version": "1.1"
   }
 }

@@ -637,7 +637,7 @@ class LocalOrchestrator(Orchestrator):
             ledger_for,
             state_of,
         )
-        from src.contracts.assignment_models import AssignmentSource, AssignmentStatus
+        from src.contracts.assignment_models import Assignment, AssignmentSource, AssignmentStatus
         from src.contracts.move_ledger import MoveActor, MoveEvidence, MovePass, ReasonCode
 
         assignment = deepcopy(assignment)  # the refresh below edits records in place
@@ -688,6 +688,8 @@ class LocalOrchestrator(Orchestrator):
         ]
         revised = {
             **assignment,
+            # #972: written now, so today's version, not the spread one's.
+            "contract_version": Assignment.model_fields["contract_version"].default,
             "version": new_version,
             "previous_version": version,
             "status": AssignmentStatus.REROUTED_AFTER_APPROVAL.value,
@@ -769,7 +771,7 @@ class LocalOrchestrator(Orchestrator):
         from datetime import UTC, datetime
 
         from src.agents.schema_design.handler import run_schema_design_auto
-        from src.contracts.assignment_models import AssignmentStatus
+        from src.contracts.assignment_models import Assignment, AssignmentStatus
         from src.storage.assignment_versioning import (
             assignment_artifact_path,
             assignment_engine_diff,
@@ -806,6 +808,8 @@ class LocalOrchestrator(Orchestrator):
             rollback = new_version + 1
             restated = {
                 **assignment,
+                # #972: written now, so today's version, not the restated one's.
+                "contract_version": Assignment.model_fields["contract_version"].default,
                 "version": rollback,
                 "previous_version": new_version,
                 "source": revised["source"],

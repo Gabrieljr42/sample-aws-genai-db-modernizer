@@ -11,6 +11,9 @@ in an AgentAnswers artifact.
 
 Version History:
 - 1.0 (2026-04-01): Initial version — Phase 1A agent interaction models
+- 1.1 (2026-10-17, #972): Added ``contract_version`` to ``AgentQuestions`` and ``AgentAnswers``,
+  the contracts written to disk (ADR-008 Decision 1). A file without it was
+  written at 1.0, and still loads.
 """
 
 from datetime import datetime
@@ -55,6 +58,10 @@ class AgentQuestions(BaseModel):
     exits with code 2.
     """
 
+    contract_version: str = Field(
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
+
     agent_type: str = Field(
         ..., description="Agent type that produced the questions (e.g., 'schema-dynamodb')"
     )
@@ -77,6 +84,10 @@ class AgentAnswers(BaseModel):
     Written to ``{db}/{job}/{agent-name}/answers.json`` after the customer
     responds to agent questions.
     """
+
+    contract_version: str = Field(
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
 
     agent_type: str = Field(..., description="Agent type the answers are for")
     answers: dict[str, str] = Field(
