@@ -9,15 +9,14 @@ headless e2e-llm run checks it as its ``engineering`` bucket (``ci/llm/run.py``)
 from __future__ import annotations
 
 import json
-import re
 
 from src.report.facts import report_facts
 from tests.branding import hits
 from tests.e2e.pipeline import PipelineResult
+from tests.placeholders import placeholder_leaks
 
-# Placeholders a broken renderer leaks: "undefined"/"NaN"/"null"/"None" as whole
-# words, "[object Object]" and "{{" anywhere.
-FORBIDDEN_WORDS = ("undefined", "NaN", "null", "None")
+# Placeholder values ("null" as a cell, not in a sentence) are checked by tests/placeholders.py;
+# "[object Object]" and "{{" are leaks anywhere.
 FORBIDDEN_SUBSTRINGS = ("[object Object]", "{{", "None%")
 
 ALWAYS = (
@@ -46,7 +45,7 @@ def test_has_every_always_present_section(run: PipelineResult) -> None:
 
 def test_leaks_no_placeholder(run: PipelineResult) -> None:
     md = _md(run)
-    leaked = [w for w in FORBIDDEN_WORDS if re.search(rf"\b{re.escape(w)}\b", md)]
+    leaked = placeholder_leaks(md)
     leaked += [s for s in FORBIDDEN_SUBSTRINGS if s in md]
     assert leaked == []
 
