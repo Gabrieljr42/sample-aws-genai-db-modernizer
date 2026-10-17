@@ -9,7 +9,7 @@ Read files with the Read tool (use `offset`/`limit` for large files). Search fil
 
 ## Arguments
 
-- `<collector_file>` — path to collector output JSON (required); must be the `.json` file itself, not a `.zip` archive
+- `<collector_file>` — path to collector output JSON (required); the `.json` file (a bundled sample whose `.json` is not extracted yet, such as `docs/examples/wordpress/wordpress-collection.json`, is extracted from its tracked `.zip` by the script)
 - `--auto` — unattended run: never ask the user anything. Skips every decision gate (auto-approve); on a phase failure, abort (see Error Handling). Equivalent to `-y`.
 - `--mode chat|ui|both` — experience mode. Default is `both`: results in chat with the local UI alongside. `--mode chat` is chat only, with no UI. `--mode ui` is UI-first: chat carries only the approval-gate numbers, UI pointers, and the final result line — no phase summaries. `--auto` without `--mode` also means `both`.
 

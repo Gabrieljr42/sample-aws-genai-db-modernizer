@@ -165,9 +165,14 @@ def test_error_before_the_job_exists_is_reported_inline(tmp_path):
     proc = _run_script(tmp_path, "--file", "missing.json", "--db", "discourse")
     assert proc.returncode == 1
     *status, pointer = _json_lines(proc.stdout)
-    assert status == [
-        {"phase": "collect", "status": "error", "message": "File not found: missing.json"}
-    ]
+    assert len(status) == 1
+    assert {k: v for k, v in status[0].items() if k != "message"} == {
+        "phase": "collect",
+        "status": "error",
+    }
+    # One line naming the path, then how to get a collection (#331).
+    assert status[0]["message"].startswith("File not found: missing.json. ")
+    assert "collector output" in status[0]["message"]
     assert pointer["log"] is None
     assert "Database Modernizer Assessment" in pointer["output_tail"]
     assert len(proc.stdout.encode()) < STDOUT_LIMIT

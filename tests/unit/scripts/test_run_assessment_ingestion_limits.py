@@ -10,15 +10,11 @@ against the full bundled samples.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 from scripts import run_assessment
 from src.storage.local_store import LocalArtifactStore
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-WORDPRESS_ZIP = REPO_ROOT / "docs" / "examples" / "wordpress" / "wordpress.zip"
 
 RAW_COLLECTION = {
     "collection_version": 1,
@@ -118,13 +114,18 @@ def test_rejects_oversized_contract_format_file(tmp_path, monkeypatch, capsys):
 
 
 def test_rejects_zip_archive_with_clear_message(tmp_path, capsys):
-    """#142 round 1 (I1): the bundled samples are shipped as .zip; passing one
-    directly (instead of the .json inside) must fail with a clear, actionable
-    message rather than an opaque JSON-decode error."""
+    """#142 round 1 (I1): a zip that is not a collection archive must fail with a
+    clear, actionable message rather than an opaque JSON-decode error. (A sample
+    zip with its expected member is now extracted instead, #331.)"""
+    import zipfile
+
+    bogus = tmp_path / "bogus.zip"
+    with zipfile.ZipFile(bogus, "w") as zf:
+        zf.writestr("something-else.txt", "x")
     store = LocalArtifactStore(base_dir=str(tmp_path / "artifacts"))
 
     with pytest.raises(SystemExit):
-        run_assessment.phase_collect(str(WORDPRESS_ZIP), None, store)
+        run_assessment.phase_collect(str(bogus), None, store)
 
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["status"] == "error"

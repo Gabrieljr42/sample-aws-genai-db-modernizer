@@ -16,7 +16,7 @@ graph LR
 
 `/modernize` runs in one of three modes: `chat`, `ui` or `both` (the default). In `ui` and `both` it starts the local API and UI before the pipeline. The chat always shows the key numbers for each phase, so you can follow the run and decide from the chat alone. In `both` mode it also points to the matching UI view: the Sankey and assignment page at the Reality Check approval, the schema designs after phase 6, and the full report at the end. If the UI can't start (a busy port, a failed build, or no Node), the run switches to chat and continues.
 
-Use `/modernize docs/examples/wordpress/wordpress-collection.json --mode chat` for a terminal-only run: no browser, no Node required, works in headless environments. `wordpress-collection.json` is bundled as `docs/examples/wordpress/wordpress.zip`; unzip it first and pass the `.json` file inside, not the archive itself.
+Use `/modernize docs/examples/wordpress/wordpress-collection.json --mode chat` for a terminal-only run: no browser, no Node required, works in headless environments. `wordpress-collection.json` is bundled as `docs/examples/wordpress/wordpress.zip`; the script extracts it next to the zip the first time you name it, so there is nothing to unzip by hand.
 
 ## The individual commands
 

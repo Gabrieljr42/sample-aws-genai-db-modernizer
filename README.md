@@ -80,11 +80,7 @@ uv sync
 
 ### Run the sample assessment with Claude Code
 
-The repo ships a WordPress + WooCommerce sample (50 tables, 107 queries) as a zip, so unzip it first:
-
-```bash
-unzip docs/examples/wordpress/wordpress.zip -d docs/examples/wordpress/
-```
+The repo ships a WordPress + WooCommerce sample (50 tables, 107 queries) as `docs/examples/wordpress/wordpress.zip`. The scripts extract `wordpress-collection.json` next to the zip the first time you name it, so there is nothing to unzip by hand.
 
 Open the repository in Claude Code and run, with the collector file as the argument:
 

@@ -67,8 +67,12 @@ def main():
     collector_file = args.collector_file
     db_name_override = args.db_name
 
-    if not os.path.exists(collector_file):
-        print(f"ERROR: File not found: {collector_file}")
+    from src.shared.sample_collection import CollectionPathError, resolve_collection_path
+
+    try:
+        collector_file = resolve_collection_path(collector_file)
+    except CollectionPathError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
 
     with open(collector_file, encoding="utf-8") as f:
