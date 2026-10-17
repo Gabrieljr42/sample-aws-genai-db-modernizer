@@ -587,7 +587,7 @@ Each decision names the guard test that fails when the code stops following it. 
 |---|---|
 | 1. Every contract carries a `contract_version` | none yet -- #972 (contracts written to disk with none)<br>none yet -- #973 (the DynamoDB decision trace is untyped) |
 | 2. The agent version is a separate field | none yet -- #974 (writers still use a literal) |
-| 3. Contract versions are MAJOR.MINOR, and a shape change moves the version | `tests/contract/test_schema_snapshot.py::test_schema_snapshot_file_matches_a_fresh_rebuild`<br>`tests/unit/scripts/test_contract_schema_snapshot.py`<br>none yet -- #975 (published enum and id values) |
+| 3. Contract versions are MAJOR.MINOR, and a shape change moves the version | `tests/contract/test_schema_snapshot.py::test_schema_snapshot_file_matches_a_fresh_rebuild`<br>`tests/unit/scripts/test_contract_schema_snapshot.py`<br>`tests/contract/test_value_set_snapshot.py::test_value_set_snapshot_matches_a_fresh_rebuild` |
 | 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR | none yet -- #971 |
 | 5. Optional fields by default | `tests/unit/scripts/test_contract_schema_snapshot.py`<br>none yet -- #976 (`extra="forbid"` per contract) |
 | 6. Deprecate before removing | none yet -- #969 (no guard planned: removing a field already needs a MAJOR bump under Decision 3) |

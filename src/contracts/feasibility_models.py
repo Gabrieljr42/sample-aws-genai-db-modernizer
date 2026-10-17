@@ -6,6 +6,11 @@ loop the assignment-review gate (the customer must fix the routing or explicitly
 accept the risk), ``advisory`` ones inform. Accepted blocking findings are
 recorded on the assignment artifact so an approved-with-known-risk routing is
 self-describing.
+
+Version History:
+- 1.0 (2026-10-16, #975): The version the value-set snapshot
+  (``scripts/contract_value_snapshot.py``) tracks for ``FindingKind`` and
+  ``FindingSeverity``. No schema change.
 """
 
 from __future__ import annotations
