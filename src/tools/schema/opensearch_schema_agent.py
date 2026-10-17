@@ -33,6 +33,7 @@ from src.contracts.model_flag import RoutingFlagEntry
 from src.contracts.opensearch_model_output import OpenSearchModelOutputContract
 from src.contracts.schema_design_input import project_schema_design_input
 from src.contracts.schema_design_output import TradeOff
+from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
 from src.tools.schema.base_schema_agent import enforce_design_numbers
 from src.tools.schema.design_metrics import (
@@ -212,10 +213,10 @@ def _project_input() -> dict:
 
     with open(collector_path, encoding="utf-8") as f:
         raw_collector = json.load(f)
-    collector = CollectorOutputContract.model_validate(raw_collector)
+    collector = load_contract(CollectorOutputContract, raw_collector, artifact=collector_path)
 
     with open(analysis_path, encoding="utf-8") as f:
-        analysis = AnalysisOutputContract.model_validate(json.load(f))
+        analysis = load_contract(AnalysisOutputContract, json.load(f), artifact=analysis_path)
 
     agent_collector, agent_analysis, agent_context = project_schema_design_input(
         collector, analysis

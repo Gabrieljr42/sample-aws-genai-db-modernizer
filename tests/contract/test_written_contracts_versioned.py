@@ -11,7 +11,8 @@ This guard finds every ``<store>.write_json(path, data)`` call in ``src/`` and
 ``scripts/`` whose ``data`` is a Pydantic dump (``x.model_dump(...)`` or
 ``json.loads(x.model_dump_json(...))``), works out the class of ``x`` from
 the enclosing function (a parameter annotation, ``x = Cls(...)``,
-``x = Cls.model_validate(...)``, ``x = other.model_copy(...)``,
+``x = Cls.model_validate(...)``, ``x = load_contract(Cls, ...)``,
+``x = other.model_copy(...)``,
 ``x = func(...)`` or ``x = obj.method(...)`` with a return annotation), and
 checks that class:
 
@@ -206,6 +207,11 @@ def _value_classes(value: ast.expr, site: WriteSite, seen: frozenset[str]) -> li
     if not isinstance(value, ast.Call):
         return []
     func = value.func
+    if isinstance(func, ast.Name) and func.id == "load_contract":
+        # ``x = load_contract(Cls, data, artifact=...)`` (#971) returns a ``Cls``.
+        first = value.args[0] if value.args else None
+        target = _lookup(first.id, site) if isinstance(first, ast.Name) else None
+        return [target] if isinstance(target, type) else []
     if isinstance(func, ast.Name):
         target = _lookup(func.id, site)
         if isinstance(target, type):

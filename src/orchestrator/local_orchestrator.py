@@ -23,6 +23,7 @@ from src.contracts.phase_models import (
     PhaseStatus,
 )
 from src.orchestrator.base import Orchestrator, PhasePrerequisiteError, PhaseScope
+from src.shared.contract_versioning import load_contract
 from src.storage.artifact_store import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class LocalOrchestrator(Orchestrator):
         if not self.store.exists(path):
             return self._infer_progression(job_id)
         raw = self.store.read_json(path)
-        return PhaseProgression.model_validate(raw)
+        return load_contract(PhaseProgression, raw, artifact=path)
 
     def _infer_progression(self, job_id: str) -> PhaseProgression:
         """Infer phase progression from existing artifacts and persist it.

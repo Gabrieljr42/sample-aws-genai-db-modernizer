@@ -17,6 +17,7 @@ from src.agents.referee.assignment_overrides import (
 )
 from src.api.dependencies import database_name_param, job_id_param
 from src.contracts.assignment_models import Assignment, AssignmentSource, ValidationResult
+from src.shared.contract_versioning import load_contract
 from src.storage.artifact_store import ArtifactStore
 from src.storage.assignment_versioning import resolve_effective_assignment_version
 
@@ -98,7 +99,9 @@ def _read_assignment(store: ArtifactStore, db: str, job_id: str, version: int) -
     from src.agents.referee.assignment_overrides import load_assignment_for_edit
 
     data, _, _, _ = load_assignment_for_edit(store, db, job_id, version)
-    return Assignment.model_validate(data)
+    return load_contract(
+        Assignment, data, artifact=f"{db}/{job_id}/assignment/v{version}/assignment.json"
+    )
 
 
 # ---------------------------------------------------------------------------

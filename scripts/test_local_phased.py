@@ -76,9 +76,14 @@ def main():
         input_data = json.loads(content)
 
     # Detect format
-    is_contract = isinstance(input_data.get("contract_version"), str) and input_data[
-        "contract_version"
-    ].startswith("3")
+    from src.contracts.collector_output import CollectorOutputContract
+    from src.shared.contract_versioning import ContractVersionError, carries_contract
+
+    try:
+        is_contract = carries_contract(input_data, CollectorOutputContract, artifact=collector_file)
+    except ContractVersionError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
     is_raw = "collection_version" in input_data or isinstance(input_data.get("queries"), list)
 
     from src.contracts.phase_models import Phase, PhaseStatus

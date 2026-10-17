@@ -29,6 +29,7 @@ from src.contracts.analysis_output import AnalysisOutputContract
 from src.contracts.collector_output import CollectorOutputContract
 from src.contracts.elasticache_model_output import ElastiCacheModelOutputContract
 from src.contracts.schema_design_input import project_schema_design_input
+from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
 from src.tools.schema.base_schema_agent import SchemaDesignRunner
 
@@ -125,13 +126,13 @@ def load_agent_input() -> dict:
 
     with open(collector_path, encoding="utf-8") as f:
         raw_collector = json.load(f)
-    collector = CollectorOutputContract.model_validate(raw_collector)
+    collector = load_contract(CollectorOutputContract, raw_collector, artifact=collector_path)
     # Owner writes on the cached tables, read-only context for invalidation (#296);
     # the contract projection below would drop it.
     invalidation_context = raw_collector.get("cache_invalidation_context")
 
     with open(analysis_path, encoding="utf-8") as f:
-        analysis = AnalysisOutputContract.model_validate(json.load(f))
+        analysis = load_contract(AnalysisOutputContract, json.load(f), artifact=analysis_path)
 
     agent_collector, agent_analysis, agent_context = project_schema_design_input(
         collector, analysis

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.shared.contract_versioning import ContractVersionError
+
 
 class _MockS3Client:
     """Minimal S3 client mock for presigned URLs, head_object, list_objects, delete_object."""
@@ -129,6 +131,8 @@ class LocalS3Service:
         try:
             result: dict = self._store.read_json(path)
             return result
+        except ContractVersionError:
+            raise  # a refusal reaches the user as a 409, never "not available"
         except Exception:
             return None
 
@@ -180,6 +184,8 @@ class LocalS3Service:
                 try:
                     result: dict = self._store.read_json(key)
                     return result
+                except ContractVersionError:
+                    raise  # a refusal reaches the user as a 409, never "not available"
                 except Exception:
                     return None
         return None
@@ -210,6 +216,8 @@ class LocalS3Service:
         path = assignment_artifact_path(database_name, job_id, latest)
         try:
             assignment = self._store.read_json(path)
+        except ContractVersionError:
+            raise  # never a stand-in reality check built from a refused assignment
         except Exception:
             return None
 
@@ -290,6 +298,8 @@ class LocalS3Service:
                         "content": data,
                     }
                 )
+            except ContractVersionError:
+                raise  # a refusal reaches the user as a 409, never a missing design
             except Exception as exc:
                 print(f"[schema-designs] Skipping {rel_path}: {exc}")  # nosec B112
 

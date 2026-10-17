@@ -655,9 +655,14 @@ def base_from_outputs(
     from src.contracts.analysis_output import AnalysisOutputContract
     from src.contracts.collector_output import CollectorOutputContract
     from src.contracts.schema_design_input import project_schema_design_input
+    from src.shared.contract_versioning import load_contract
 
-    collector = CollectorOutputContract.model_validate(collector_output)
-    analysis = AnalysisOutputContract.model_validate(analysis_output)
+    collector = load_contract(
+        CollectorOutputContract, collector_output, artifact="collector output"
+    )
+    analysis = load_contract(
+        AnalysisOutputContract, analysis_output, artifact=f"analysis-{engine} output"
+    )
     agent_collector, agent_analysis, _ = project_schema_design_input(collector, analysis)
     base = AuroraDesignBase.from_inputs(engine, agent_collector, collector_output)
     return base, agent_collector, agent_analysis

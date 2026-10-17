@@ -21,6 +21,7 @@ import json
 import os
 import tempfile
 
+from src.shared.contract_versioning import check_artifact
 from src.storage.artifact_store import ArtifactStore
 
 ARTIFACT_SCHEME = "artifact://"
@@ -133,7 +134,9 @@ class AtxArtifactStore(ArtifactStore):
 
                 check_file_size(os.path.getsize(tmp_path), source=path)
             with open(tmp_path, encoding="utf-8") as fh:
-                return json.load(fh)  # type: ignore[no-any-return]
+                data = json.load(fh)
+            # ADR-008 Decision 4: refuse another MAJOR (an older one with an adapter is upgraded)
+            return check_artifact(path, data)  # type: ignore[no-any-return]
         finally:
             with contextlib.suppress(OSError):
                 os.remove(tmp_path)

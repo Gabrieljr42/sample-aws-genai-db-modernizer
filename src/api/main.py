@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.shared.contract_versioning import ContractVersionError
 from src.shared.package_version import get_package_version
 
 #: The background thread of the one-time redaction of stored inputs (#723), for tests.
@@ -120,6 +121,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 del error["ctx"]
         cleaned.append(error)
     return JSONResponse(status_code=422, content={"detail": cleaned})
+
+
+# ============================================================
+# Stored artifact at another contract MAJOR (ADR-008 Decision 4)
+# ============================================================
+@app.exception_handler(ContractVersionError)
+async def contract_version_exception_handler(request: Request, exc: ContractVersionError):
+    """A stored artifact this code cannot read (another contract MAJOR) is a
+    conflict with the stored job, not a server fault. The response says so in
+    plain words (no artifact path, class name or policy reference); the full
+    detail goes to the server log."""
+    logging.getLogger(__name__).warning("refused stored artifact: %s", exc)
+    return JSONResponse(status_code=409, content={"detail": exc.public_message})
 
 
 # ============================================================

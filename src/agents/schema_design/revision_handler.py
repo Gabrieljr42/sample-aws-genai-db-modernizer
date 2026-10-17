@@ -26,6 +26,7 @@ from src.contracts.schema_revision_models import (
     TableModification,
     VerificationResult,
 )
+from src.shared.contract_versioning import stamp_artifact_version
 from src.storage.artifact_store import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -547,7 +548,8 @@ def execute_revision(
 
     # 9. Write artifacts
     base_path = f"{database_name}/{job_id}/schema-{engine}/v{new_version}"
-    store.write_json(f"{base_path}/schema_output.json", new_schema)
+    schema_key = f"{base_path}/schema_output.json"
+    store.write_json(schema_key, stamp_artifact_version(schema_key, new_schema))
 
     store.write_json(f"{base_path}/version_meta.json", meta.model_dump(mode="json"))
     store.write_json(f"{base_path}/revision_request.json", request.model_dump(mode="json"))

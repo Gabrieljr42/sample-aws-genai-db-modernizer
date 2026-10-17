@@ -133,9 +133,15 @@ def main() -> None:
     input_data = json.loads(content)
 
     # Detect format: contract (processed) vs raw (collection script output)
-    is_contract = isinstance(input_data.get("contract_version"), str) and input_data[
-        "contract_version"
-    ].startswith("3")
+    from src.contracts.collector_output import CollectorOutputContract
+    from src.shared.contract_versioning import ContractVersionError, carries_contract
+
+    # A stored collector output carries a contract_version (ADR-008 Decision 4: same
+    # MAJOR only); a raw collection carries none.
+    try:
+        is_contract = carries_contract(input_data, CollectorOutputContract, artifact=args.file)
+    except ContractVersionError as exc:
+        _error(str(exc))
 
     if is_contract:
         try:

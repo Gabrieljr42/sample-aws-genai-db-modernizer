@@ -221,9 +221,12 @@ def run_finalize(store, job_id: str, db: str, engine: str) -> None:
     if engine == "dynamodb":
         from src.agents.analysis.dynamodb_analysis_agent import apply_dynamodb_llm_output
         from src.contracts.analysis_output import AnalysisOutputContract
+        from src.shared.contract_versioning import load_contract
         from src.tools.analysis.dynamodb_analysis_tools import LlmAdvisorOutput
 
-        contract = AnalysisOutputContract.model_validate(partial_data["contract"])
+        contract = load_contract(
+            AnalysisOutputContract, partial_data["contract"], artifact=partial_path
+        )
         llm_ddb = LlmAdvisorOutput.model_validate(llm_response)
         updated_contract = apply_dynamodb_llm_output(contract, llm_ddb)
         trace = partial_data["decision_trace"]
@@ -232,9 +235,12 @@ def run_finalize(store, job_id: str, db: str, engine: str) -> None:
     elif engine == "documentdb":
         from src.agents.analysis.documentdb_analysis_agent import apply_documentdb_llm_output
         from src.contracts.analysis_output import AnalysisOutputContract
+        from src.shared.contract_versioning import load_contract
         from src.tools.analysis.documentdb_analysis_tools import LlmDocumentDBOutput
 
-        contract = AnalysisOutputContract.model_validate(partial_data["contract"])
+        contract = load_contract(
+            AnalysisOutputContract, partial_data["contract"], artifact=partial_path
+        )
         trace = partial_data["decision_trace"]
         mermaid = partial_data.get("mermaid_diagram", "")
         llm_docdb = LlmDocumentDBOutput.model_validate(llm_response)

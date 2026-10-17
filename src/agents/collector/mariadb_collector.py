@@ -34,6 +34,7 @@ from src.agents.collector.mysql_collector import (
 )
 from src.contracts.collector_input import CollectionMode, CollectorInput
 from src.contracts.collector_output import CollectorOutputContract
+from src.shared.contract_versioning import load_contract
 from src.tools.aws.ssm_executor import SSMExecutor
 from src.tools.database.mariadb_tools import MariaDBRemoteCollector
 
@@ -46,8 +47,10 @@ def collect(input_contract: CollectorInput) -> CollectorOutputContract:
 
     if ckpt.exists("output"):
         logger.info("Job %s: final output already exists, returning cached", input_contract.job_id)
-        result: CollectorOutputContract = CollectorOutputContract.model_validate(
-            ckpt.load("output")
+        result: CollectorOutputContract = load_contract(
+            CollectorOutputContract,
+            ckpt.load("output"),
+            artifact=f"collector checkpoint {input_contract.job_id}/output",
         )
         return result
 
