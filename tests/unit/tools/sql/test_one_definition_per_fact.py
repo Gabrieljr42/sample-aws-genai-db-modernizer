@@ -54,6 +54,12 @@ FACT_MODULES: dict[str, str] = {
         "BY, ORDER BY, LIKE, SELECT and range readings come from regex_facts "
         "(QUERY_SHAPE_OWN_DETECTORS)"
     ),
+    "src/agents/referee/transaction_shape.py": (
+        "the write-transaction shape (#493): how many VALUES rows a write inserts, the source "
+        "an INSERT ... SELECT copies, an array of key values, set-returning functions and a "
+        "MERGE's source and ON condition. Only those: its SELECT, IN-list, EXISTS and FROM "
+        "readings come from regex_facts (#930, TRANSACTION_SHAPE_OWN_DETECTORS)"
+    ),
     "src/agents/referee/utility_statements.py": (
         "the utility-statement fact (#327, #737): DDL, session and transaction control, "
         "metadata reads"
@@ -62,10 +68,6 @@ FACT_MODULES: dict[str, str] = {
 
 # Modules with a SQL regex that is not a routing or analysis query fact.
 OTHER_SQL_MODULES: dict[str, str] = {
-    "src/agents/referee/transaction_shape.py": (
-        "the write-transaction shape (#493); its keyword scans are not yet audited against the "
-        "query facts (#930)"
-    ),
     "src/agents/collector/mysql_collector.py": (
         "the collector's time-range field, before any fact is read; its has_text_search is the "
         "text_search fact the live reader sets (#929)"
@@ -209,7 +211,6 @@ QUERY_SHAPE_OWN_DETECTORS: dict[str, str] = {
     "_CTE_RE": "the shape check's CTE",
     "_WHERE_RE": "the WHERE clause the key predicate is read from",
     "_EQUALS_RE": "the key predicate's equality",
-    "_IN_LIST_RE": "the key predicate's IN list",
     "_NOT_BEFORE_RE": "a NOT before an IN list",
     "_LEFT_OPERAND_RE": "the operand before an operator",
     "_RIGHT_OPERAND_RE": "the operand after an operator",
@@ -250,11 +251,75 @@ def test_query_shape_defines_only_its_documented_facts():
     }
     assert {
         "GROUP_BY_RE",
+        "IN_LIST_RE",
         "ORDER_BY_RE",
         "PATTERN_PREDICATE_RE",
         "RANGE_PREDICATE_RE",
         "SELECT_WORD_RE",
     } <= imported
+
+
+def _compiled_and_imported(path: str) -> tuple[set[str], set[str]]:
+    """The regexes ``path`` compiles at module level, and the names it imports from
+    ``src.tools.sql.regex_facts``."""
+    tree = ast.parse((_REPO / path).read_text(encoding="utf-8"))
+    compiled = {
+        node.targets[0].id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "re.compile"
+    }
+    imported = {
+        alias.name
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "src.tools.sql.regex_facts"
+        for alias in node.names
+    }
+    return compiled, imported
+
+
+# The detectors transaction_shape.py defines itself, each a fact of the write's shape no
+# query fact or access fact gives (#930 audit). Its SELECT, IN-list, EXISTS and FROM
+# readings are the shared ones in regex_facts.
+TRANSACTION_SHAPE_OWN_DETECTORS: dict[str, str] = {
+    "_VALUES_RE": (
+        "where an INSERT's VALUES rows start, to count them; the access facts' inserts_values "
+        "says only whether there are any"
+    ),
+    "_KEY_ARRAY_RE": (
+        "an array of key values (= ANY(...)), a set the statement does not bound; the access "
+        "facts read it as one equality"
+    ),
+    "_MERGE_VALUES_RE": "a MERGE whose source is a VALUES list (USING (VALUES ...))",
+    "_MERGE_ON_RE": "that MERGE's ON condition",
+    "_RANGE_RE": (
+        "a comparison in that ON condition that can match many target rows (<, >, <>, "
+        "BETWEEN, LIKE): not the range predicate fact, which leaves out <> and LIKE"
+    ),
+    "_SET_RETURNING_RE": (
+        "a set-returning function an INSERT ... SELECT copies rows from with no FROM; the "
+        "access facts see a table function only as a FROM source"
+    ),
+}
+
+
+def test_transaction_shape_defines_only_its_documented_facts():
+    compiled, imported = _compiled_and_imported("src/agents/referee/transaction_shape.py")
+    assert compiled == set(TRANSACTION_SHAPE_OWN_DETECTORS), (
+        "transaction_shape.py defines a detector that is not one of its documented facts: "
+        f"read it from src.tools.sql.regex_facts. {sorted(compiled ^ set(TRANSACTION_SHAPE_OWN_DETECTORS))}"
+    )
+    assert {"EXISTS_CONDITION_RE", "FROM_WORD_RE", "IN_LIST_RE", "SELECT_WORD_RE"} <= imported
+
+
+def test_the_exists_condition_is_one_definition():
+    """The ``[NOT] EXISTS (`` the transaction shape blanks is the one the
+    ``exists_or_in_subquery`` fact reads (#930)."""
+    compiled, imported = _compiled_and_imported("src/tools/sql/query_facts.py")
+    assert "EXISTS_CONDITION_RE" in imported
+    assert not any("EXISTS" in name for name in compiled)
 
 
 @pytest.mark.parametrize(

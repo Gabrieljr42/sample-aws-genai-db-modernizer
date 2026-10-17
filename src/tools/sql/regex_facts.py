@@ -79,6 +79,13 @@ ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 PATTERN_PREDICATE_RE = re.compile(r"\b(?:I?LIKE|SIMILAR\s+TO|REGEXP|RLIKE)\b", re.IGNORECASE)
 LITERAL_PREFIX_LIKE_RE = re.compile(r"\bI?LIKE\s+'[^%_']", re.IGNORECASE)
 SELECT_WORD_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
+# ``IN (`` (the key predicate's IN list, and the IN list whose values the transaction
+# shape counts), a ``[NOT] EXISTS (`` condition (the ``exists_or_in_subquery`` fact's,
+# and the one the transaction shape blanks) and the ``FROM`` word (the multi-table
+# write's, and the source of an INSERT ... SELECT), each defined here once (#930).
+IN_LIST_RE = re.compile(r"\bIN\s*\(", re.IGNORECASE)
+EXISTS_CONDITION_RE = re.compile(r"\b(?:NOT\s+)?EXISTS\s*\(", re.IGNORECASE)
+FROM_WORD_RE = re.compile(r"\bfrom\b", re.IGNORECASE)
 # A LIKE/ILIKE whose pattern starts with ``%``: a quoted literal (``N'%...'``
 # included), or a ``CONCAT(...)`` whose first part is one (#493).
 _LEADING_WILDCARD_RE = re.compile(
@@ -553,7 +560,6 @@ def regex_json_access(query_text: str) -> bool:
 _UPDATE_RE = re.compile(r"\bupdate\b", re.IGNORECASE)
 _SET_RE = re.compile(r"\bset\b", re.IGNORECASE)
 _JOIN_RE = re.compile(r"\bjoin\b", re.IGNORECASE)
-_FROM_RE = re.compile(r"\bfrom\b", re.IGNORECASE)
 
 
 _DELETE_RE = re.compile(r"\bdelete\b", re.IGNORECASE)
@@ -612,7 +618,7 @@ def regex_multi_table_write(query_text: str) -> bool:
         head = text[update.end() : set_.start()]
         if _JOIN_RE.search(head) or "," in head:
             return True
-        from_ = _FROM_RE.search(text, set_.end())
+        from_ = FROM_WORD_RE.search(text, set_.end())
         if from_ is None:
             return False
         return not _from_names_only_the_target(head, text[from_.end() :])

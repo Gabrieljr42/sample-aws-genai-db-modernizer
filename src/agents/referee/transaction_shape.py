@@ -46,6 +46,12 @@ from src.agents.referee.query_shape import (
 )
 from src.agents.referee.table_resolution import SourceScope
 from src.shared.unsupported_pattern import strip_comments_and_literals
+from src.tools.sql.regex_facts import (
+    EXISTS_CONDITION_RE,
+    FROM_WORD_RE,
+    IN_LIST_RE,
+    SELECT_WORD_RE,
+)
 
 SINGLE_ITEM = "single item"
 BOUNDED = "bounded"
@@ -55,16 +61,21 @@ UNBOUNDED = "unbounded"
 TRANSACTION_MAX_ITEMS = 100
 
 _WRITE_TYPES = frozenset({"INSERT", "UPDATE", "DELETE", "REPLACE", "MERGE"})
-_SELECT_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
+# The SELECT word, an IN list, a [NOT] EXISTS condition and the FROM word are the shared
+# readings in ``regex_facts`` (#930). The detectors below are facts of the write's shape
+# no query fact or access fact gives: where the VALUES rows start (the access facts'
+# ``inserts_values`` says only whether there are any), an array of key values (the access
+# facts read ``= ANY(...)`` as one equality), a MERGE's VALUES source and ON condition,
+# and set-returning functions.
 _VALUES_RE = re.compile(r"\bVALUES?\b", re.IGNORECASE)
-_IN_LIST_RE = re.compile(r"\bIN\s*\(", re.IGNORECASE)
-_EXISTS_RE = re.compile(r"\b(?:NOT\s+)?EXISTS\s*\(", re.IGNORECASE)
-_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
 _KEY_ARRAY_RE = re.compile(r"=\s*(?:ANY|SOME)\s*\(", re.IGNORECASE)
 _MERGE_VALUES_RE = re.compile(r"\bUSING\s*\(\s*VALUES\b", re.IGNORECASE)
 _MERGE_ON_RE = re.compile(
     r"\)\s*(?:AS\s+)?\w+(?:\s*\([^()]*\))?\s+ON\b(?P<on>.*?)\bWHEN\b", re.IGNORECASE | re.DOTALL
 )
+# A comparison in the ON condition that can match many target rows per source row: any
+# ``<``/``>`` operator (``<>`` included), ``BETWEEN`` or ``LIKE``. Not the range predicate
+# fact (``regex_facts.RANGE_PREDICATE_RE``), which leaves out ``<>`` and ``LIKE``.
 _RANGE_RE = re.compile(r"[<>]|\bBETWEEN\b|\bLIKE\b", re.IGNORECASE)
 # Functions that return a set of rows: ``INSERT ... SELECT unnest($1)`` writes
 # many rows though it has no FROM clause.
@@ -148,7 +159,7 @@ def _values_rows(sql: str) -> int:
 def _in_list_items(sql: str) -> int:
     """Items in the widest ``IN (...)`` list (1 when there is none)."""
     widest = 1
-    for match in _IN_LIST_RE.finditer(sql):
+    for match in IN_LIST_RE.finditer(sql):
         start = match.end() - 1
         body = sql[start + 1 : _balanced_group_end(sql, start) - 1]
         depth, items = 0, 1
@@ -179,7 +190,7 @@ def _without_exists_conditions(sql: str) -> str:
     guards (a conditional write, ADR-031 Decision 3). ``1=1`` is not a key
     predicate (``query_shape``), so a write guarded by nothing else stays unkeyed.
     """
-    while (match := _EXISTS_RE.search(sql)) is not None:
+    while (match := EXISTS_CONDITION_RE.search(sql)) is not None:
         end = _balanced_group_end(sql, match.end() - 1)
         sql = f"{sql[: match.start()]} 1=1 {sql[end:]}"
     return sql
@@ -224,14 +235,14 @@ def _keyed(
 
 def _insert_shape(query: Mapping, sql: str, scope: SourceScope | None) -> TransactionShape:
     values = _top_level(sql, _VALUES_RE)
-    select = _top_level(sql, _SELECT_RE)
+    select = _top_level(sql, SELECT_WORD_RE)
     if select is None or (values is not None and values.start() < select.start()):
         # A scalar subquery inside VALUES fills a column of the same row.
         rows = _values_rows(sql)
         return _by_count(rows, f"inserts {rows} row(s) per call")
     body = sql[select.start() :]
-    if len(_SELECT_RE.findall(body)) == 1 and not _SET_RETURNING_RE.search(body):
-        source = _top_level(body, _FROM_RE)
+    if len(SELECT_WORD_RE.findall(body)) == 1 and not _SET_RETURNING_RE.search(body):
+        source = _top_level(body, FROM_WORD_RE)
         if source is None:
             return _by_count(1, "inserts one row when its condition holds")
         shape = _keyed(
