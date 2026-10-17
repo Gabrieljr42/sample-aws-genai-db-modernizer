@@ -18,6 +18,12 @@ import pytest
 from tests.e2e.pipeline import SAMPLES as PIPELINE_SAMPLES
 from tests.e2e.pipeline import PipelineResult, _env, from_existing_job, run_pipeline
 
+# The UI smoke's API and UI ports (#1028): 8000 and 3000 by default, as the UI
+# build expects (ci/lib.sh's build_ui reads E2E_API_PORT too); set both to run
+# the smoke next to a local API/UI already on the default ports.
+API_PORT = int(os.environ.get("E2E_API_PORT", "8000"))
+UI_PORT = int(os.environ.get("E2E_UI_PORT", "3000"))
+
 SAMPLES = list(PIPELINE_SAMPLES)
 
 REPO = Path(__file__).resolve().parents[2]
@@ -268,7 +274,7 @@ def all_runs(e2e_root: Path) -> list[PipelineResult]:
 
 @pytest.fixture(scope="session")
 def api(all_runs: list[PipelineResult]) -> Iterator[str]:
-    _ensure_port_free(8000)
+    _ensure_port_free(API_PORT)
     # Reuse pipeline._env() so the API subprocess is stripped of AWS_PROFILE /
     # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN the same way
     # the deterministic pipeline steps are -- same proof: this suite needs no
@@ -276,18 +282,19 @@ def api(all_runs: list[PipelineResult]) -> Iterator[str]:
     # (hosted Step Functions/S3 services removed, #175).
     env = _env()
     env["ARTIFACT_DIR"] = str(all_runs[0].artifact_root)
+    env["ALLOWED_ORIGIN"] = f"http://localhost:{UI_PORT}"
     log_path = _log_path("api.log")
     log_file = log_path.open("w")
     proc = subprocess.Popen(  # nosec B603 -- fixed argv, this repo's own API server
-        [sys.executable, "-m", "uvicorn", "src.api.main:app", "--port", "8000"],
+        [sys.executable, "-m", "uvicorn", "src.api.main:app", "--port", str(API_PORT)],
         cwd=REPO,
         env=env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
     )
     try:
-        _wait_for(8000, proc, log_path)
-        yield "http://localhost:8000/api/v1/"
+        _wait_for(API_PORT, proc, log_path)
+        yield f"http://localhost:{API_PORT}/api/v1/"
     finally:
         _terminate(proc, log_file)
 
@@ -296,12 +303,13 @@ def api(all_runs: list[PipelineResult]) -> Iterator[str]:
 def ui(api: str) -> Iterator[str]:
     if not (UI_BUILD / "index.html").exists():
         pytest.fail(
-            "UI not built. Run: cd src/ui && npm ci && REACT_APP_API_URL=http://localhost:8000/api/v1/ npx react-scripts build"
+            "UI not built. Run: cd src/ui && npm ci && "
+            f"REACT_APP_API_URL=http://localhost:{API_PORT}/api/v1/ npx react-scripts build"
         )
     serve_bin = REPO / "src" / "ui" / "node_modules" / ".bin" / "serve"
     if not serve_bin.exists():
         pytest.fail(f"{serve_bin} not found. Run: cd src/ui && npm ci")
-    _ensure_port_free(3000)
+    _ensure_port_free(UI_PORT)
     log_path = _log_path("serve.log")
     log_file = log_path.open("w")
     proc = subprocess.Popen(  # nosec B603 -- fixed argv, the repo's own pinned `serve` binary
@@ -309,13 +317,13 @@ def ui(api: str) -> Iterator[str]:
         # re-install the package on every invocation, which is slower and,
         # offline, can fail outright. The pinned dependency's own binary
         # (installed by `npm ci`) is what we actually want to run.
-        [str(serve_bin), "-s", "build", "-l", "3000", "--no-clipboard"],
+        [str(serve_bin), "-s", "build", "-l", str(UI_PORT), "--no-clipboard"],
         cwd=REPO / "src" / "ui",
         stdout=log_file,
         stderr=subprocess.STDOUT,
     )
     try:
-        _wait_for(3000, proc, log_path)
-        yield "http://localhost:3000"
+        _wait_for(UI_PORT, proc, log_path)
+        yield f"http://localhost:{UI_PORT}"
     finally:
         _terminate(proc, log_file)

@@ -78,6 +78,28 @@ jest.mock('@cloudscape-design/components/link', () => ({
     <a role="button" tabIndex={0} aria-label={ariaLabel} onClick={e => onFollow({ preventDefault: () => {}, detail: {} })}>{children}</a>
   ),
 }));
+jest.mock('@cloudscape-design/components/expandable-section', () => ({
+  __esModule: true,
+  default: ({ headerText, headerCounter, headerDescription, defaultExpanded, variant, children }) => (
+    <details data-default-expanded={String(Boolean(defaultExpanded))} data-variant={variant}>
+      <summary><h2>{headerText}</h2><span className="mock-counter">{headerCounter}</span><p>{headerDescription}</p></summary>
+      {children}
+    </details>
+  ),
+}));
+jest.mock('@cloudscape-design/components/select', () => ({
+  __esModule: true,
+  default: ({ selectedOption, options, onChange, ariaLabel }) => (
+    <select
+      className="mock-select"
+      aria-label={ariaLabel}
+      value={selectedOption ? selectedOption.value : ''}
+      onChange={e => onChange({ detail: { selectedOption: options.find(o => o.value === e.target.value) } })}
+    >
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  ),
+}));
 jest.mock('@cloudscape-design/components/table', () => ({
   __esModule: true,
   default: ({ items, columnDefinitions, empty, loading, ariaLabels }) => (
@@ -214,4 +236,46 @@ test('a list cut at the page limit says so', () => {
   expect(container.textContent).toContain('Only the first 2 queries are listed.');
   render({ truncated: false });
   expect(container.textContent).not.toContain('are listed.');
+});
+
+// #1028: the section opens collapsed, below the query flow, and keeps the
+// query explorer inside it: text search plus query type and engine filters.
+test('the section is collapsed when the page opens, with its title and count in the header', () => {
+  render();
+  const section = container.querySelector('details');
+  expect(section.dataset.defaultExpanded).toBe('false');
+  expect(section.dataset.variant).toBe('container');
+  expect(section.querySelector('summary h2').textContent).toBe('Query routing');
+  expect(section.querySelector('.mock-counter').textContent).toBe('(2)');
+  // The explorer is inside the collapsed section, not dropped.
+  expect(section.querySelector('.mock-filter')).not.toBeNull();
+  expect(section.querySelector('table')).not.toBeNull();
+});
+
+test('the query type and engine filters narrow the rows', () => {
+  const update = row(3, { queryType: 'UPDATE', engine: 'aurora_mysql', engineName: 'Aurora MySQL' });
+  render({ rows: [row(1, { queryType: 'SELECT' }), update, moved] });
+  const [typeSelect, engineSelect] = container.querySelectorAll('.mock-select');
+  expect(typeSelect.getAttribute('aria-label')).toBe('Filter by query type');
+  expect([...typeSelect.options].map(o => o.textContent)).toEqual(['Any query type', 'SELECT', 'UPDATE']);
+  expect([...engineSelect.options].map(o => o.textContent)).toEqual(['Any engine', 'Aurora MySQL', 'DynamoDB']);
+  const choose = (el, value) => act(() => {
+    el.value = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  choose(engineSelect, 'aurora_mysql');
+  expect(bodyRows().map(r => r.dataset.queryId)).toEqual([update.queryId, moved.queryId]);
+  choose(typeSelect, 'UPDATE');
+  expect(bodyRows().map(r => r.dataset.queryId)).toEqual([update.queryId]);
+  expect(container.querySelector('.mock-counter').textContent).toBe('(1 of 3)');
+  choose(engineSelect, '');
+  choose(typeSelect, '');
+  expect(bodyRows()).toHaveLength(3);
+});
+
+test('each row shows its query type', () => {
+  render({ rows: [row(1, { queryType: 'SELECT' }), row(2)] });
+  const type = id => container.querySelector(`tr[data-query-id="${id}"] [data-col="type"]`).textContent;
+  expect(type(row(1).queryId)).toBe('SELECT');
+  expect(type(row(2).queryId)).toBe('—');
 });

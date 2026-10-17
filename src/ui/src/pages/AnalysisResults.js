@@ -44,6 +44,7 @@ import QueryRoutingTable from "../components/QueryRoutingTable";
 import CloseCallCallout from "../components/CloseCallCallout";
 import UnservableQueriesCallout from "../components/UnservableQueriesCallout";
 import MigrationWavePlan from "../components/MigrationWavePlan";
+import ExecutiveSummaryStats from "../components/ExecutiveSummaryStats";
 import DeliverablesPanel from "../components/DeliverablesPanel";
 import { buildQueryRoutingRows } from "../utils/queryRouting";
 import { getCacheOverlay, ownerDistribution, formatCacheLayerLine, cacheOverlayNotes, targetEngineEntries, resolveCostBreakdown, ownerSchemaDesigns, cacheAccessPatternCount, addCacheOverlayNode, cacheLayerAccessPatterns } from "../utils/cacheLayer";
@@ -1894,8 +1895,18 @@ const AnalysisResultsPage = memo(() => {
               {t('analysis-results.header.title')}
             </Header>
 
-            {/* Executive Summary */}
-            <Container header={<Header variant="h2">{t('analysis-results.executive-summary.title')}</Header>}>
+            {/* Deliverables (#957, #1028): three download buttons, first. */}
+            <DeliverablesPanel
+              files={deliverables.files}
+              loading={deliverables.loading}
+              error={deliverables.error}
+              baseUrl={ApiConfigurations.baseUrl}
+              t={t}
+            />
+
+            {/* Executive Summary. #1028: the access-pattern count sits below
+                the database name; a cost tile with no figure is left out. */}
+            <Container id="executive-summary-section" header={<Header variant="h2">{t('analysis-results.executive-summary.title')}</Header>}>
               <SpaceBetween size="m">
                 <Box variant="p" fontSize="body-m">
                   {synthesis?.summary || 'No summary available.'}
@@ -1907,113 +1918,66 @@ const AnalysisResultsPage = memo(() => {
                     })}
                   />
                 )}
-                <ColumnLayout columns={4} variant="text-grid">
-                  <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.database')}</Box>
-                    <Box fontSize="heading-m" fontWeight="bold">{synthesis?.database_name || '—'}</Box>
-                  </Box>
-                  <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.target-engines')}</Box>
-                    <Box fontSize="heading-m">
-                      <SpaceBetween direction="horizontal" size="xxs">
-                        {/* #358: the cache layer is listed here too (labeled
-                            distinctly, e.g. "ElastiCache (cache layer)") -- it
-                            owns no queries, but it is still a target engine
-                            the deliverables name and price. */}
-                        {targetEngines.map(({ engine, isCacheLayer }) => (
-                          <Badge key={engine} color={ENGINE_BADGE_COLORS[engine] || 'grey'}>
-                            {ENGINE_LABELS[engine] || engine}
-                            {isCacheLayer ? t('cache-layer.engine-badge-suffix', { defaultValue: ' (cache layer)' }) : ''}
-                          </Badge>
-                        ))}
-                      </SpaceBetween>
-                    </Box>
-                    {/* #296: additional cache-layer stats (reads fronted, %
-                        of calls) shown as a note below the badges above. */}
-                    {cacheLayerLine && (
-                      <Box fontSize="body-s" color="text-body-secondary" padding={{ top: 'xxs' }}>
-                        {cacheLayerLine}
+                <ExecutiveSummaryStats
+                  t={t}
+                  databaseName={synthesis?.database_name}
+                  accessPatternCount={totalAccessPatterns}
+                  ownerQueryCount={ownerQueryCount}
+                  cachePatternCount={cachePatternCount}
+                  projectedCost={projectedCost}
+                  costBaseline={costBaseline}
+                  targetEngines={(
+                    <>
+                      <Box fontSize="heading-m">
+                        <SpaceBetween direction="horizontal" size="xxs">
+                          {/* #358: the cache layer is listed here too (labeled
+                              distinctly, e.g. "ElastiCache (cache layer)") -- it
+                              owns no queries, but it is still a target engine
+                              the deliverables name and price. */}
+                          {targetEngines.map(({ engine, isCacheLayer }) => (
+                            <Badge key={engine} color={ENGINE_BADGE_COLORS[engine] || 'grey'}>
+                              {ENGINE_LABELS[engine] || engine}
+                              {isCacheLayer ? t('cache-layer.engine-badge-suffix', { defaultValue: ' (cache layer)' }) : ''}
+                            </Badge>
+                          ))}
+                        </SpaceBetween>
                       </Box>
-                    )}
-                    {/* #424: the gate's cache_overlay (assigned at the
-                        assignment gate) and this one (after schema design)
-                        can disagree -- the post-schema-design safety net
-                        drops cached reads the design doesn't cover. Each
-                        note already states its own before/after numbers and
-                        the reason, so it is shown verbatim, not summarized.
-                        #459: cacheOverlayNotes reads safety_net_notes only --
-                        never the full notes field, which also carries
-                        customer-edit notes (full query hashes) and the
-                        legacy-migration note. */}
-                    {cacheOverlayNotes(cacheOverlay).map((note, idx) => (
-                      <Box
-                        key={idx}
-                        fontSize="body-s"
-                        color="text-status-warning"
-                        padding={{ top: 'xxs' }}
-                      >
-                        {note}
-                      </Box>
-                    ))}
-                  </Box>
-                  <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.projected-cost')}</Box>
-                    <Box fontSize="heading-m" fontWeight="bold">
-                      {projectedCost > 0 ? `$${projectedCost.toFixed(2)}/mo` : '—'}
-                    </Box>
-                  </Box>
-                  <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.current-cost')}</Box>
-                    <Box fontSize="heading-m" fontWeight="bold">
-                      {costBaseline.known ? costBaseline.currentCostStat : t('analysis-results.executive-summary.cost-baseline-unknown')}
-                    </Box>
-                  </Box>
-                  <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.savings')}</Box>
-                    <Box fontSize="heading-m" fontWeight="bold">
-                      {costBaseline.known ? costBaseline.savingsStat : t('analysis-results.executive-summary.savings-unknown')}
-                    </Box>
-                  </Box>
-                  <Box>
-                    <Box variant="awsui-key-label">{t('analysis-results.executive-summary.access-patterns')}</Box>
-                    <Box fontSize="heading-m" fontWeight="bold">
-                      {totalAccessPatterns > 0 ? totalAccessPatterns : ownerQueryCount || '—'}
-                    </Box>
-                    {/* #361: access patterns and the Query flow's query count
-                        don't always match (relational engines model as tables,
-                        not patterns; several queries can converge into one
-                        pattern) -- say so instead of leaving the gap
-                        unexplained. */}
-                    {totalAccessPatterns > 0 && ownerQueryCount > 0 && totalAccessPatterns !== ownerQueryCount && (
-                      <Box fontSize="body-s" color="text-body-secondary" padding={{ top: 'xxs' }}>
-                        {t('analysis-results.executive-summary.access-patterns-of-queries', { count: ownerQueryCount })}
-                      </Box>
-                    )}
-                    {/* #361: the cache layer's own patterns are real, but
-                        never owned workload -- call them out separately
-                        instead of folding them into the total/pie above. */}
-                    {cachePatternCount > 0 && (
-                      <Box fontSize="body-s" color="text-body-secondary" padding={{ top: 'xxs' }}>
-                        {t('analysis-results.executive-summary.cache-patterns-note', { count: cachePatternCount })}
-                      </Box>
-                    )}
-                  </Box>
-                </ColumnLayout>
+                      {/* #296: additional cache-layer stats (reads fronted, %
+                          of calls) shown as a note below the badges above. */}
+                      {cacheLayerLine && (
+                        <Box fontSize="body-s" color="text-body-secondary" padding={{ top: 'xxs' }}>
+                          {cacheLayerLine}
+                        </Box>
+                      )}
+                      {/* #424: the gate's cache_overlay (assigned at the
+                          assignment gate) and this one (after schema design)
+                          can disagree -- the post-schema-design safety net
+                          drops cached reads the design doesn't cover. Each
+                          note already states its own before/after numbers and
+                          the reason, so it is shown verbatim, not summarized.
+                          #459: cacheOverlayNotes reads safety_net_notes only --
+                          never the full notes field, which also carries
+                          customer-edit notes (full query hashes) and the
+                          legacy-migration note. */}
+                      {cacheOverlayNotes(cacheOverlay).map((note, idx) => (
+                        <Box
+                          key={idx}
+                          fontSize="body-s"
+                          color="text-status-warning"
+                          padding={{ top: 'xxs' }}
+                        >
+                          {note}
+                        </Box>
+                      ))}
+                    </>
+                  )}
+                />
               </SpaceBetween>
             </Container>
 
-            {/* Deliverables (#957): download the job's deliverables/ folder. */}
-            <DeliverablesPanel
-              files={deliverables.files}
-              loading={deliverables.loading}
-              error={deliverables.error}
-              baseUrl={ApiConfigurations.baseUrl}
-              t={t}
-            />
-
             {/* Query Flow (Sankey) */}
             {sankeyData && (
-              <Container header={
+              <Container id="query-flow-section" header={
                 <Header variant="h2" description={t('analysis-results.query-flow.description')}>
                   {t('analysis-results.query-flow.title')}
                 </Header>
@@ -2026,41 +1990,9 @@ const AnalysisResultsPage = memo(() => {
               </Container>
             )}
 
-            {/* Queries on a fallback engine (#729): where each landed and why,
-                its gates, a redesign hint and the assignment review that
-                re-runs. Warning first, as in both reports. */}
-            <UnservableQueriesCallout
-              synthesis={resultsData?.synthesis}
-              jobId={jobId}
-              onOpen={fetchQueryJourney}
-              t={t}
-            />
-
-            {/* Close calls (#730): queries a kept engine could serve almost
-                as well, with the way into each one's decision trace and the
-                assignment review that moves them. */}
-            <CloseCallCallout
-              synthesis={resultsData?.synthesis}
-              jobId={jobId}
-              onOpen={fetchQueryJourney}
-              t={t}
-            />
-
-            {/* Query routing (#822): every query, and the way into its
-                journey and decision trace without schema design. */}
-            <QueryRoutingTable
-              rows={queryRoutingRows}
-              loading={queryJourneyList.loading}
-              error={queryJourneyList.error}
-              hasLedger={routingHistoryRecorded(resultsData?.synthesis)}
-              truncated={queryJourneyList.truncated}
-              onOpen={fetchQueryJourney}
-              t={t}
-            />
-
             {/* Cost Breakdown */}
             {costBreakdown.length > 0 && (
-              <Container header={<Header variant="h2" description={t('analysis-results.cost-breakdown.description')}>{t('analysis-results.cost-breakdown.title')}</Header>}>
+              <Container id="cost-breakdown-section" header={<Header variant="h2" description={t('analysis-results.cost-breakdown.description')}>{t('analysis-results.cost-breakdown.title')}</Header>}>
                 <SpaceBetween size="m">
                   <ColumnLayout columns={costBreakdown.length} variant="text-grid">
                     {costBreakdown.map((cb, idx) => {
@@ -2095,6 +2027,39 @@ const AnalysisResultsPage = memo(() => {
             {/* Migration roadmap (#957): report.json's waves, the same ones the
                 PDF and the engineering report show. */}
             <MigrationWavePlan synthesis={synthesis} t={t} />
+
+            {/* Queries on a fallback engine (#729): where each landed and why,
+                its gates, a redesign hint and the assignment review that
+                re-runs. Warning first, as in both reports. */}
+            <UnservableQueriesCallout
+              synthesis={resultsData?.synthesis}
+              jobId={jobId}
+              onOpen={fetchQueryJourney}
+              t={t}
+            />
+
+            {/* Close calls (#730): queries a kept engine could serve almost
+                as well, with the way into each one's decision trace and the
+                assignment review that moves them. */}
+            <CloseCallCallout
+              synthesis={resultsData?.synthesis}
+              jobId={jobId}
+              onOpen={fetchQueryJourney}
+              t={t}
+            />
+
+            {/* Query routing (#822): every query, and the way into its
+                journey and decision trace without schema design. #1028:
+                collapsed when the page opens. */}
+            <QueryRoutingTable
+              rows={queryRoutingRows}
+              loading={queryJourneyList.loading}
+              error={queryJourneyList.error}
+              hasLedger={routingHistoryRecorded(resultsData?.synthesis)}
+              truncated={queryJourneyList.truncated}
+              onOpen={fetchQueryJourney}
+              t={t}
+            />
 
             {/* ============================================ */}
             {/* Access Pattern Explorer                      */}

@@ -5,7 +5,7 @@
  * facts already hold: the engine from the journey, and why a query's routing
  * is listed from `facts.query_trace.listed_queries` (never recomputed here).
  */
-import { buildQueryRoutingRows, filterQueryRoutingRows, queryExcerpt } from '../queryRouting';
+import { buildQueryRoutingRows, filterQueryRoutingRows, queryExcerpt, queryRoutingFilterOptions } from '../queryRouting';
 import { routingHistoryRecorded, routingKindsById } from '../reportFacts';
 
 const journeys = [
@@ -82,4 +82,39 @@ test('routingHistoryRecorded follows facts.query_trace.has_ledger', () => {
   expect(routingHistoryRecorded({ facts: { query_trace: { has_ledger: false } } })).toBe(false);
   expect(routingHistoryRecorded({ facts: {} })).toBe(false);
   expect(routingHistoryRecorded(null)).toBe(false);
+});
+
+// #1028: the query routing section is the query explorer every run has, with
+// or without schema design: search by text, and narrow by query type and engine.
+const typed = [
+  { query_id: 'q1', source: { query_text: 'SELECT 1 FROM wp_posts', query_type: 'SELECT', tables_accessed: ['wp_posts'] }, assignment: { assigned_engine: 'dynamodb' } },
+  { query_id: 'q2', source: { query_text: 'UPDATE wp_posts SET a = ?', query_type: 'UPDATE', tables_accessed: ['wp_posts'] }, assignment: { assigned_engine: 'aurora_mysql' } },
+  { query_id: 'q3', source: { query_text: 'SELECT 2 FROM wp_options', query_type: 'SELECT', tables_accessed: ['wp_options'] }, assignment: { assigned_engine: 'aurora_mysql' } },
+  { query_id: 'q4', source: { query_text: 'SELECT 3' }, assignment: null },
+];
+
+test('a row carries the collector\'s query type, or null without one', () => {
+  const rows = buildQueryRoutingRows(typed, new Map(), labels);
+  expect(rows.map(r => r.queryType)).toEqual(['SELECT', 'UPDATE', 'SELECT', null]);
+});
+
+test('the query type and engine filters narrow the rows, together and with the text', () => {
+  const rows = buildQueryRoutingRows(typed, new Map(), labels);
+  const ids = (...args) => filterQueryRoutingRows(rows, ...args).map(r => r.queryId);
+  expect(ids('', 'all', { queryType: 'SELECT' })).toEqual(['q1', 'q3']);
+  expect(ids('', 'all', { engine: 'aurora_mysql' })).toEqual(['q2', 'q3']);
+  expect(ids('', 'all', { queryType: 'SELECT', engine: 'aurora_mysql' })).toEqual(['q3']);
+  expect(ids('wp_posts', 'all', { engine: 'aurora_mysql' })).toEqual(['q2']);
+  expect(ids('update', 'all')).toEqual(['q2']);
+  expect(ids('', 'all', {})).toEqual(['q1', 'q2', 'q3', 'q4']);
+  expect(ids('', 'all', { queryType: null, engine: null })).toEqual(['q1', 'q2', 'q3', 'q4']);
+});
+
+test('the filter options are the distinct query types and engines the rows hold, sorted', () => {
+  const rows = buildQueryRoutingRows(typed, new Map(), labels);
+  expect(queryRoutingFilterOptions(rows)).toEqual({
+    queryTypes: ['SELECT', 'UPDATE'],
+    engines: [{ engine: 'aurora_mysql', engineName: 'Aurora MySQL' }, { engine: 'dynamodb', engineName: 'DynamoDB' }],
+  });
+  expect(queryRoutingFilterOptions([])).toEqual({ queryTypes: [], engines: [] });
 });

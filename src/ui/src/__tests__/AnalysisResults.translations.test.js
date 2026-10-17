@@ -20,8 +20,8 @@ const PAGES = [
   {
     name: 'DeliverablesPanel.js',
     file: '../components/DeliverablesPanel.js',
-    canaryKey: 'analysis-results.deliverables.title',
-    canaryValue: 'Deliverables',
+    canaryKey: 'analysis-results.deliverables.button.executive-summary',
+    canaryValue: 'Executive Summary',
   },
   {
     // #269 round-1 review: extended to also cover the Assignment review page,

@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import Alert from "@cloudscape-design/components/alert";
 import Box from "@cloudscape-design/components/box";
 import SpaceBetween from "@cloudscape-design/components/space-between";
@@ -14,9 +14,28 @@ import { closeCallsOf } from "../utils/reportFacts";
  * (`onOpen`, the page's query-journey opener), and the assignment review link
  * is where the customer moves them. It only formats the facts (ADR-032).
  *
+ * A short banner (#1028): each pair names its first SHOWN_IDS closest queries,
+ * then "+N more" (the rest of the ids the facts list) expands to the rest. A
+ * link shows the first SHORT_ID_CHARS characters of the id; its tooltip, label
+ * and target keep the full id.
+ *
  * Callers pass `t` (the page's own `useTranslation` function), like
  * QueryRoutingTable.
  */
+
+const SHOWN_IDS = 3;
+const SHORT_ID_CHARS = 5;
+
+const INLINE_TOGGLE_STYLE = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  margin: 0,
+  font: 'inherit',
+  color: 'inherit',
+  cursor: 'pointer',
+  textDecoration: 'underline',
+};
 
 function gapText(pair, t) {
   if (pair.min_gap === pair.max_gap) {
@@ -52,40 +71,66 @@ function headerText(cc, t) {
     : head;
 }
 
+function ClosestQueries({ pair, onOpen, t }) {
+  const [open, setOpen] = useState(false);
+  const ids = pair.query_ids || [];
+  const shown = open ? ids : ids.slice(0, SHOWN_IDS);
+  const rest = ids.slice(SHOWN_IDS);
+  // The toggle stays mounted in the same place, so focus stays on it.
+  return (
+    <SpaceBetween direction="horizontal" size="xs">
+      <span>{t('analysis-results.close-calls.closest')}</span>
+      {shown.map(qid => (
+        <Link
+          key={qid}
+          ariaLabel={t('analysis-results.close-calls.open-label', { id: qid })}
+          onFollow={(e) => { e.preventDefault(); onOpen(qid); }}
+        >
+          <span style={{ fontFamily: 'monospace' }} title={qid}>{qid.slice(0, SHORT_ID_CHARS)}</span>
+        </Link>
+      ))}
+      {(open || rest.length === 0) && pair.more_query_count > 0 && (
+        <span>{t('analysis-results.close-calls.more', { count: pair.more_query_count })}</span>
+      )}
+      {rest.length > 0 && (
+        <button
+          type="button"
+          style={INLINE_TOGGLE_STYLE}
+          aria-expanded={open}
+          aria-label={open ? undefined : t('analysis-results.close-calls.show-more-label', { count: rest.length })}
+          onClick={() => setOpen(v => !v)}
+        >
+          {open
+            ? t('analysis-results.close-calls.show-fewer')
+            : t('analysis-results.close-calls.show-more', { count: rest.length })}
+        </button>
+      )}
+    </SpaceBetween>
+  );
+}
+
 const CloseCallCallout = memo(({ synthesis, jobId, onOpen, t }) => {
   const cc = closeCallsOf(synthesis);
   if (!cc) return null;
   return (
-    <Alert
-      type="info"
-      header={headerText(cc, t)}
-    >
-      <SpaceBetween size="s">
-        <Box>{t('analysis-results.close-calls.intro', { margin: cc.margin_points })}</Box>
-        {cc.engine_pairs.map(pair => (
-          <Box key={`${pair.engine}-${pair.alternative}`}>
-            <div>{pairText(pair, cc.margin_points, t)}</div>
-            <SpaceBetween direction="horizontal" size="xs">
-              <span>{t('analysis-results.close-calls.closest')}</span>
-              {(pair.query_ids || []).map(qid => (
-                <Link
-                  key={qid}
-                  ariaLabel={t('analysis-results.close-calls.open-label', { id: qid })}
-                  onFollow={(e) => { e.preventDefault(); onOpen(qid); }}
-                >
-                  <span style={{ fontFamily: 'monospace' }}>{qid}</span>
-                </Link>
-              ))}
-              {pair.more_query_count > 0 && (
-                <span>{t('analysis-results.close-calls.more', { count: pair.more_query_count })}</span>
-              )}
-            </SpaceBetween>
-          </Box>
-        ))}
-        <Box>{t('analysis-results.close-calls.override')}</Box>
-        <Link href={`/analysis/assignments/${jobId}`}>{t('analysis-results.close-calls.assignment-link')}</Link>
-      </SpaceBetween>
-    </Alert>
+    <div id="close-calls-section">
+      <Alert
+        type="info"
+        header={headerText(cc, t)}
+      >
+        <SpaceBetween size="s">
+          <Box>{t('analysis-results.close-calls.intro', { margin: cc.margin_points })}</Box>
+          {cc.engine_pairs.map(pair => (
+            <Box key={`${pair.engine}-${pair.alternative}`}>
+              <div>{pairText(pair, cc.margin_points, t)}</div>
+              <ClosestQueries pair={pair} onOpen={onOpen} t={t} />
+            </Box>
+          ))}
+          <Box>{t('analysis-results.close-calls.override')}</Box>
+          <Link href={`/analysis/assignments/${jobId}`}>{t('analysis-results.close-calls.assignment-link')}</Link>
+        </SpaceBetween>
+      </Alert>
+    </div>
   );
 });
 

@@ -17481,6 +17481,43 @@
                       "type": "string"
                     }
                   },
+                  "gate_parts": {
+                    "required": false,
+                    "schema": {
+                      "kind": "anyOf",
+                      "members": [
+                        {
+                          "items": {
+                            "kind": "object",
+                            "properties": {
+                              "items": {
+                                "required": false,
+                                "schema": {
+                                  "items": {
+                                    "kind": "scalar",
+                                    "type": "string"
+                                  },
+                                  "kind": "array"
+                                }
+                              },
+                              "text": {
+                                "required": true,
+                                "schema": {
+                                  "kind": "scalar",
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "kind": "array"
+                        },
+                        {
+                          "kind": "scalar",
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
                   "homogeneity": {
                     "required": false,
                     "schema": {
@@ -20327,8 +20364,8 @@
         }
       }
     },
-    "schema_hash": "0830f9a352201c73afe85ac413892909ab9384890931ecc27b2b888b1fc8b8c0",
-    "version": "1.26"
+    "schema_hash": "4eba17fcc4e341a2933204056483a2134d26c80a74e6d1cd11eddc3430a00b15",
+    "version": "1.27"
   },
   "triage_output.TriageOutputContract": {
     "fields": {

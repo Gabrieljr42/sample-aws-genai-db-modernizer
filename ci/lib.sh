@@ -20,5 +20,5 @@ build_ui() {  # Install UI deps and build the production bundle (src/ui/build/).
   # No registry is hardcoded here: locally npm may be configured to use an internal
   # mirror (.npmrc / NPM_CONFIG_REGISTRY), and CI uses the public default. Both are
   # respected by leaving npm's registry resolution alone.
-  ( cd "$REPO_ROOT/src/ui" && npm ci --no-audit --no-fund && REACT_APP_API_URL=http://localhost:8000/api/v1/ CI=false npx react-scripts build )
+  ( cd "$REPO_ROOT/src/ui" && npm ci --no-audit --no-fund && REACT_APP_API_URL="http://localhost:${E2E_API_PORT:-8000}/api/v1/" CI=false npx react-scripts build )
 }
