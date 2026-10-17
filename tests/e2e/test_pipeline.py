@@ -177,6 +177,33 @@ def test_contract_artifacts_validate(run: PipelineResult) -> None:
     assert run.report["errors"] == []
 
 
+def test_every_versioned_artifact_is_a_registered_contract_file(run: PipelineResult) -> None:
+    """Each file the job wrote that carries a ``contract_version`` is in the contract
+    file registry (``src/shared/contract_versioning.py``), so every store read checks its
+    MAJOR (ADR-008 Decision 4, #971), and the stored version is one this code reads.
+    Model I/O (``MODEL_IO_PATTERNS``: requests, inputs, responses, group drafts) is a
+    model session's own file, not a stored contract, and is skipped."""
+    from src.shared.contract_versioning import check_artifact, contract_for_artifact, is_model_io
+
+    job_dir = run.job_dir()
+    seen = []
+    for path in sorted(job_dir.rglob("*.json")):
+        data = json.loads(path.read_text())
+        if not (isinstance(data, dict) and "contract_version" in data):
+            continue
+        key = str(path.relative_to(run.artifact_root))
+        if is_model_io(key):
+            continue
+        assert contract_for_artifact(key) is not None, (
+            f"{key} carries contract_version {data['contract_version']!r} but no "
+            "contract file registry entry"
+        )
+        check_artifact(key, data)
+        seen.append(key)
+    assert any(k.endswith("/collector/output.json") for k in seen)
+    assert any(k.endswith("/report.json") for k in seen)
+
+
 @pytest.mark.deterministic
 def test_dynamodb_check_costs_on_a_real_split_group(run: PipelineResult, tmp_path) -> None:
     """External-mode DynamoDB group drafts can pass the skill's cost check (#198).

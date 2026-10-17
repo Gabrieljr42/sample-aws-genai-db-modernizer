@@ -324,11 +324,16 @@ def ingest_offline_collection(store, job_id: str, database_name: str, raw_input:
         _build_views,
     )
     from src.contracts.collector_input import CollectorInput
+    from src.contracts.collector_output import CollectorOutputContract
+    from src.shared.contract_versioning import carries_contract
     from src.tools.database.offline_parser import parse_offline_collection
     from src.tools.validation.ingestion_limits import check_collection_counts
 
-    contract_version = raw_input.get("contract_version")
-    is_contract = isinstance(contract_version, str) and contract_version.startswith("3")
+    # A stored collector output carries a contract_version (ADR-008 Decision 4: a
+    # different MAJOR is refused); a raw collection carries none.
+    is_contract = carries_contract(
+        raw_input, CollectorOutputContract, artifact=f"{database_name}/{job_id} upload"
+    )
 
     if is_contract:
         # Non-contract input is counted inside parse_offline_collection (#142);

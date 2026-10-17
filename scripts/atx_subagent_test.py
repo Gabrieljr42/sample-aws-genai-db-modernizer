@@ -111,17 +111,19 @@ if not store.exists(collector_key):
     fail("Collector artifact not written")
 
 from src.contracts.collector_output import CollectorOutputContract
+from src.shared.contract_versioning import load_contract
+from src.storage.local_store import LocalArtifactStore
 
 new_collector = store.read_json(collector_key)
 try:
-    CollectorOutputContract.model_validate(new_collector)
+    load_contract(CollectorOutputContract, new_collector, artifact=collector_key)
     ok("Collector output validates against contract")
 except Exception as e:  # noqa: BLE001
     fail(f"Collector contract validation failed: {e}")
 
 # Determinism vs reference collector
-ref_collector = json.loads(
-    (REPO / "artifacts" / REFERENCE_DB / REFERENCE_JOB / "collector" / "output.json").read_text()
+ref_collector = LocalArtifactStore(str(REPO / "artifacts")).read_json(
+    f"{REFERENCE_DB}/{REFERENCE_JOB}/collector/output.json"
 )
 nc = normalize(new_collector, REFERENCE_JOB, job_id)
 rc = normalize(ref_collector, REFERENCE_JOB, job_id)
@@ -143,15 +145,13 @@ from src.contracts.triage_output import TriageOutputContract
 
 new_triage = store.read_json(triage_key)
 try:
-    TriageOutputContract.model_validate(new_triage)
+    load_contract(TriageOutputContract, new_triage, artifact=triage_key)
     ok("Triage output validates against contract")
 except Exception as e:  # noqa: BLE001
     fail(f"Triage contract validation failed: {e}")
 
-ref_triage = json.loads(
-    (
-        REPO / "artifacts" / REFERENCE_DB / REFERENCE_JOB / "referee-triage" / "triage.json"
-    ).read_text()
+ref_triage = LocalArtifactStore(str(REPO / "artifacts")).read_json(
+    f"{REFERENCE_DB}/{REFERENCE_JOB}/referee-triage/triage.json"
 )
 ntr = normalize(new_triage, REFERENCE_JOB, job_id)
 rtr = normalize(ref_triage, REFERENCE_JOB, job_id)

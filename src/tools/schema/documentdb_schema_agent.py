@@ -32,6 +32,7 @@ from src.contracts.documentdb_model_output import DocumentDBModelOutputContract
 from src.contracts.dynamodb_pe_review import ROUTING_FLAGS_DESCRIPTION
 from src.contracts.model_flag import RoutingFlagEntry
 from src.contracts.schema_design_input import project_schema_design_input
+from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
 from src.tools.analysis.documentdb_analysis_tools import (
     DOCUMENTDB_TARGET_CLUSTER,
@@ -211,10 +212,10 @@ def load_agent_input() -> dict:
 
     with open(collector_path, encoding="utf-8") as f:
         raw_collector = json.load(f)
-    collector = CollectorOutputContract.model_validate(raw_collector)
+    collector = load_contract(CollectorOutputContract, raw_collector, artifact=collector_path)
 
     with open(analysis_path, encoding="utf-8") as f:
-        analysis = AnalysisOutputContract.model_validate(json.load(f))
+        analysis = load_contract(AnalysisOutputContract, json.load(f), artifact=analysis_path)
 
     agent_collector, agent_analysis, agent_context = project_schema_design_input(
         collector, analysis

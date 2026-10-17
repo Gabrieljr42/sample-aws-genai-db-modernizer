@@ -144,7 +144,7 @@ MAJOR means a breaking change (incompatible). MINOR means a backward-compatible 
 
 ### 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR
 
-*Amended (2026-10-16, #970):* the original decision called for version adapters and a version detector. None of that was built, and no contract has shipped a MAJOR bump, so there is nothing to adapt. A reader that loads a stored artifact accepts any MINOR of the MAJOR it was written for and refuses a different MAJOR with a clear error naming the contract, the stored version and the supported MAJOR. An adapter is written only when a contract first ships a MAJOR bump, in the same change that bumps it.
+*Amended (2026-10-16, #970; corrected 2026-10-17, #971):* the original decision called for version adapters and a version detector; none of that was built. A reader that loads a stored artifact accepts any MINOR of the MAJOR it was written for and refuses a different MAJOR with a clear error naming the contract, the stored version and the supported MAJOR. A different MAJOR is read only through an adapter, and an adapter should ship in the same change as the bump. That did not happen once: `RealityCheckOutputContract` went from 1.13 to 2.0 in #790 (it removed the always-empty `lightweight_recommendations`) with no adapter, the same day this amendment said no contract had shipped a MAJOR bump. Its 1.x adapter was added afterwards, in #971, so reality checks saved before 2.0 still load; it is the only adapter.
 
 ### 5. Optional fields by default
 
@@ -467,6 +467,18 @@ class CollectorOutput(BaseModel):
 
 The first version of this ADR described `src/contracts/adapters/`, a `src/contracts/version_detector.py` module and a `load_checkpoint` that adapted old data. None of them exist, and Decision 4 replaces them: a reader accepts any MINOR of the same MAJOR and refuses a different MAJOR. When a contract first ships a MAJOR bump, its migration (for example renaming a field) is written as an adapter in the same change, with a test that loads an artifact saved under the old MAJOR.
 
+The check lives in `src/shared/contract_versioning.py` (#971):
+
+- `load_contract(Model, data, artifact=...)` checks the stored version and parses the model. The loaded model says the model's current version, so a model loaded at an older MINOR and written back (the `.meta` progression, an approved assignment) stores today's version.
+- `check_artifact(path, data)` checks a raw dict by its path against a registry of contract files (`collector/output.json`, `analysis-<engine>/analysis.json`, `assignment/v<N>/assignment.json`, ...). Every `ArtifactStore.read_json` returns what it returns, so the raw-dict reads of contract files are checked in the store.
+- `carries_contract(data, Model, artifact=...)` tells an uploaded collector output (it has a `contract_version`) from a raw collection (it has none), and refuses a collector output at another MAJOR rather than parsing it as a collection.
+- A stored file with no `contract_version` (written before #972) is read as legacy, with a debug log.
+- Model I/O (`MODEL_IO_PATTERNS`: `llm_requests/`, `llm_responses/`, `llm_input.json`, `llm_response.json`, `partial_output.json`, group drafts and their inputs) is a model session's own file, not a stored contract, and is never checked: a model may echo any version. The writer that turns a response into a stored contract validates it and writes the contract's own version.
+
+A different MAJOR raises `ContractVersionError`, which names the artifact, the contract, the stored version and the current one in the server log; the API answers it with 409 and a plain message ("This assessment was saved by an incompatible version of the tool (contract 3.0, expected 2.*).") that names no path or code, and a job whose `.meta` progression is refused shows as FAILED with that message. The exception is a MAJOR listed in the module's `_ADAPTERS`, whose payload is turned into the current shape before it is read. One contract has shipped a MAJOR bump so far: `RealityCheckOutputContract` 2.0 (#790) removed the always-empty `lightweight_recommendations`, and its 1.x adapter drops that key, so a reality check saved before 2.0 still loads.
+
+The amendment's guards prove only that, with no adapter, a different MAJOR is refused and never read as the current one, and that the one adapter there is reads its saved files. That a MAJOR bump ships its adapter in the same change is checked in review, not by a test.
+
 ---
 
 ## Checkpoint Compatibility
@@ -584,11 +596,11 @@ Each decision names the guard test that fails when the code stops following it. 
 | 1. Every contract carries a `contract_version` | `tests/contract/test_written_contracts_versioned.py::test_every_written_model_carries_contract_version`<br>`tests/contract/test_written_contracts_legacy_load.py::test_a_file_written_before_the_version_still_loads`<br>`tests/unit/agents/referee/test_derived_versions_carry_contract_version.py`<br>none yet -- #1006 (five contracts still declare the version without the MAJOR.MINOR pattern)<br>none yet -- #973 (the DynamoDB decision trace is untyped) |
 | 2. The agent version is a separate field | `tests/contract/test_writers_take_version_from_model.py::test_no_writer_passes_a_contract_version_literal`<br>`tests/unit/agents/analysis/test_analysis_writes_the_model_version.py`<br>`tests/unit/tools/schema/aurora_common/test_delta_merge.py::test_the_output_version_is_the_engine_contract_default` |
 | 3. Contract versions are MAJOR.MINOR, and a shape change moves the version | `tests/contract/test_schema_snapshot.py::test_schema_snapshot_file_matches_a_fresh_rebuild`<br>`tests/unit/scripts/test_contract_schema_snapshot.py`<br>`tests/contract/test_value_set_snapshot.py::test_value_set_snapshot_matches_a_fresh_rebuild` |
-| 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR | none yet -- #971 |
+| 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR | `tests/unit/contracts/test_contract_versioning.py::test_the_same_major_at_a_higher_minor_is_accepted`<br>`tests/unit/contracts/test_contract_versioning.py::test_a_different_major_is_refused_naming_artifact_and_both_versions`<br>`tests/unit/contracts/test_contract_versioning.py::test_a_missing_version_is_accepted_as_legacy_with_a_debug_log`<br>`tests/unit/contracts/test_contract_versioning.py::test_a_progression_loaded_at_an_older_minor_is_written_back_at_the_current_one`<br>`tests/unit/contracts/test_contract_versioning.py::test_the_local_store_refuses_a_contract_file_at_another_major`<br>`tests/contract/test_reads_check_contract_version.py::test_no_artifact_read_validates_a_versioned_contract_directly`<br>`tests/contract/test_reads_check_contract_version.py::test_every_store_read_json_checks_the_artifact`<br>`tests/contract/test_reads_check_contract_version.py::test_the_registry_covers_every_written_contract`<br>`tests/contract/test_reads_check_contract_version.py::test_every_direct_json_file_read_checks_its_version`<br>`tests/e2e/test_pipeline.py::test_every_versioned_artifact_is_a_registered_contract_file` |
 | 5. Optional fields by default | `tests/unit/scripts/test_contract_schema_snapshot.py`<br>none yet -- #976 (`extra="forbid"` per contract) |
 | 6. Deprecate before removing | none yet -- #969 (no guard planned: removing a field already needs a MAJOR bump under Decision 3) |
 | 7. A single version is deployed at a time | none yet -- #969 (a deployment property; no code guard planned) |
-| Amendment 2026-10-16 (Decision 4, #970): adapters only when a MAJOR bump ships | none yet -- #971 |
+| Amendment 2026-10-16 (Decision 4, #970): adapters only when a MAJOR bump ships | `tests/unit/contracts/test_contract_versioning.py::test_a_different_major_is_refused_naming_artifact_and_both_versions`<br>`tests/unit/contracts/test_contract_versioning.py::test_a_reality_check_saved_at_1_x_loads_through_its_adapter`<br>`tests/unit/contracts/test_contract_versioning.py::test_a_reality_check_at_a_major_with_no_adapter_is_refused` |
 
 ---
 
@@ -705,6 +717,7 @@ Release v2.0.0 (user-facing, breaking changes)
 | 1.0 | 2026-02-02 | Architecture Team | Initial decision |
 | 1.1 | 2026-10-16 | Architecture Team | Numbered the decisions, added the Enforcement table, replaced the adapter decision with accept-MINOR/refuse-MAJOR readers (#970), replaced the version matrix with a pointer |
 | 1.2 | 2026-10-17 | Architecture Team | Decision 1 guarded: every contract written to disk carries a `contract_version` (#972) |
+| 1.3 | 2026-10-17 | Architecture Team | Decision 4 guarded: every artifact read checks the stored `contract_version` through `src/shared/contract_versioning.py` (#971). Corrected the Decision 4 amendment: `RealityCheckOutputContract` 2.0 (#790) had shipped a MAJOR bump without an adapter; its 1.x adapter is a retrofit in #971 |
 
 ---
 

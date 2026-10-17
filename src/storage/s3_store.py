@@ -7,6 +7,7 @@ import json
 import boto3
 import botocore.exceptions
 
+from src.shared.contract_versioning import check_artifact
 from src.storage.artifact_store import ArtifactStore
 
 
@@ -19,7 +20,9 @@ class S3ArtifactStore(ArtifactStore):
 
     def read_json(self, path: str) -> dict:
         response = self.s3.get_object(Bucket=self.bucket, Key=path)
-        return json.loads(response["Body"].read())  # type: ignore[no-any-return]
+        data = json.loads(response["Body"].read())
+        # ADR-008 Decision 4: refuse another MAJOR (an older one with an adapter is upgraded)
+        return check_artifact(path, data)  # type: ignore[no-any-return]
 
     def write_json(self, path: str, data: dict) -> None:
         self.s3.put_object(

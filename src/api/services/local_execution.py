@@ -13,6 +13,7 @@ from pathlib import Path
 
 from src.api.secret_guard import find_submitted_secrets, strip_secrets
 from src.report.deliverables import DELIVERABLES_DIR, FOLDER_FILENAMES
+from src.shared.contract_versioning import ContractVersionError
 
 logger = logging.getLogger(__name__)
 
@@ -935,6 +936,9 @@ class LocalExecutionService:
             return None
         try:
             phases = self._store.read_json(meta_path).get("phases", {})
+        except ContractVersionError as exc:
+            # The job list and status show the refusal instead of a stale RUNNING.
+            return ("FAILED", exc.public_message)
         except Exception:
             return None
 

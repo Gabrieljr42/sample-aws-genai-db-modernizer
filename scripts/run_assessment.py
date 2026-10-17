@@ -278,9 +278,15 @@ def phase_collect(collector_file: str, db_name: str | None, store) -> tuple[str,
     content = extract_json_object(raw_text, source=collector_file)
     input_data = json.loads(content)
 
-    is_contract = isinstance(input_data.get("contract_version"), str) and input_data[
-        "contract_version"
-    ].startswith("3")
+    from src.contracts.collector_output import CollectorOutputContract
+    from src.shared.contract_versioning import ContractVersionError, carries_contract
+
+    # A stored collector output carries a contract_version (ADR-008 Decision 4: same
+    # MAJOR only); a raw collection carries none.
+    try:
+        is_contract = carries_contract(input_data, CollectorOutputContract, artifact=collector_file)
+    except ContractVersionError as exc:
+        _error("collect", str(exc))
     is_raw = "collection_version" in input_data or isinstance(input_data.get("queries"), list)
 
     if is_contract:

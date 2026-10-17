@@ -27,6 +27,7 @@ from src.agents.schema_design.dynamodb_merge import (
     pattern_id_maps,
     rewrite_pattern_ids,
 )
+from src.shared.contract_versioning import ContractVersionError, stamp_artifact_version
 from src.storage.artifact_store import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -341,6 +342,8 @@ def merge_schema_groups(
         collector_key = f"{database_name}/{job_id}/collector/output.json"
         try:
             collector = store.read_json(collector_key)
+        except ContractVersionError:
+            raise  # an unreadable collector output fails the merge, not just its keys
         except Exception as exc:
             # Safe direction (only superset keys are kept, so more conflicts and
             # never collapsed rows), but say so: it explains surprise conflicts.
@@ -370,8 +373,10 @@ def merge_schema_groups(
     if excluded_queries:
         merged["excluded_queries"] = excluded_queries
 
-    # Write merged draft
-    store.write_json(f"{base_key}/schema_output.json", merged)
+    # Write merged draft (the version comes from the contract, not the drafts)
+    output_key = f"{base_key}/schema_output.json"
+    merged = stamp_artifact_version(output_key, merged)
+    store.write_json(output_key, merged)
 
     maps = pattern_id_maps(drafts) if engine == "dynamodb" else []
     _consolidate_design_traces(

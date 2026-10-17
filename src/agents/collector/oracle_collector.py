@@ -54,6 +54,7 @@ from src.contracts.collector_output import (
     TriggerEventType,
     View,
 )
+from src.shared.contract_versioning import load_contract
 from src.tools.aws.s3_storage import init_storage
 from src.tools.aws.ssm_executor import SSMExecutor
 from src.tools.database.oracle_tools import OracleRemoteCollector, _normalize_index_type
@@ -105,8 +106,10 @@ def collect(input_contract: CollectorInput) -> CollectorOutputContract:
 
     if ckpt.exists("output"):
         logger.info("Job %s: returning cached output", input_contract.job_id)
-        result: CollectorOutputContract = CollectorOutputContract.model_validate(
-            ckpt.load("output")
+        result: CollectorOutputContract = load_contract(
+            CollectorOutputContract,
+            ckpt.load("output"),
+            artifact=f"collector checkpoint {input_contract.job_id}/output",
         )
         return result
 

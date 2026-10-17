@@ -191,7 +191,7 @@ class CollectorOutput(BaseModel):
 
 - Old agents must work with new contracts (backward compatibility)
 - New agents must work with old contract versions (forward compatibility via Pydantic's `extra="ignore"`)
-- Version adapters handle MAJOR version migrations
+- Readers accept any MINOR of the MAJOR they were written for and refuse a different MAJOR: read a stored contract with `load_contract` from `src/shared/contract_versioning.py` (the artifact store checks raw-dict reads of contract files itself). A MAJOR bump ships its adapter in the same change (ADR-008 Decision 4)
 
 **See:** [ADR-008: Contract Versioning](https://github.com/aws-samples/sample-aws-genai-db-modernizer/blob/main/docs/architecture/decisions/ADR-008-contract-versioning.md)
 

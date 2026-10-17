@@ -8,6 +8,7 @@ import secrets
 import stat
 from pathlib import Path
 
+from src.shared.contract_versioning import check_artifact
 from src.storage.artifact_store import ArtifactStore
 
 
@@ -40,7 +41,9 @@ class LocalArtifactStore(ArtifactStore):
         if not (full_path + os.sep).startswith(base):
             raise ValueError(f"path escapes the artifact root: {path!r}")
         with open(full_path, encoding="utf-8") as f:
-            return json.load(f)  # type: ignore[no-any-return]
+            data = json.load(f)
+        # ADR-008 Decision 4: refuse another MAJOR (an older one with an adapter is upgraded)
+        return check_artifact(path, data)  # type: ignore[no-any-return]
 
     def write_json(self, path: str, data: dict) -> None:
         """Write ``data`` as JSON.

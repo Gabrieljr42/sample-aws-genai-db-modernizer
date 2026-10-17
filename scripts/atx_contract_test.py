@@ -118,10 +118,11 @@ ok("Collector output written")
 # ---------------------------------------------------------------------------
 print("\n2. Validate collector output against contract")
 from src.contracts.collector_output import CollectorOutputContract
+from src.shared.contract_versioning import check_artifact, load_contract
 
 new_collector = store.read_json(new_collector_key)
 try:
-    CollectorOutputContract.model_validate(new_collector)
+    load_contract(CollectorOutputContract, new_collector, artifact=new_collector_key)
     ok("Collector output validates against CollectorOutputContract")
 except Exception as e:  # noqa: BLE001
     fail(f"Collector output failed contract validation: {e}")
@@ -149,7 +150,7 @@ from src.contracts.triage_output import TriageOutputContract
 
 new_triage = store.read_json(new_triage_key)
 try:
-    TriageOutputContract.model_validate(new_triage)
+    load_contract(TriageOutputContract, new_triage, artifact=new_triage_key)
     ok("Triage output validates against TriageOutputContract")
 except Exception as e:  # noqa: BLE001
     fail(f"Triage output failed contract validation: {e}")
@@ -167,7 +168,7 @@ def normalize(obj, ref_job: str, new_job: str):
     return json.loads(text)
 
 
-ref_triage_data = json.loads(ref_triage.read_text())
+ref_triage_data = check_artifact(str(ref_triage), json.loads(ref_triage.read_text()))
 new_norm = normalize(new_triage, REFERENCE_JOB, job_id)
 ref_norm = normalize(ref_triage_data, REFERENCE_JOB, job_id)
 
@@ -181,7 +182,7 @@ for field in ("selected_agents", "skipped_agents", "signals", "deferred_agents")
         fail(f"Triage field '{field}' is NOT deterministic vs reference")
     ok(f"Triage '{field}' matches reference exactly")
 
-ref_collector_data = json.loads(ref_collector.read_text())
+ref_collector_data = check_artifact(str(ref_collector), json.loads(ref_collector.read_text()))
 new_c = normalize(new_collector, REFERENCE_JOB, job_id)
 ref_c = normalize(ref_collector_data, REFERENCE_JOB, job_id)
 

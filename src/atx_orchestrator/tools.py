@@ -41,6 +41,7 @@ from src.atx_orchestrator.runtime.job_plan import (
     register_steps_from_server,
 )
 from src.contracts.phase_models import Phase, PhaseStatus
+from src.shared.contract_versioning import load_contract
 
 logger = logging.getLogger(__name__)
 
@@ -603,9 +604,11 @@ def present_assignment_review(job_id: str, database_name: str) -> str:
 
     from src.agents.referee.assignment_overrides import load_assignment_for_edit
 
-    assignment = Assignment.model_validate(
+    assignment = load_contract(
+        Assignment,
         # legacy ElastiCache owners moved to their system-of-record engine (#296)
-        load_assignment_for_edit(store, database_name, job_id, version)[0]
+        load_assignment_for_edit(store, database_name, job_id, version)[0],
+        artifact=f"{database_name}/{job_id}/assignment/v{version}/assignment.json",
     )
     summary_md = render_assignment_summary(assignment)
 
@@ -684,9 +687,11 @@ def open_detailed_routing_review(job_id: str, database_name: str) -> str:
 
     from src.agents.referee.assignment_overrides import load_assignment_for_edit
 
-    assignment = Assignment.model_validate(
+    assignment = load_contract(
+        Assignment,
         # legacy ElastiCache owners moved to their system-of-record engine (#296)
-        load_assignment_for_edit(store, database_name, job_id, version)[0]
+        load_assignment_for_edit(store, database_name, job_id, version)[0],
+        artifact=f"{database_name}/{job_id}/assignment/v{version}/assignment.json",
     )
 
     # Try the platform HITL editable-table transport first.
@@ -847,9 +852,11 @@ def finalize_assignment_review(
             {"error": "No assignment found. Run the assessment core first.", "job_id": job_id}
         )
 
-    current = Assignment.model_validate(
+    current = load_contract(
+        Assignment,
         # legacy ElastiCache owners moved to their system-of-record engine (#296)
-        load_assignment_for_edit(store, database_name, job_id, version)[0]
+        load_assignment_for_edit(store, database_name, job_id, version)[0],
+        artifact=f"{database_name}/{job_id}/assignment/v{version}/assignment.json",
     )
 
     # Resolve overrides from whichever transport the customer used. Precedence:

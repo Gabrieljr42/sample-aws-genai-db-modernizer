@@ -16,6 +16,7 @@ Requirements: 7.1, 7.4
 from __future__ import annotations
 
 from src.contracts.agent_interaction_models import AgentAnswers, AgentQuestions
+from src.shared.contract_versioning import load_contract
 from src.storage.artifact_store import ArtifactStore
 
 
@@ -61,7 +62,7 @@ def read_answers(
     if not store.exists(path):
         return None
     data = store.read_json(path)
-    return AgentAnswers.model_validate(data)
+    return load_contract(AgentAnswers, data, artifact=path)
 
 
 def write_partial_output(

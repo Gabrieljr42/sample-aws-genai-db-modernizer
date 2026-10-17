@@ -21,6 +21,7 @@ from src.contracts.schema_revision_models import (
     SchemaVersionMeta,
     VerificationResult,
 )
+from src.shared.contract_versioning import load_contract
 from src.storage.artifact_store import ArtifactStore
 
 router = APIRouter(prefix="/api/v1/assessments", tags=["schema-revisions"])
@@ -98,7 +99,7 @@ def _read_version_meta(
     path = f"{db}/{job_id}/schema-{engine}/v{version}/version_meta.json"
     if store.exists(path):
         data = store.read_json(path)
-        return SchemaVersionMeta.model_validate(data)
+        return load_contract(SchemaVersionMeta, data, artifact=path)
     # Initial design run doesn't write version_meta — synthesize a default
     return SchemaVersionMeta(
         version=version,

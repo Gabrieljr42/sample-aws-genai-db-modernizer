@@ -15,6 +15,7 @@ from src.api.dependencies import database_name_param, job_id_param
 from src.api.secret_guard import refuse_credential_shapes
 from src.contracts.agent_interaction_models import AgentAnswers, AgentQuestions
 from src.contracts.assignment_models import ValidationResult
+from src.shared.contract_versioning import load_contract
 from src.storage.artifact_store import ArtifactStore
 
 router = APIRouter(prefix="/api/v1/assessments", tags=["agent-interaction"])
@@ -115,7 +116,7 @@ async def get_questions(
     if not store.exists(path):
         raise HTTPException(status_code=404, detail="No questions artifact found for this agent")
     data = store.read_json(path)
-    return AgentQuestions.model_validate(data)
+    return load_contract(AgentQuestions, data, artifact=path)
 
 
 # Free-text answers are stored (answers.json) or sent to a model: refuse one shaped like a
@@ -137,7 +138,7 @@ async def put_answers(
         raise HTTPException(status_code=404, detail="No questions artifact found for this agent")
 
     questions_data = store.read_json(q_path)
-    questions = AgentQuestions.model_validate(questions_data)
+    questions = load_contract(AgentQuestions, questions_data, artifact=q_path)
 
     answers = AgentAnswers(
         agent_type=questions.agent_type,
@@ -176,7 +177,7 @@ async def validate_single_answer(
         raise HTTPException(status_code=404, detail="No questions artifact found for this agent")
 
     questions_data = store.read_json(q_path)
-    questions = AgentQuestions.model_validate(questions_data)
+    questions = load_contract(AgentQuestions, questions_data, artifact=q_path)
 
     # Find the question by ID
     question = next(

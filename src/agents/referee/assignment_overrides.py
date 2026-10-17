@@ -63,6 +63,7 @@ from src.contracts.assignment_models import (
 )
 from src.contracts.move_ledger import MoveActor, MovePass, ReasonCode
 from src.shared.capability_labels import capability_gap_phrase
+from src.shared.contract_versioning import load_contract
 from src.shared.engine_names import SOURCE_ENGINE_DISPLAY_NAMES, display_engine
 from src.storage.assignment_versioning import (
     assignment_artifact_path,
@@ -544,7 +545,9 @@ def apply_assignment_overrides(
     ledger = loaded.ledger
     if ledger is None:  # pragma: no cover - new_version=True always builds one
         raise RuntimeError("customer gate: no move ledger for the new version")
-    current = Assignment.model_validate(raw)
+    current = load_contract(
+        Assignment, raw, artifact=assignment_artifact_path(database_name, job_id, current_version)
+    )
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     query_by_id = {q.get("query_id"): q for q in queries}
     cache = available_cache_engine(analysis_outputs) or "elasticache"
@@ -849,7 +852,7 @@ def mark_assignment_customer_approved(
     if version == 0:
         return None
     path = assignment_artifact_path(database_name, job_id, version)
-    current = Assignment.model_validate(store.read_json(path))
+    current = load_contract(Assignment, store.read_json(path), artifact=path)
     if current.status in (AssignmentStatus.CUSTOMER_MODIFIED, AssignmentStatus.CUSTOMER_APPROVED):
         return current
     # #972: rewritten by today's code, so it says today's version.

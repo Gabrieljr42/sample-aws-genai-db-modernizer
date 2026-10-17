@@ -126,11 +126,12 @@ header("4. Validate contracts")
 
 from src.contracts.collector_output import CollectorOutputContract  # noqa: E402
 from src.contracts.triage_output import TriageOutputContract  # noqa: E402
+from src.shared.contract_versioning import load_contract  # noqa: E402
 
 with open(ref_collector, encoding="utf-8") as f:
     collector_json = json.load(f)
 try:
-    CollectorOutputContract.model_validate(collector_json)
+    load_contract(CollectorOutputContract, collector_json, artifact=str(ref_collector))
 except Exception as e:
     fail(f"Collector reference fails CollectorOutputContract: {type(e).__name__}: {e}")
 ok("Collector reference validates against CollectorOutputContract")
@@ -138,7 +139,7 @@ ok("Collector reference validates against CollectorOutputContract")
 with open(ref_triage, encoding="utf-8") as f:
     triage_json = json.load(f)
 try:
-    TriageOutputContract.model_validate(triage_json)
+    load_contract(TriageOutputContract, triage_json, artifact=str(ref_triage))
 except Exception as e:
     fail(f"Triage reference fails TriageOutputContract: {type(e).__name__}: {e}")
 ok("Triage reference validates against TriageOutputContract")

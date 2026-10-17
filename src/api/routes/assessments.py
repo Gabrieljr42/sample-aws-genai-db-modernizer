@@ -27,6 +27,7 @@ from src.api.services.local_execution import (
     LocalExecutionService,
 )
 from src.api.services.local_s3 import LocalS3Service
+from src.shared.contract_versioning import ContractVersionError
 from src.shared.ranking import engine_confidence, main_engine
 from src.tools.validation.ingestion_limits import IngestionLimitError, check_file_size
 
@@ -636,6 +637,8 @@ def _summarize_artifact(summary: dict | None) -> str | None:
                     return f"Main engine: {top} ({main['workload_percent']}% of workload, {score})"
                 return f"Top recommendation: {top} ({score})"
             return "Synthesis complete"
+    except ContractVersionError:
+        raise  # a refusal reaches the user as a 409, never an empty summary
     except Exception:
         return None
 
@@ -718,6 +721,8 @@ def _extract_artifact_summary(database_name: str, job_id: str, agent_name: str) 
                 "monthly_cost_usd": cost.get("monthly_cost_usd"),
             }
 
+    except ContractVersionError:
+        raise  # a refusal reaches the user as a 409, never an empty summary
     except Exception:
         return None
 

@@ -32,6 +32,7 @@ from src.agents.schema_design.scope import (
     assess_schema_scope,
 )
 from src.contracts.aurora_design_delta import is_design_delta
+from src.shared.contract_versioning import stamp_artifact_version
 from src.storage.artifact_store import ArtifactStore
 from src.storage.assignment_versioning import engine_scope, read_assignment
 from src.tools.schema.design_metrics import (
@@ -370,7 +371,7 @@ def finalize_schema_design(
     )
 
     output_key = f"{prefix}/schema-{target_type}/v{version}/schema_output.json"
-    store.write_json(output_key, output)
+    store.write_json(output_key, stamp_artifact_version(output_key, output))
 
     status = scope_status(report, output_key)
     if delta_summary is not None:
@@ -727,7 +728,7 @@ def run_schema_design(
     output_data, report = apply_schema_scope(
         store, database_name, job_id, target_type, output_data, assignment_version
     )
-    store.write_json(output_key, output_data)
+    store.write_json(output_key, stamp_artifact_version(output_key, output_data))
 
     # Write design trace via ArtifactStore
     if trace_json:
@@ -1259,7 +1260,7 @@ def run_schema_design_with_injected(
         output_data = _merge_cascade_output(existing, output_data, target_type)
         print(f"[schema-design/{target_type}] Merged cascade output with existing schema")
 
-    store.write_json(output_key, output_data)
+    store.write_json(output_key, stamp_artifact_version(output_key, output_data))
 
     elapsed = time.time() - start_time
     print(

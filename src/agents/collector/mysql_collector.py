@@ -51,6 +51,7 @@ from src.contracts.collector_output import (
     TriggerTiming,
     View,
 )
+from src.shared.contract_versioning import load_contract
 from src.tools.aws.credentials import AWSCredentialManager
 from src.tools.aws.rds_tools import (
     get_cloudwatch_metrics,
@@ -277,8 +278,10 @@ def collect(input_contract: CollectorInput) -> CollectorOutputContract:
     # If final output already exists, return it directly
     if ckpt.exists("output"):
         logger.info("Job %s: final output already exists, returning cached", input_contract.job_id)
-        result: CollectorOutputContract = CollectorOutputContract.model_validate(
-            ckpt.load("output")
+        result: CollectorOutputContract = load_contract(
+            CollectorOutputContract,
+            ckpt.load("output"),
+            artifact=f"collector checkpoint {input_contract.job_id}/output",
         )
         return result
 

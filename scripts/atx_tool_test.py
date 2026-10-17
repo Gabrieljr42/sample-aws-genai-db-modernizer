@@ -106,12 +106,14 @@ ok("Both artifacts written via ArtifactStore")
 
 from src.contracts.collector_output import CollectorOutputContract
 from src.contracts.triage_output import TriageOutputContract
+from src.shared.contract_versioning import load_contract
+from src.storage.local_store import LocalArtifactStore
 
 new_collector = store.read_json(collector_key)
 new_triage = store.read_json(triage_key)
 try:
-    CollectorOutputContract.model_validate(new_collector)
-    TriageOutputContract.model_validate(new_triage)
+    load_contract(CollectorOutputContract, new_collector, artifact=collector_key)
+    load_contract(TriageOutputContract, new_triage, artifact=triage_key)
     ok("Both outputs validate against their contracts")
 except Exception as e:  # noqa: BLE001
     fail(f"Contract validation failed: {e}")
@@ -120,13 +122,11 @@ except Exception as e:  # noqa: BLE001
 # Determinism vs reference
 # ---------------------------------------------------------------------------
 print("\n3. Determinism vs reference discourse/15e6403d")
-ref_triage = json.loads(
-    (
-        REPO / "artifacts" / REFERENCE_DB / REFERENCE_JOB / "referee-triage" / "triage.json"
-    ).read_text()
+ref_triage = LocalArtifactStore(str(REPO / "artifacts")).read_json(
+    f"{REFERENCE_DB}/{REFERENCE_JOB}/referee-triage/triage.json"
 )
-ref_collector = json.loads(
-    (REPO / "artifacts" / REFERENCE_DB / REFERENCE_JOB / "collector" / "output.json").read_text()
+ref_collector = LocalArtifactStore(str(REPO / "artifacts")).read_json(
+    f"{REFERENCE_DB}/{REFERENCE_JOB}/collector/output.json"
 )
 
 new_t = normalize(new_triage, REFERENCE_JOB, job_id)
