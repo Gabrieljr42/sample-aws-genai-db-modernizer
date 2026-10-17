@@ -64,6 +64,7 @@ count:
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 
 _JOIN_WORD_RE = re.compile(r"\bjoin\b", re.IGNORECASE)
@@ -107,10 +108,9 @@ _AGGREGATE_WORD_RE = re.compile(
 _LIKE_PARAMETER_RE = re.compile(
     r"\bI?LIKE\s+(?:\?|\$\d+\b|:\w+\b|@\w+\b)(?!\s*(?:\+|\|\|))", re.IGNORECASE
 )
+# ``MATCH (...) AGAINST (`` is :func:`has_match_against`, a linear scan (#902).
 _FULLTEXT_SEARCH_RE = re.compile(
     r"""
-    MATCH\s*\(.+?\)\s*AGAINST\s*\(
-    |
     \b(?:to_tsvector|to_tsquery|plainto_tsquery|phraseto_tsquery|websearch_to_tsquery)\s*\(
     |
     \btsvector\b
@@ -265,7 +265,39 @@ def regex_like_parameter(query_text: str) -> bool:
 
 def regex_fulltext_search(query_text: str) -> bool:
     """A MySQL, PostgreSQL or SQL Server full-text match."""
-    return bool(_FULLTEXT_SEARCH_RE.search(query_text or ""))
+    text = query_text or ""
+    return bool(_FULLTEXT_SEARCH_RE.search(text)) or has_match_against(text)
+
+
+# The two ends of a MySQL full-text match, ``MATCH (`` and ``) AGAINST (``.
+_MATCH_OPEN_RE = re.compile(r"MATCH\s*\(", re.IGNORECASE)
+_AGAINST_OPEN_RE = re.compile(r"\)\s*AGAINST\s*\(", re.IGNORECASE)
+
+
+def has_match_against(text: str) -> bool:
+    """``MATCH (<at least one character>) AGAINST (``, the argument on one line: exactly
+    what ``MATCH\\s*\\(.+?\\)\\s*AGAINST\\s*\\(`` (no ``re.DOTALL``) finds, in linear time.
+
+    That regex retried the rest of the line from every ``MATCH (``, which is quadratic
+    on a line of them with no ``AGAINST`` (#902). Here each ``MATCH (`` looks for the
+    first ``) AGAINST (`` at least one character after it, and the match holds when that
+    one starts before the line ends (the whitespace around ``AGAINST`` may still cross
+    lines, as in the regex).
+    """
+    againsts = [m.start() for m in _AGAINST_OPEN_RE.finditer(text)]
+    if not againsts:
+        return False
+    line_end = -1
+    for opening in _MATCH_OPEN_RE.finditer(text):
+        start = opening.end()
+        if start > line_end:
+            line_end = text.find("\n", start)
+            if line_end == -1:
+                line_end = len(text)
+        first = bisect_left(againsts, start + 1)
+        if first < len(againsts) and againsts[first] < line_end:
+            return True
+    return False
 
 
 def regex_pattern_match(query_text: str) -> bool:
