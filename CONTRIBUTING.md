@@ -481,6 +481,13 @@ snapshot (`tests/e2e/routing_snapshot.py`):
 uv run python scripts/contract_schema_snapshot.py --write
 ```
 
+`tests/contract/test_value_set_snapshot.py` applies the same rule to the
+values contracts publish: enum and literal members (reason codes, flag
+reasons, phases), engine ids, capability ids and access-pattern id prefixes,
+in `tests/contract/value_set_snapshot.json`. Adding a value is a MINOR bump of
+the publishing contract, removing or renaming one is MAJOR. Regenerate with
+`uv run python scripts/contract_value_snapshot.py --write`.
+
 If two in-flight PRs both touch a contract, whichever lands second
 regenerates the snapshot.
 
@@ -493,7 +500,7 @@ Many pull requests land on `main` every day, so a branch that was green yesterda
 - Run `./ci/pre_merge.sh` before you push and before you ask for a merge. It fetches main, reports how far behind you are, checks for conflicts and contract version collisions, runs lint and tests (`--quick` skips the tests), and prints the `needs_llm_run` verdict.
 - Rebase onto the latest main and re-test right before merging, not only when you opened the PR.
 - Take the next contract version at rebase time. If another PR already used your `contract_version`, bump to the next one and regenerate the schema snapshot.
-- Never hand-merge a generated snapshot (the routing snapshot, `tests/contract/schema_snapshot.json`, rendered catalog docs). Take main's copy and regenerate it on top of it.
+- Never hand-merge a generated snapshot (the routing snapshot, `tests/contract/schema_snapshot.json`, `tests/contract/value_set_snapshot.json`, rendered catalog docs). Take main's copy and regenerate it on top of it.
 - Run `./ci/needs_llm_run.sh` early. If it says `e2e-llm: required`, start that run before the review rounds, not after.
 
 ## Maintainer Sync

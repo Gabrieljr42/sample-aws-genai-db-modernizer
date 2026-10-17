@@ -1,0 +1,828 @@
+{
+  "access_pattern_id_prefixes.documentdb": {
+    "module": "documentdb_model_output",
+    "values": [
+      "DOC"
+    ],
+    "version": "1.0"
+  },
+  "access_pattern_id_prefixes.dynamodb": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "DDB"
+    ],
+    "version": "1.1"
+  },
+  "access_pattern_id_prefixes.elasticache": {
+    "module": "elasticache_model_output",
+    "values": [
+      "EC"
+    ],
+    "version": "1.1"
+  },
+  "access_pattern_id_prefixes.opensearch": {
+    "module": "opensearch_model_output",
+    "values": [
+      "OS"
+    ],
+    "version": "1.0"
+  },
+  "analysis_output.Confidence": {
+    "module": "analysis_output",
+    "values": [
+      "HIGH",
+      "LOW",
+      "MEDIUM"
+    ],
+    "version": "2.1"
+  },
+  "analysis_output.MigrationComplexity": {
+    "module": "analysis_output",
+    "values": [
+      "HIGH",
+      "LOW",
+      "MEDIUM"
+    ],
+    "version": "2.1"
+  },
+  "analysis_output.RecommendationLevel": {
+    "module": "analysis_output",
+    "values": [
+      "HIGHLY_SUITABLE",
+      "MARGINAL",
+      "NOT_SUITABLE",
+      "SUITABLE"
+    ],
+    "version": "2.1"
+  },
+  "analysis_output.Severity": {
+    "module": "analysis_output",
+    "values": [
+      "CRITICAL",
+      "HIGH",
+      "LOW",
+      "MEDIUM"
+    ],
+    "version": "2.1"
+  },
+  "analysis_output.TargetDatabase": {
+    "module": "analysis_output",
+    "values": [
+      "aurora",
+      "aurora_mysql",
+      "aurora_postgresql",
+      "documentdb",
+      "dynamodb",
+      "elasticache",
+      "keyspaces",
+      "neptune",
+      "opensearch"
+    ],
+    "version": "2.1"
+  },
+  "assignment_models.AssignmentSource": {
+    "module": "assignment_models",
+    "values": [
+      "assignment_resolution",
+      "customer_gate",
+      "post_schema_routing",
+      "reality_check"
+    ],
+    "version": "1.14"
+  },
+  "assignment_models.AssignmentStatus": {
+    "module": "assignment_models",
+    "values": [
+      "auto_generated",
+      "customer_approved",
+      "customer_modified",
+      "reroute_rolled_back",
+      "rerouted_after_approval"
+    ],
+    "version": "1.14"
+  },
+  "capability_ids": {
+    "module": "triage_output",
+    "values": [
+      "aggregation",
+      "complex_joins",
+      "computed_join",
+      "multi_doc_acid",
+      "scan_engine",
+      "sql_admin",
+      "strong_consistency",
+      "text_pattern_match"
+    ],
+    "version": "1.1"
+  },
+  "collector_input.CollectionMode": {
+    "module": "collector_input",
+    "values": [
+      "ddl",
+      "live",
+      "offline"
+    ],
+    "version": "3.0"
+  },
+  "collector_input.DatabaseEngine": {
+    "module": "collector_input",
+    "values": [
+      "db2",
+      "mariadb",
+      "mysql",
+      "oracle",
+      "postgresql",
+      "sqlserver"
+    ],
+    "version": "3.0"
+  },
+  "collector_output.DatabaseEngine": {
+    "module": "collector_output",
+    "values": [
+      "db2",
+      "mariadb",
+      "mysql",
+      "oracle",
+      "postgresql",
+      "sqlserver"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.DeploymentType": {
+    "module": "collector_output",
+    "values": [
+      "ec2_self_managed",
+      "on_premises",
+      "rds_instance"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.ForeignKeyAction": {
+    "module": "collector_output",
+    "values": [
+      "CASCADE",
+      "NO ACTION",
+      "RESTRICT",
+      "SET DEFAULT",
+      "SET NULL"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.IndexType": {
+    "module": "collector_output",
+    "values": [
+      "btree",
+      "fulltext",
+      "gin",
+      "gist",
+      "hash",
+      "other",
+      "spatial"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.NormalizedDataType": {
+    "module": "collector_output",
+    "values": [
+      "binary",
+      "blob",
+      "boolean",
+      "date",
+      "datetime",
+      "decimal",
+      "floating_point",
+      "integer",
+      "json",
+      "string",
+      "text",
+      "timestamp",
+      "uuid",
+      "xml"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.ParameterMode": {
+    "module": "collector_output",
+    "values": [
+      "IN",
+      "INOUT",
+      "OUT"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.ProcedureType": {
+    "module": "collector_output",
+    "values": [
+      "FUNCTION",
+      "PROCEDURE",
+      "TRIGGER_FUNCTION"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.QueryLogSource": {
+    "module": "collector_output",
+    "values": [
+      "dmv_query_stats",
+      "general_log",
+      "performance_insights",
+      "performance_schema",
+      "pg_stat_statements",
+      "query_store",
+      "slow_query_log",
+      "v_dollar_sql"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.QueryType": {
+    "module": "collector_output",
+    "values": [
+      "DELETE",
+      "INSERT",
+      "MERGE",
+      "OTHER",
+      "SELECT",
+      "UPDATE"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.StorageType": {
+    "module": "collector_output",
+    "values": [
+      "gp2",
+      "gp3",
+      "io1",
+      "io2",
+      "magnetic"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.TriggerEventType": {
+    "module": "collector_output",
+    "values": [
+      "DELETE",
+      "INSERT",
+      "UPDATE"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.TriggerForEach": {
+    "module": "collector_output",
+    "values": [
+      "ROW",
+      "STATEMENT"
+    ],
+    "version": "3.2"
+  },
+  "collector_output.TriggerTiming": {
+    "module": "collector_output",
+    "values": [
+      "AFTER",
+      "BEFORE",
+      "INSTEAD OF"
+    ],
+    "version": "3.2"
+  },
+  "documentdb_model_output.DOCDB_OPERATION": {
+    "module": "documentdb_model_output",
+    "values": [
+      "aggregate",
+      "countDocuments",
+      "deleteMany",
+      "deleteOne",
+      "find",
+      "findOne",
+      "insertMany",
+      "insertOne",
+      "updateMany",
+      "updateOne"
+    ],
+    "version": "1.0"
+  },
+  "documentdb_model_output.EMBED_STRATEGY": {
+    "module": "documentdb_model_output",
+    "values": [
+      "embed",
+      "hybrid",
+      "reference"
+    ],
+    "version": "1.0"
+  },
+  "documentdb_model_output.INDEX_TYPE": {
+    "module": "documentdb_model_output",
+    "values": [
+      "compound",
+      "partial",
+      "single",
+      "text",
+      "unique"
+    ],
+    "version": "1.0"
+  },
+  "dynamodb_model_output.AGGREGATE_PATTERNS": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "identifying_relationship",
+      "item_collection",
+      "separate"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_model_output.DYNAMODB_ATTRIBUTE_TYPES": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "B",
+      "BOOL",
+      "BS",
+      "L",
+      "M",
+      "N",
+      "NS",
+      "NULL",
+      "S",
+      "SS"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_model_output.DYNAMODB_OPERATIONS": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "BatchGetItem",
+      "BatchWriteItem",
+      "DeleteItem",
+      "GetItem",
+      "PutItem",
+      "Query",
+      "TransactGetItems",
+      "TransactWriteItems",
+      "UpdateItem"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_model_output.PARTITION_OPERATIONS": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "read",
+      "write"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_model_output.PROJECTION_TYPES": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "ALL",
+      "INCLUDE",
+      "KEYS_ONLY"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_model_output.STORED_OBJECT_TYPES": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "procedure",
+      "trigger",
+      "view"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_model_output.UNSUPPORTED_PATTERN_TYPES": {
+    "module": "dynamodb_model_output",
+    "values": [
+      "aggregation",
+      "text_search"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_pe_review.ChangeCategory": {
+    "module": "dynamodb_pe_review",
+    "values": [
+      "access_pattern",
+      "cost_concern",
+      "denormalization",
+      "etl_lineage",
+      "gsi_necessity",
+      "join_type",
+      "key_design",
+      "missing_trade_off",
+      "over_engineering",
+      "scope_challenge",
+      "table_boundary"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_pe_review.ReviewVerdict": {
+    "module": "dynamodb_pe_review",
+    "values": [
+      "APPROVED",
+      "CHANGES_REQUESTED"
+    ],
+    "version": "1.1"
+  },
+  "dynamodb_pe_review.Severity": {
+    "module": "dynamodb_pe_review",
+    "values": [
+      "blocker",
+      "major",
+      "minor",
+      "suggestion"
+    ],
+    "version": "1.1"
+  },
+  "elasticache_model_output.REDIS_DATA_TYPE": {
+    "module": "elasticache_model_output",
+    "values": [
+      "bitmap",
+      "bloom_filter",
+      "geo",
+      "hash",
+      "hyperloglog",
+      "json",
+      "list",
+      "set",
+      "sorted_set",
+      "stream",
+      "string"
+    ],
+    "version": "1.1"
+  },
+  "elasticache_model_output.REDIS_OPERATION": {
+    "module": "elasticache_model_output",
+    "values": [
+      "BF.ADD",
+      "BF.EXISTS",
+      "BF.MADD",
+      "BF.MEXISTS",
+      "BITCOUNT",
+      "BITOP",
+      "DECR",
+      "DEL",
+      "EXISTS",
+      "EXPIRE",
+      "GEOADD",
+      "GEODIST",
+      "GEOSEARCH",
+      "GEOSEARCHSTORE",
+      "GET",
+      "GETBIT",
+      "HDEL",
+      "HEXISTS",
+      "HGET",
+      "HGETALL",
+      "HINCRBY",
+      "HMGET",
+      "HMSET",
+      "HSET",
+      "INCR",
+      "INCRBY",
+      "JSON.ARRAPPEND",
+      "JSON.DEL",
+      "JSON.GET",
+      "JSON.MGET",
+      "JSON.SET",
+      "LLEN",
+      "LPOP",
+      "LPUSH",
+      "LRANGE",
+      "MGET",
+      "MSET",
+      "PFADD",
+      "PFCOUNT",
+      "PFMERGE",
+      "RPOP",
+      "RPUSH",
+      "SADD",
+      "SCAN",
+      "SCARD",
+      "SET",
+      "SETBIT",
+      "SINTER",
+      "SISMEMBER",
+      "SMEMBERS",
+      "SREM",
+      "SUNION",
+      "TTL",
+      "XACK",
+      "XADD",
+      "XGROUP",
+      "XLEN",
+      "XRANGE",
+      "XREAD",
+      "XREADGROUP",
+      "XREVRANGE",
+      "ZADD",
+      "ZCARD",
+      "ZRANGE",
+      "ZRANGEBYSCORE",
+      "ZRANK",
+      "ZREM",
+      "ZREVRANGE",
+      "ZREVRANK",
+      "ZSCORE"
+    ],
+    "version": "1.1"
+  },
+  "elasticache_model_output.USE_CASE_TYPE": {
+    "module": "elasticache_model_output",
+    "values": [
+      "caching",
+      "event_sourcing",
+      "geospatial",
+      "json_document",
+      "leaderboard",
+      "pub_sub",
+      "rate_limiting",
+      "real_time_analytics",
+      "recommendation",
+      "reference_data",
+      "session_store",
+      "time_series"
+    ],
+    "version": "1.1"
+  },
+  "engine_ids": {
+    "module": "assignment_models",
+    "values": [
+      "aurora",
+      "aurora_mysql",
+      "aurora_postgresql",
+      "documentdb",
+      "dynamodb",
+      "elasticache",
+      "keyspaces",
+      "neptune",
+      "opensearch"
+    ],
+    "version": "1.14"
+  },
+  "feasibility_models.FindingKind": {
+    "module": "feasibility_models",
+    "values": [
+      "co_dependency_on_non_join_engine",
+      "co_dependency_split",
+      "read_write_split"
+    ],
+    "version": "1.0"
+  },
+  "feasibility_models.FindingSeverity": {
+    "module": "feasibility_models",
+    "values": [
+      "advisory",
+      "blocking"
+    ],
+    "version": "1.0"
+  },
+  "model_flag.FlagReason": {
+    "module": "model_flag",
+    "values": [
+      "client_side_join",
+      "full_scan",
+      "missing_feature",
+      "other"
+    ],
+    "version": "1.0"
+  },
+  "model_flag.FlaggableEngine": {
+    "module": "model_flag",
+    "values": [
+      "aurora_mysql",
+      "aurora_postgresql",
+      "documentdb",
+      "dynamodb",
+      "elasticache",
+      "opensearch"
+    ],
+    "version": "1.0"
+  },
+  "move_ledger.MoveActor": {
+    "module": "move_ledger",
+    "values": [
+      "customer",
+      "model_flag",
+      "rule"
+    ],
+    "version": "1.5"
+  },
+  "move_ledger.MovePass": {
+    "module": "move_ledger",
+    "values": [
+      "aurora_fallback",
+      "cache_owner_normalize",
+      "candidates",
+      "co_dependency",
+      "customer_group_propagation",
+      "customer_pick",
+      "floor",
+      "heterogeneous_choice",
+      "model_flag",
+      "place",
+      "post_schema_flag",
+      "resettle",
+      "score",
+      "settle",
+      "signal_override",
+      "sweep",
+      "tie",
+      "utility_pin"
+    ],
+    "version": "1.5"
+  },
+  "move_ledger.ReasonCode": {
+    "module": "move_ledger",
+    "values": [
+      "cache.legacy_owner",
+      "consolidate.no_unique_value",
+      "consolidate.source_compatible_survives",
+      "customer.pick",
+      "fallback.no_group_owner",
+      "fallback.no_owner",
+      "fallback.no_score",
+      "flag.capability_gap",
+      "floor.cost_share",
+      "floor.opensearch",
+      "group.customer_propagation",
+      "group.mean",
+      "highest_score",
+      "override.text_search",
+      "override.utility",
+      "rollback.redesign_failed",
+      "sweep.orphan",
+      "tie.cleared",
+      "tie.placeholder.hash",
+      "tie.placeholder.settled_workload",
+      "tie.source_compatible",
+      "tie.stability"
+    ],
+    "version": "1.5"
+  },
+  "phase_models.Phase": {
+    "module": "phase_models",
+    "values": [
+      "analysis",
+      "assignment",
+      "assignment_review",
+      "collect_triage",
+      "load_test",
+      "reality_check",
+      "schema_design",
+      "synthesis"
+    ],
+    "version": "1.0"
+  },
+  "phase_models.PhaseStatus": {
+    "module": "phase_models",
+    "values": [
+      "awaiting_input",
+      "awaiting_review",
+      "completed",
+      "failed",
+      "in_progress",
+      "not_started",
+      "skipped"
+    ],
+    "version": "1.0"
+  },
+  "query_trace.TraceBasis": {
+    "module": "query_trace",
+    "values": [
+      "group_mean",
+      "query"
+    ],
+    "version": "1.25"
+  },
+  "referee_output.ArchitectureType": {
+    "module": "referee_output",
+    "values": [
+      "HYBRID_WITH_CACHE",
+      "MULTI_DATABASE",
+      "SINGLE_DATABASE"
+    ],
+    "version": "2.0"
+  },
+  "referee_output.CacheType": {
+    "module": "referee_output",
+    "values": [
+      "ElastiCache Memcached",
+      "ElastiCache Redis"
+    ],
+    "version": "2.0"
+  },
+  "referee_output.DatabaseService": {
+    "module": "referee_output",
+    "values": [
+      "Aurora MySQL",
+      "Aurora PostgreSQL",
+      "DocumentDB",
+      "DynamoDB",
+      "ElastiCache",
+      "Keyspaces",
+      "Neptune",
+      "OpenSearch"
+    ],
+    "version": "2.0"
+  },
+  "referee_output.RiskLevel": {
+    "module": "referee_output",
+    "values": [
+      "CRITICAL",
+      "HIGH",
+      "LOW",
+      "MEDIUM"
+    ],
+    "version": "2.0"
+  },
+  "referee_output.RiskType": {
+    "module": "referee_output",
+    "values": [
+      "COST_OVERRUN",
+      "DATA_CONSISTENCY",
+      "MIGRATION_COMPLEXITY",
+      "OPERATIONAL_RISK",
+      "PERFORMANCE_DEGRADATION",
+      "SECURITY_RISK"
+    ],
+    "version": "2.0"
+  },
+  "schema_design_input.Confidence": {
+    "module": "schema_design_input",
+    "values": [
+      "HIGH",
+      "LOW",
+      "MEDIUM"
+    ],
+    "version": "1.0"
+  },
+  "schema_design_input.ForeignKeyAction": {
+    "module": "schema_design_input",
+    "values": [
+      "CASCADE",
+      "NO ACTION",
+      "RESTRICT",
+      "SET DEFAULT",
+      "SET NULL"
+    ],
+    "version": "1.0"
+  },
+  "schema_design_input.MigrationComplexity": {
+    "module": "schema_design_input",
+    "values": [
+      "HIGH",
+      "LOW",
+      "MEDIUM"
+    ],
+    "version": "1.0"
+  },
+  "schema_design_input.NormalizedDataType": {
+    "module": "schema_design_input",
+    "values": [
+      "binary",
+      "blob",
+      "boolean",
+      "date",
+      "datetime",
+      "decimal",
+      "floating_point",
+      "integer",
+      "json",
+      "string",
+      "text",
+      "timestamp",
+      "uuid",
+      "xml"
+    ],
+    "version": "1.0"
+  },
+  "schema_design_input.QueryLogSource": {
+    "module": "schema_design_input",
+    "values": [
+      "dmv_query_stats",
+      "general_log",
+      "performance_insights",
+      "performance_schema",
+      "pg_stat_statements",
+      "query_store",
+      "slow_query_log",
+      "v_dollar_sql"
+    ],
+    "version": "1.0"
+  },
+  "schema_design_input.QueryType": {
+    "module": "schema_design_input",
+    "values": [
+      "DELETE",
+      "INSERT",
+      "MERGE",
+      "OTHER",
+      "SELECT",
+      "UPDATE"
+    ],
+    "version": "1.0"
+  },
+  "schema_revision_models.PatternAction": {
+    "module": "schema_revision_models",
+    "values": [
+      "DROP",
+      "NOTE",
+      "REASSIGN"
+    ],
+    "version": "1.0"
+  }
+}
