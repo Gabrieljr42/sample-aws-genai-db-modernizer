@@ -235,9 +235,9 @@ def test_engineering_report_figures(run: PipelineResult) -> None:
 
 def test_the_trace_appendix_agrees_with_the_unresolved_ties(run: PipelineResult) -> None:
     """#339 review: the appendix says "unresolved" only for ties still open, so
-    its "(N still open)" is the "Unresolved engine ties (N)" count (trailgear:
-    8 tied at some step, 3 still open), and every listed tie that was settled
-    reads "was tied"."""
+    its "(N still open)" is the "Unresolved engine ties (N)" count (since #1002
+    discourse has 33 open ties and trailgear none: its 4 first-assignment ties all
+    clear in the reality check), and every listed tie that was settled reads "was tied"."""
     report = _report_json(run)
     trace = (report.get("facts") or {}).get("query_trace") or {}
     if not trace.get("listed_query_count"):

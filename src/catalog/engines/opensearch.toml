@@ -17,3 +17,19 @@ base_monthly = 150
 extra_engine_burden_monthly = 300
 max_burden_per_unique_query = 100
 # A domain is billed by its instances and storage, not per request (#494).
+
+# Score-dimension weights (ADR-031 Decision 5). Cost is the same 10% for every engine
+# (#1002); the first profile is the engine's default.
+# A search table; a time-series table weights performance higher (ingest throughput
+# and aggregation latency).
+[score_weights.search]
+pattern_match = 0.45
+complexity = 0.25
+performance = 0.20
+cost = 0.10
+
+[score_weights.time_series]
+pattern_match = 0.40
+complexity = 0.20
+performance = 0.30
+cost = 0.10

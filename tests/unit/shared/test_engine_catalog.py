@@ -347,6 +347,163 @@ class TestPricingIsInTheCatalog:
                 assert needle not in text, f"{rel} still holds a cost literal: {needle!r}"
 
 
+DIMENSIONS = ("pattern_match", "complexity", "performance", "cost")
+# The splits before #1002 (cost at 15% for DynamoDB and DocumentDB, 10% elsewhere).
+SPLITS_BEFORE_1002 = {
+    ("aurora_postgresql", "default"): (40, 30, 20, 10),
+    ("aurora_mysql", "default"): (40, 30, 20, 10),
+    ("dynamodb", "default"): (60, 20, 5, 15),
+    ("documentdb", "default"): (45, 25, 15, 15),
+    ("opensearch", "search"): (45, 25, 20, 10),
+    ("opensearch", "time_series"): (40, 20, 30, 10),
+}
+
+
+def _split(weights: dict[str, float]) -> tuple[int, ...]:
+    return tuple(round(weights[d] * 100) for d in DIMENSIONS)
+
+
+def _with_weights(directory: Path, engine_id: str, order: int, weights: str) -> None:
+    _write(directory, engine_id, VALID.format(id=engine_id, order=order) + weights)
+
+
+WEIGHTS = (
+    "\n[score_weights.default]\npattern_match = {}\ncomplexity = {}\nperformance = {}\ncost = {}\n"
+)
+
+
+class TestScoreWeightsAreInTheCatalog:
+    """ADR-031 Decision 5 (maintainer decision, #1002): every engine weights cost the same."""
+
+    def test_every_engine_and_profile_weights_cost_the_same(self) -> None:
+        costs = {
+            (e.id, name): weights["cost"]
+            for e in catalog.engines()
+            for name, weights in e.score_weights.items()
+        }
+        assert costs, "no engine file carries score weights"
+        costs[("<default>", "default")] = catalog.default_score_weights()["cost"]
+        assert set(costs.values()) == {0.10}, costs
+
+    def test_the_weights_are_read_from_the_engine_files(self) -> None:
+        got = {
+            (e.id, name): _split(weights)
+            for e in catalog.engines()
+            for name, weights in e.score_weights.items()
+        }
+        assert got == {
+            ("aurora_postgresql", "default"): (40, 30, 20, 10),
+            ("aurora_mysql", "default"): (40, 30, 20, 10),
+            ("dynamodb", "default"): (64, 21, 5, 10),
+            ("documentdb", "default"): (48, 26, 16, 10),
+            ("opensearch", "search"): (45, 25, 20, 10),
+            ("opensearch", "time_series"): (40, 20, 30, 10),
+        }
+
+    def test_the_common_cost_weight_keeps_the_other_dimensions_in_balance(self) -> None:
+        """Each engine's other three weights are its pre-#1002 ones scaled to fill what
+        the common cost weight leaves, rounded to whole percent."""
+        for (engine, profile), before in SPLITS_BEFORE_1002.items():
+            after = _split(catalog.score_weights(engine, profile))
+            scale = (100 - after[3]) / (100 - before[3])
+            assert after[:3] == tuple(round(b * scale) for b in before[:3]), engine
+            assert sum(after) == 100, engine
+
+    def test_an_engine_without_weights_uses_the_default_split(self) -> None:
+        assert _split(catalog.default_score_weights()) == (40, 30, 20, 10)
+        assert catalog.score_weight_profiles("elasticache") == (catalog.default_score_weights(),)
+        assert catalog.score_weight_profiles("not_an_engine") == (catalog.default_score_weights(),)
+
+    def test_the_first_profile_is_the_engines_default(self) -> None:
+        profiles = catalog.score_weight_profiles("opensearch")
+        assert [_split(p) for p in profiles] == [(45, 25, 20, 10), (40, 20, 30, 10)]
+        assert catalog.score_weights("opensearch") == profiles[0]
+        assert catalog.score_weights("opensearch", "time_series") == profiles[1]
+
+    def test_the_analysis_constants_and_the_router_read_the_catalog(self) -> None:
+        from src.tools.analysis import scoring
+        from src.tools.analysis.aurora_common_pattern_catalog import (
+            AURORA_MYSQL_SCORE_WEIGHTS,
+            AURORA_PG_SCORE_WEIGHTS,
+        )
+        from src.tools.analysis.documentdb_pattern_catalog import DOCUMENTDB_SCORE_WEIGHTS
+        from src.tools.analysis.dynamodb_pattern_catalog import DYNAMODB_SCORE_WEIGHTS
+        from src.tools.analysis.opensearch_pattern_catalog import (
+            OPENSEARCH_SEARCH_WEIGHTS,
+            OPENSEARCH_TIMESERIES_WEIGHTS,
+        )
+        from src.tools.analysis.score_weights import weight_profiles
+
+        assert AURORA_PG_SCORE_WEIGHTS == catalog.score_weights("aurora_postgresql")
+        assert AURORA_MYSQL_SCORE_WEIGHTS == catalog.score_weights("aurora_mysql")
+        assert DYNAMODB_SCORE_WEIGHTS == catalog.score_weights("dynamodb")
+        assert DOCUMENTDB_SCORE_WEIGHTS == catalog.score_weights("documentdb")
+        assert OPENSEARCH_SEARCH_WEIGHTS == catalog.score_weights("opensearch", "search")
+        assert OPENSEARCH_TIMESERIES_WEIGHTS == catalog.score_weights("opensearch", "time_series")
+        assert scoring.DEFAULT_WEIGHTS == catalog.default_score_weights()
+        for engine in IDS | {"not_an_engine"}:
+            assert weight_profiles(engine) == catalog.score_weight_profiles(engine), engine
+
+    def test_a_different_cost_weight_fails_at_load(self, tmp_path: Path) -> None:
+        _with_weights(tmp_path, "one", 1, WEIGHTS.format(0.40, 0.30, 0.20, 0.10))
+        _with_weights(tmp_path, "two", 2, WEIGHTS.format(0.60, 0.20, 0.05, 0.15))
+        with pytest.raises(CatalogError, match="cost weight"):
+            load_engine_catalog(tmp_path)
+
+    def test_a_cost_weight_other_than_the_default_fails_even_when_all_agree(
+        self, tmp_path: Path
+    ) -> None:
+        """An engine with no weights uses the default split, so it counts too."""
+        _with_weights(tmp_path, "one", 1, WEIGHTS.format(0.60, 0.20, 0.05, 0.15))
+        with pytest.raises(CatalogError, match="cost weight"):
+            load_engine_catalog(tmp_path)
+
+    def test_the_same_cost_weight_loads(self, tmp_path: Path) -> None:
+        _with_weights(tmp_path, "one", 1, WEIGHTS.format(0.40, 0.30, 0.20, 0.10))
+        _with_weights(tmp_path, "two", 2, WEIGHTS.format(0.64, 0.21, 0.05, 0.10))
+        assert len(load_engine_catalog(tmp_path)) == 2
+
+    @pytest.mark.parametrize(
+        "weights",
+        [
+            pytest.param(WEIGHTS.format(0.40, 0.30, 0.20, 0.20), id="does-not-sum-to-one"),
+            pytest.param(WEIGHTS.format(0.40, 0.30, 0.20, 0.10) + "speed = 0.0\n", id="extra"),
+            pytest.param(
+                WEIGHTS.format(0.40, 0.30, 0.20, 0.10).replace("complexity = 0.3\n", ""),
+                id="missing",
+            ),
+            pytest.param(WEIGHTS.format(1.10, -0.20, 0.0, 0.10), id="negative"),
+            pytest.param("\n[score_weights]\n", id="empty-table"),
+            pytest.param(
+                WEIGHTS.format(0.40, 0.30, 0.20, 0.10).replace("cost = 0.1", 'cost = "0.1"'),
+                id="a-string",
+            ),
+            pytest.param(
+                WEIGHTS.format(0.40, 0.30, 0.20, 0.10).replace("cost = 0.1", "cost = true"),
+                id="a-boolean",
+            ),
+        ],
+    )
+    def test_malformed_weights_fail_at_load(self, tmp_path: Path, weights: str) -> None:
+        _with_weights(tmp_path, "example", 1, weights)
+        with pytest.raises(CatalogError, match="example.toml"):
+            load_engine_catalog(tmp_path)
+
+    @pytest.mark.parametrize("value", ['"0.1"', "true"])
+    def test_a_weight_that_is_not_a_number_names_the_problem(
+        self, tmp_path: Path, value: str
+    ) -> None:
+        """A string or a boolean is a catalog error naming the file and the profile, not a
+        raw ``TypeError`` (a TOML ``true`` would otherwise count as 1)."""
+        text = WEIGHTS.format(0.40, 0.30, 0.20, 0.10).replace("cost = 0.1", f"cost = {value}")
+        _with_weights(tmp_path, "example", 1, text)
+        with pytest.raises(
+            CatalogError,
+            match=r"(?s)example\.toml.*score_weights\.default: every weight is a number",
+        ):
+            load_engine_catalog(tmp_path)
+
+
 class TestConstantsAreTheCatalogsView:
     """Each formerly hand-kept table, pinned to its pre-catalog value (zero behaviour change)."""
 

@@ -23,3 +23,11 @@ storage_price_per_gb_month = 0.10
 [pricing.instance_hourly]
 "db.r6g.large" = 0.24
 "db.r6g.xlarge" = 0.48
+
+# Score-dimension weights (ADR-031 Decision 5). Cost is the same 10% for every engine
+# (#1002); the first profile is the engine's default.
+[score_weights.default]
+pattern_match = 0.40
+complexity = 0.30
+performance = 0.20
+cost = 0.10

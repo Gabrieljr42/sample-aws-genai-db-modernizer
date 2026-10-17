@@ -1,9 +1,10 @@
 """ADR-031 Decision 5: cost is one of four weighted score dimensions (#638).
 
 The decision states that a score has exactly four dimensions (pattern match,
-complexity, performance, cost) at a 40/30/20/10 default split, that some
-engines weight cost differently, and that the per-table confidence built from
-them is what a query's score rests on. These tests assert that behaviour, not
+complexity, performance, cost) at a 40/30/20/10 default split, that every engine
+weights cost the same (maintainer decision, #1002: cost is per query and
+engine-aware, so a per-engine cost weight would only add a flat bonus), and that
+the per-table confidence built from them is what a query's score rests on. These tests assert that behaviour, not
 the shape of any one function: change the dimension set or the default weights
 and they fail until the ADR is amended too.
 """
@@ -88,12 +89,25 @@ def test_cost_moves_the_default_score_by_ten() -> None:
     assert compute_confidence(with_cost) - compute_confidence(base) == 10
 
 
-def test_an_engine_may_weight_cost_differently_but_keeps_the_same_four_dimensions() -> None:
-    """The decision allows per-engine weights; each still covers the four and sums to 1."""
+def test_every_engine_weights_cost_the_same_and_keeps_the_same_four_dimensions() -> None:
+    """Per-engine weights may differ on the other three dimensions; cost is the same for
+    every engine and profile (#1002), the default's 10%."""
     for name, weights in ENGINE_WEIGHTS.items():
         assert set(weights) == DIMENSIONS, name
         assert sum(weights.values()) == pytest.approx(1.0), name
-    assert any(w["cost"] != DEFAULT_WEIGHTS["cost"] for w in ENGINE_WEIGHTS.values())
+        assert weights["cost"] == DEFAULT_WEIGHTS["cost"] == 0.10, name
+    assert any(w != DEFAULT_WEIGHTS for w in ENGINE_WEIGHTS.values())
+
+
+@pytest.mark.parametrize("cost", [0, 1, 25, 50, 96, 99, 100])
+def test_an_equal_cost_earns_equal_cost_points_on_every_engine(cost: int) -> None:
+    """Two engines with the same cost score get the same cost points: no engine gets a
+    flat bonus for cost (#1002)."""
+    points = {
+        name: compute_confidence(_only("cost", cost), dict(weights))
+        for name, weights in ENGINE_WEIGHTS.items()
+    }
+    assert len(set(points.values())) == 1, points
 
 
 def test_explicit_weights_change_what_cost_is_worth() -> None:

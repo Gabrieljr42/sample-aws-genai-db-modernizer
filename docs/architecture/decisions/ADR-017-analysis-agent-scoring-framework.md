@@ -79,6 +79,8 @@ The analysis agent is the core product value — the component where specialist 
 
 *Superseded (#701): `DYNAMODB_SCORE_WEIGHTS` in `src/tools/analysis/dynamodb_pattern_catalog.py` is 60/20/5/15, and `src/tools/analysis/redis_analysis_tools.py` passes no weights, so Redis uses the 40/30/20/10 default.*
 
+*Superseded (#1002): the weights are catalog data, each engine file's `[score_weights]` tables (`src/catalog/engines/<engine>.toml`), and every engine weights cost the same 10% (ADR-031 Decision 5 Amendment 8). DynamoDB is 64/21/5/10 and DocumentDB 48/26/16/10; Redis (ElastiCache) still uses the 40/30/20/10 default.*
+
 **Alternatives considered:**
 
 - Universal weights: simpler but wrong. DynamoDB's value proposition is access pattern fit (pattern_match), while Redis's is latency improvement (performance). Same weights for both misrepresents the analysis.
@@ -107,7 +109,7 @@ Each decision names the guard test that fails when the code stops following it. 
 | 1. Queries are the atomic unit of analysis | `tests/unit/test_assignment_resolver.py::TestOpenSearchScoresTheQueryNotTheTable`<br>`tests/unit/test_assignment_resolver.py::TestComputeQueryConfidence::test_pattern_match_on_a_table_outside_the_querys_own_tables_has_no_effect` |
 | 2. Specialist-curated pattern catalogs drive scoring | superseded -- #707 (ADR-031 Decision 8 replaces per-engine catalogs with one engine-neutral catalog; its guard is `tests/unit/shared/test_rule_catalog_complete.py`) |
 | 3. Decision trace is a required output | `tests/unit/agents/analysis/test_decision_trace_completeness_properties.py`<br>`tests/unit/agents/analysis/test_decision_trace_artifact.py` |
-| 4. Score weights are per-target configurable | `tests/unit/agents/referee/test_cost_dimension.py::test_an_engine_may_weight_cost_differently_but_keeps_the_same_four_dimensions`<br>`tests/unit/agents/analysis/test_score_weights_per_target.py`<br>superseded -- #701 (the weights table does not match the code, `src/tools/analysis/dynamodb_pattern_catalog.py`) |
+| 4. Score weights are per-target configurable | `tests/unit/agents/referee/test_cost_dimension.py::test_every_engine_weights_cost_the_same_and_keeps_the_same_four_dimensions`<br>`tests/unit/agents/analysis/test_score_weights_per_target.py`<br>superseded -- #701 (the weights table does not match the code, `src/tools/analysis/dynamodb_pattern_catalog.py`)<br>superseded -- #1002 (the weights are each engine file's `[score_weights]`, and every engine weights cost the same, ADR-031 Decision 5 Amendment 8) |
 | 5. Workload segments are per-pattern groupings | `tests/unit/agents/analysis/test_workload_segment_per_pattern.py::test_one_pattern_is_one_segment`<br>`tests/unit/agents/analysis/test_workload_segment_per_pattern.py::test_aurora_standard_crud_is_one_segment_across_tables` |
 
 ## Consequences

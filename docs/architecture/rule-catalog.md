@@ -18,6 +18,20 @@ Generated from `src/catalog/engines/*.toml` and `src/catalog/patterns/*.toml` (A
 | Keyspaces | `keyspaces` | future enhancement | wide_column | yes |
 | Aurora | `aurora` | legacy | relational | yes |
 
+## Score weights
+
+How each engine weighs a query's four score dimensions (ADR-031 Decision 5), from its `[score_weights.<profile>]` tables; the first profile is the engine's default, and an engine with none uses the default split. Every engine gives cost the same weight (#1002).
+
+| Engine | Profile | Pattern match | Complexity | Performance | Cost |
+|---|---|---|---|---|---|
+| DynamoDB | default | 64% | 21% | 5% | 10% |
+| DocumentDB | default | 48% | 26% | 16% | 10% |
+| OpenSearch | search | 45% | 25% | 20% | 10% |
+| OpenSearch | time_series | 40% | 20% | 30% | 10% |
+| Aurora PostgreSQL | default | 40% | 30% | 20% | 10% |
+| Aurora MySQL | default | 40% | 30% | 20% | 10% |
+| Any other engine | default | 40% | 30% | 20% | 10% |
+
 ## Pattern x engine matrix
 
 Each cell is what a query showing the pattern gets on that engine: `fit N` (the engine's analysis reports it, catalog score N), `fit (level)` (reported with a confidence level instead of a score), `anti S` (reported as an anti-pattern, severity S), `native` (has the capability, never penalised), `scan` (lacks it and runs the pattern as a scan: loses the pattern's penalty only on a query that crosses its scan threshold), `redesign -N` (lacks it, bounded redesign, N-point penalty), **no** (cannot run it: takes the full penalty when another engine reports it as a fit), `no` (cannot run it, no score effect; `anti S, no` for a reported anti-pattern), `-` (no effect) or `future` (a future-enhancement placeholder: not modelled yet, never a routing candidate). Penalty is the points lost on an engine that reports it as an anti-pattern, or on every other engine when one reports it as a fit. One rule sizes it (ADR-031 Decision 8 Amendment 6): the penalty basis, the consequence the engines' public documentation states for the pattern, fixes the points (`cannot_run` 40, `needs_redesign` 30, `reads_more_than_returns` 20, `workload_fit` 20, `bounded_limit` 10, `guidance_only` 0).

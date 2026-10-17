@@ -150,6 +150,7 @@ CATALOG_ACCESSORS = {
     "engine_ids",
     "pattern",
     "profile_pattern_types",
+    "score_weights",
 }
 
 _ROUTING = "routing rule still in code (#492: moves into the catalog)"
@@ -319,27 +320,9 @@ ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
     "src/tools/schema/aurora_common/bedrock_delta.py": (frozenset({"_ENGINE_LABELS"}), _WORDING),
 }
 
-_WEIGHTS = _ROUTING + ": score weights per engine (engine files' weights per profile)"
-# Module-level score-weight tables (keyed by the four score dimensions).
-SCORE_WEIGHT_TABLES: dict[str, tuple[frozenset[str], str]] = {
-    "src/tools/analysis/aurora_common_pattern_catalog.py": (
-        frozenset({"AURORA_PG_SCORE_WEIGHTS", "AURORA_MYSQL_SCORE_WEIGHTS"}),
-        _WEIGHTS,
-    ),
-    "src/tools/analysis/documentdb_pattern_catalog.py": (
-        frozenset({"DOCUMENTDB_SCORE_WEIGHTS"}),
-        _WEIGHTS,
-    ),
-    "src/tools/analysis/dynamodb_pattern_catalog.py": (
-        frozenset({"DYNAMODB_SCORE_WEIGHTS"}),
-        _WEIGHTS,
-    ),
-    "src/tools/analysis/opensearch_pattern_catalog.py": (
-        frozenset({"OPENSEARCH_SEARCH_WEIGHTS", "OPENSEARCH_TIMESERIES_WEIGHTS"}),
-        _WEIGHTS,
-    ),
-    "src/tools/analysis/scoring.py": (frozenset({"DEFAULT_WEIGHTS"}), _WEIGHTS),
-}
+# Module-level score-weight tables (keyed by the four score dimensions). None is left: the
+# weights are the engine files' [score_weights] since #1002, so a new table fails here.
+SCORE_WEIGHT_TABLES: dict[str, tuple[frozenset[str], str]] = {}
 
 _THRESHOLD = _ROUTING + ": a threshold or floor (engine files' floors, sizing)"
 _DETECTION = "a detector threshold: detection stays in code (#491 facts module)"
@@ -523,10 +506,6 @@ INLINE_ENGINE_LITERALS: dict[str, tuple[int, str]] = {
     "src/agents/referee/synthesis_handler.py": (3, _WORDING),
     "src/agents/referee/synthesis_report.py": (6, _WORDING),
     "src/agents/analysis/handler.py": (6, _PLUMBING + ": per-engine analysis dispatch"),
-    "src/tools/analysis/score_weights.py": (
-        5,
-        _PLUMBING + ": which catalog module's score weights each engine's analysis uses (#728)",
-    ),
     "src/tools/analysis/dynamodb_analysis_tools.py": (
         1,
         _PLUMBING + ": the engine's own cost estimate reads its request prices (#494)",
@@ -757,6 +736,9 @@ class TestNoRoutingRuleOutsideTheCatalog:
                 "TEXT_SEARCH_ENGINES",
                 "FUZZY_SEARCH_ENGINES",
             },
+            "src/tools/analysis/dynamodb_pattern_catalog.py": {"DYNAMODB_SCORE_WEIGHTS"},
+            "src/tools/analysis/documentdb_pattern_catalog.py": {"DOCUMENTDB_SCORE_WEIGHTS"},
+            "src/tools/analysis/scoring.py": {"DEFAULT_WEIGHTS"},
             "src/agents/referee/query_scoring.py": {
                 "ANTI_PATTERN_PENALTIES",
                 "CAPABILITY_SIGNAL_ENGINES",
@@ -765,12 +747,16 @@ class TestNoRoutingRuleOutsideTheCatalog:
                 "CAPABILITY_EXEMPT_NOTES",
             },
             "src/tools/analysis/opensearch_pattern_catalog.py": {
+                "OPENSEARCH_SEARCH_WEIGHTS",
+                "OPENSEARCH_TIMESERIES_WEIGHTS",
                 "OPENSEARCH_PATTERNS",
                 "OPENSEARCH_ANTI_PATTERNS",
                 "SEARCH_PATTERN_TYPES",
                 "TIMESERIES_PATTERN_TYPES",
             },
             "src/tools/analysis/aurora_common_pattern_catalog.py": {
+                "AURORA_PG_SCORE_WEIGHTS",
+                "AURORA_MYSQL_SCORE_WEIGHTS",
                 "AURORA_COMMON_PATTERNS",
                 "AURORA_COMMON_ANTI_PATTERNS",
                 "CATALOG_ENGINE_HINTS",

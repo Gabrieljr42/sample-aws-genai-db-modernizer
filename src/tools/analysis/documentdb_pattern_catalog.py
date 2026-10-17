@@ -21,6 +21,7 @@ The entries live in ``src/catalog/patterns/<pattern_type>.toml`` (ADR-031 Decisi
 under the names the analysis tools import. Edit the TOML file, not this module.
 """
 
+from src.shared.catalog import score_weights
 from src.tools.analysis.pattern_catalog_base import (
     CatalogAntiPattern,
     CatalogPattern,
@@ -40,13 +41,5 @@ ANTI_PATTERN_BY_ID: dict[str, CatalogAntiPattern] = {
     ap.pattern_id: ap for ap in DOCUMENTDB_ANTI_PATTERNS
 }
 
-# DocumentDB-specific score weights
-# Pattern match weighted high because document patterns are strong signals.
-# Complexity weighted moderate — schema flexibility reduces migration effort.
-# Performance and cost balanced — instance-based pricing matters.
-DOCUMENTDB_SCORE_WEIGHTS: dict[str, float] = {
-    "pattern_match": 0.45,
-    "complexity": 0.25,
-    "performance": 0.15,
-    "cost": 0.15,
-}
+# DocumentDB's score weights: its engine file's [score_weights] (ADR-031 Decision 5, #1002).
+DOCUMENTDB_SCORE_WEIGHTS: dict[str, float] = score_weights("documentdb")

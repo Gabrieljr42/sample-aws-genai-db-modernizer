@@ -403,9 +403,14 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # lose DynamoDB's old small-table credit and 1 its Aurora tie, and go to DocumentDB
     # (its cost weight is 15%): dynamodb -4, aurora_mysql -1, documentdb +5 (every moved
     # query is in the #494 slice 2 PR).
+    # #1002 (every engine weights cost the same 10%): DocumentDB and DynamoDB lose their
+    # 5-point cost bonus over Aurora, so a woocommerce order-items read ties Aurora MySQL
+    # and goes to it as the source-compatible engine, a wp_options read now ties DocumentDB
+    # and DynamoDB (placeholder DynamoDB), and two wp_terms joins leave a DynamoDB tie for
+    # DocumentDB: dynamodb -1, aurora_mysql +1 (every moved query is in the #1002 PR).
     assert rc["before_distribution"] == {
-        "dynamodb": 32,
-        "aurora_mysql": 46,
+        "dynamodb": 31,
+        "aurora_mysql": 47,
         "documentdb": 28,
         "opensearch": 1,
     }

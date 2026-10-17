@@ -48,7 +48,8 @@ from src.shared.catalog.access_classes import (
 from src.tools.analysis.scoring import DEFAULT_WEIGHTS
 
 REPO = Path(__file__).resolve().parents[4]
-DDB_WEIGHTS = {"pattern_match": 0.6, "complexity": 0.2, "performance": 0.05, "cost": 0.15}
+# DynamoDB's weights since #1002 (cost at the common 10%; ADR-031 Decision 5 Amendment 8).
+DDB_WEIGHTS = {"pattern_match": 0.64, "complexity": 0.21, "performance": 0.05, "cost": 0.10}
 AURORA_WEIGHTS = {"pattern_match": 0.4, "complexity": 0.3, "performance": 0.2, "cost": 0.1}
 
 
@@ -427,7 +428,7 @@ class TestTheQueryScoresItsOwnPattern:
         # pattern 75 (key-scoped on DynamoDB), complexity 80, performance 60. Cost is the
         # query's own (#494), not the tables' 70: DynamoDB has no standing cost and one
         # read a second costs it $0.32 a month, a cost score of 100.
-        expected = int(75 * 0.6 + 80 * 0.2 + 60 * 0.05 + 100 * 0.15)
+        expected = int(75 * 0.64 + 80 * 0.21 + 60 * 0.05 + 100 * 0.10)
         assert _score(JOIN, "dynamodb", {"dynamodb": analysis}) == expected
 
     def test_a_partition_range_read_takes_dynamodbs_query_rating(self):
@@ -644,7 +645,7 @@ class TestTheSwitchIsTheRoutingPath:
         # The cost dimension is the query's own (#494): DynamoDB has no standing cost
         # (100); Aurora PostgreSQL's $250 is shared by the workload's two queries, $125
         # each, 100 * 100 / (100 + 125) = 44.
-        assert ladder["dynamodb"] == int(100 * 0.6 + 80 * 0.2 + 60 * 0.05 + 100 * 0.15)
+        assert ladder["dynamodb"] == int(100 * 0.64 + 80 * 0.21 + 60 * 0.05 + 100 * 0.10)
         assert ladder["aurora_postgresql"] == int(80 * 0.4 + 80 * 0.3 + 60 * 0.2 + 44 * 0.1)
 
     def test_the_assignment_handler_writes_no_shadow(self, tmp_path):

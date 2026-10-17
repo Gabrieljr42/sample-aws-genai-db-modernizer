@@ -16,6 +16,7 @@ The entries live in ``src/catalog/patterns/<pattern_type>.toml`` (ADR-031 Decisi
 under the names the analysis tools import. Edit the TOML file, not this module.
 """
 
+from src.shared.catalog import score_weights
 from src.shared.catalog.patterns import profile_pattern_types
 from src.tools.analysis.pattern_catalog_base import (
     CatalogAntiPattern,
@@ -49,24 +50,13 @@ ANTI_PATTERN_BY_ID: dict[str, CatalogAntiPattern] = {
 
 
 # ==========================================================================
-# Score weights (per-workload)
+# Score weights (per workload): the engine file's [score_weights] (ADR-031 Decision 5)
 # ==========================================================================
 
 # Search: pattern_match weighted highest — catalog scores directly reflect search fitness
-OPENSEARCH_SEARCH_WEIGHTS: dict[str, float] = {
-    "pattern_match": 0.45,
-    "complexity": 0.25,
-    "performance": 0.20,
-    "cost": 0.10,
-}
-
+OPENSEARCH_SEARCH_WEIGHTS: dict[str, float] = score_weights("opensearch", "search")
 # Time-series: performance weighted higher — ingest throughput and aggregation latency are critical
-OPENSEARCH_TIMESERIES_WEIGHTS: dict[str, float] = {
-    "pattern_match": 0.40,
-    "complexity": 0.20,
-    "performance": 0.30,
-    "cost": 0.10,
-}
+OPENSEARCH_TIMESERIES_WEIGHTS: dict[str, float] = score_weights("opensearch", "time_series")
 
 
 # The high-ingest threshold is shared with every engine: pattern_catalog_base.

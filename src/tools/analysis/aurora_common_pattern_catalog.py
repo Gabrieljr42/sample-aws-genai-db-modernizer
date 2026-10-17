@@ -16,6 +16,7 @@ The entries live in ``src/catalog/patterns/<pattern_type>.toml`` (ADR-031 Decisi
 under the names the analysis tools import. Edit the TOML file, not this module.
 """
 
+from src.shared.catalog import score_weights
 from src.shared.catalog.patterns import catalog_entries
 from src.tools.analysis.pattern_catalog_base import (
     CatalogAntiPattern,
@@ -93,22 +94,11 @@ ANTI_PATTERN_BY_ID: dict[str, CatalogAntiPattern] = {
 
 
 # ==========================================================================
-# Score weights
+# Score weights: the engine files' [score_weights] (ADR-031 Decision 5, #1002)
 # ==========================================================================
 
-AURORA_PG_SCORE_WEIGHTS: dict[str, float] = {
-    "pattern_match": 0.40,
-    "complexity": 0.30,
-    "performance": 0.20,
-    "cost": 0.10,
-}
-
-AURORA_MYSQL_SCORE_WEIGHTS: dict[str, float] = {
-    "pattern_match": 0.40,
-    "complexity": 0.30,
-    "performance": 0.20,
-    "cost": 0.10,
-}
+AURORA_PG_SCORE_WEIGHTS: dict[str, float] = score_weights("aurora_postgresql")
+AURORA_MYSQL_SCORE_WEIGHTS: dict[str, float] = score_weights("aurora_mysql")
 
 
 # ==========================================================================

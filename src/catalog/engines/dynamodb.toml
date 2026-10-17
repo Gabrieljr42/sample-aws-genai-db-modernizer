@@ -21,3 +21,13 @@ read_unit_price_per_million = 0.125
 read_unit_bytes = 4096
 write_unit_price_per_million = 0.625
 write_unit_bytes = 1024
+
+# Score-dimension weights (ADR-031 Decision 5). Cost is the same 10% for every engine
+# (#1002); the first profile is the engine's default.
+# The other three keep the 60/20/5 balance they had at a 15% cost weight, scaled by
+# 90/85 and rounded to whole percent.
+[score_weights.default]
+pattern_match = 0.64
+complexity = 0.21
+performance = 0.05
+cost = 0.10
