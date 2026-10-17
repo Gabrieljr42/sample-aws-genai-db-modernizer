@@ -79,7 +79,9 @@ keeping apart (one whose ``source_tables`` include the source table and whose
 5. **GSIs with the same name and different keys** in tables that will merge
    (same name, or the same rows): the keys most of those tables give the name
    keep it (then fewer key attributes), every other GSI of that name is
-   renamed after its own keys (``<name>_<KeyAttributes>``).
+   renamed after its own keys (``<name>_<KeyAttributes>``). A new or renamed
+   GSI name longer than :data:`NAME_LIMIT` is cut with a hash of the full name
+   (:func:`fit_name`), so it stays unique and the same in every run (#866).
 
 Finally :func:`dedupe_gsis` keeps one GSI per key schema on each merged table.
 Mechanical changes (names, labels, folds without writes, renamed or combined
@@ -90,13 +92,14 @@ note in its ``key_condition``.
 What is left (a table name used for different rows, a key no group can safely
 give up, sort-key templates over different columns, key attribute types that
 disagree, an item collection and a single-entity table that do not map, more
-than :data:`GSI_LIMIT` GSIs on one merged table) stays a merge failure for the
-fix round.
+than :data:`GSI_LIMIT` GSIs on one merged table, a table or GSI name over
+:data:`NAME_LIMIT` characters) stays a merge failure for the fix round.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -106,6 +109,9 @@ from src.agents.schema_design.scope import normalize_table_name
 
 GSI_LIMIT = 20
 """GSIs DynamoDB allows on one table by default."""
+
+NAME_LIMIT = 255
+"""Longest table or index name DynamoDB accepts (#866)."""
 
 READ_OPERATIONS = frozenset({"GetItem", "Query", "BatchGetItem", "TransactGetItems"})
 _TOKEN_RE = re.compile(r"\{([^{}]+)\}")
@@ -946,10 +952,25 @@ def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def fit_name(name: str, limit: int = NAME_LIMIT) -> str:
+    """``name`` cut to ``limit`` characters, stably (#866).
+
+    A name within the limit is returned as is. A longer one keeps its first
+    characters and ends ``_<8 hex>``, a hash of the whole name, so two long
+    names that share a prefix still get different results, and the same name
+    always gets the same result.
+    """
+    if len(name) <= limit:
+        return name
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+    return f"{name[: limit - len(digest) - 1]}_{digest}"
+
+
 def _unique_gsi_name(wanted: str, taken: set[str]) -> str:
-    name, n = wanted, 2
+    """``wanted`` (or ``wanted2``, ``wanted3`` ...), within :data:`NAME_LIMIT` and not taken."""
+    name, n = fit_name(wanted), 2
     while name in taken:
-        name, n = f"{wanted}{n}", n + 1
+        name, n = fit_name(f"{wanted}{n}"), n + 1
     return name
 
 
@@ -1576,6 +1597,27 @@ def dedupe_gsis(merged: dict, notes: list[str] | None = None) -> None:
                 f"{name}: GSI {old} has the same keys as {new}; kept {new}"
                 for old, new in renames.items()
             )
+
+
+def name_length_failures(tables: list[dict], prefix: str) -> list[str]:
+    """A failure for each table or GSI name longer than DynamoDB accepts (#866)."""
+    failures: list[str] = []
+    for table in tables:
+        name = str(table.get("table_name") or "")
+        if len(name) > NAME_LIMIT:
+            failures.append(
+                f"{prefix}table name '{name[:40]}...' is {len(name)} characters, over the "
+                f"DynamoDB limit of {NAME_LIMIT}. Use a shorter table name."
+            )
+        for gsi in _dicts(table.get("gsis")):
+            gsi_name = str(gsi.get("gsi_name") or "")
+            if len(gsi_name) > NAME_LIMIT:
+                failures.append(
+                    f"{prefix}GSI name '{gsi_name[:40]}...' on table '{name[:40]}' is "
+                    f"{len(gsi_name)} characters, over the DynamoDB limit of {NAME_LIMIT}. "
+                    "Use a shorter GSI name."
+                )
+    return failures
 
 
 def gsi_limit_failures(tables: list[dict], prefix: str) -> list[str]:

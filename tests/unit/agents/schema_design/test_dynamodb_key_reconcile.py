@@ -1882,3 +1882,129 @@ class TestPartitionKeyTypeFromTheSource:
 
         assert len(merge_failures(merged)) == 1
         assert merged["table_definitions"][0]["partition_key"] == _key("topic_id", "N")
+
+
+# ---------------------------------------------------------------------------
+# DynamoDB's 255-character name limit (#866)
+# ---------------------------------------------------------------------------
+
+NAME_LIMIT = 255
+
+
+def _options_with_gsi(gsi_name: str, sort_key: list[str] | None) -> dict:
+    src = "wordpress.wp_options"
+    attrs = [_attr(c, src, type_="S") for c in ("option_name", "autoload", "option_id")]
+    t = _single(
+        "WpOptions",
+        src,
+        "option_name",
+        attrs=attrs,
+        gsis=[_gsi(gsi_name, ["autoload"], sort_key)],
+    )
+    t["partition_key"] = _key("option_name", "S")
+    return t
+
+
+def _all_gsi_names(merged: dict) -> list[str]:
+    return [g["gsi_name"] for t in merged["table_definitions"] for g in t.get("gsis") or []]
+
+
+class TestNameLimit:
+    def test_a_renamed_250_character_gsi_name_is_capped_at_255(self):
+        """The #854 review case: a 250-character name renamed with a key suffix was 259."""
+        long_name = "G" * 250
+        drafts = [
+            _draft([_options_with_gsi(long_name, ["option_id"])], []),
+            _draft([_options_with_gsi(long_name, None)], []),
+            _draft([_options_with_gsi(long_name, ["option_id"])], []),
+        ]
+
+        results = set()
+        for order, merged in _every_order(drafts):
+            names = _all_gsi_names(merged)
+            assert len(names) == 2, order
+            assert long_name in names, order
+            assert all(len(n) <= NAME_LIMIT for n in names), (order, [len(n) for n in names])
+            assert len(set(names)) == 2, order
+            assert merge_failures(merged) == [], order
+            _assert_every_pattern_is_served(merged)
+            results.add(tuple(sorted(names)))
+        assert len(results) == 1, results  # stable: the same capped name in every order
+
+    def test_capped_names_stay_unique(self):
+        """Three key sets under one long name: the two renamed GSIs keep distinct names."""
+        long_name = "G" * 250
+        drafts = [
+            _draft([_options_with_gsi(long_name, ["option_id"])], []),
+            _draft([_options_with_gsi(long_name, ["option_id"])], []),
+            _draft([_options_with_gsi(long_name, None)], []),
+            _draft([_options_with_gsi(long_name, ["option_name"])], []),
+        ]
+
+        merged = merge_group_drafts(drafts, "dynamodb")
+
+        names = _all_gsi_names(merged)
+        assert len(names) == 3
+        assert len(set(names)) == 3
+        assert all(len(n) <= NAME_LIMIT for n in names)
+        assert merge_failures(merged) == []
+
+    def test_a_short_renamed_gsi_name_is_unchanged(self):
+        """Names under the limit keep the readable ``<name>_<key attributes>`` form."""
+        drafts = [
+            _draft([_options_with_gsi("OptionsByAutoload", ["option_id"])], []),
+            _draft([_options_with_gsi("OptionsByAutoload", ["option_id"])], []),
+            _draft([_options_with_gsi("OptionsByAutoload", None)], []),
+        ]
+
+        merged = merge_group_drafts(drafts, "dynamodb")
+
+        assert sorted(_all_gsi_names(merged)) == ["OptionsByAutoload", "OptionsByAutoload_Autoload"]
+
+    def test_a_gsi_name_over_255_characters_fails_the_merge(self):
+        drafts = [
+            _draft([_options_with_gsi("G" * 256, None)], []),
+            _draft([_options_with_gsi("G" * 256, None)], []),
+        ]
+
+        merged = merge_group_drafts(drafts, "dynamodb")
+
+        [failure] = merge_failures(merged)
+        assert "255" in failure and "GSI" in failure
+        assert merged["validation_passed"] is False
+
+    def test_a_table_name_over_255_characters_fails_the_merge(self):
+        src = "shop.orders"
+        name = "T" * 256
+        drafts = [_draft([_single(name, src, "order_id")], []) for _ in range(2)]
+
+        merged = merge_group_drafts(drafts, "dynamodb")
+
+        [failure] = merge_failures(merged)
+        assert "255" in failure and "table" in failure
+
+    def test_names_of_exactly_255_characters_pass(self):
+        src = "shop.orders"
+        name = "T" * NAME_LIMIT
+        table = _single(name, src, "order_id", gsis=[_gsi("G" * NAME_LIMIT, ["order_id"])])
+        merged = merge_group_drafts([_draft([table], []), _draft([table], [])], "dynamodb")
+
+        assert merge_failures(merged) == []
+
+    def test_a_new_gsi_for_a_replaced_key_is_capped(self):
+        """The GSI that keeps a replaced key is named after the table: a long table name."""
+        long_table = "orders_" + "x" * 240
+        drafts = TestDifferentKeySchemas()._two_groups()
+        for draft in drafts:
+            for table in draft["table_definitions"]:
+                table["table_name"] = long_table
+            for ap in draft["access_patterns"]:
+                ap["table_name"] = long_table
+
+        merged = merge_group_drafts(drafts, "dynamodb", unique_keys=UNIQUE)
+
+        names = _all_gsi_names(merged)
+        assert names, merged["table_definitions"]
+        assert all(len(n) <= NAME_LIMIT for n in names), [len(n) for n in names]
+        assert merge_failures(merged) == []
+        _assert_every_pattern_is_served(merged)

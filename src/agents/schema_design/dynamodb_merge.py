@@ -53,7 +53,8 @@ Merge rule
    name used for two different designs that rule 1a could not reconcile, the
    same entity type for the same source table with contradictory PK/SK
    templates (tokens compared by source column) in tables from different
-   groups, and a merged table with more GSIs than DynamoDB allows by default.
+   groups, a merged table with more GSIs than DynamoDB allows by default, and
+   a table or GSI name over DynamoDB's 255-character limit (#866).
 4. **Independent homes are warnings.** When a source table is the *primary
    entity* (its own entity in an item collection, or the base entity of a
    single-entity table) of two or more tables designed by different groups,
@@ -941,7 +942,11 @@ def finish_merge(
     GSIs with the same keys on one merged table are combined first (one GSI per
     key schema, the wider projection kept).
     """
-    from src.agents.schema_design.dynamodb_key_reconcile import dedupe_gsis, gsi_limit_failures
+    from src.agents.schema_design.dynamodb_key_reconcile import (
+        dedupe_gsis,
+        gsi_limit_failures,
+        name_length_failures,
+    )
 
     homes = reconciliation.homes
     if "table_definitions" in merged or homes:
@@ -961,6 +966,7 @@ def finish_merge(
         reconciliation.failures
         + entity_conflicts(homes)
         + gsi_limit_failures([h.table for h in homes], MERGE_FAILURE_PREFIX)
+        + name_length_failures([h.table for h in homes], MERGE_FAILURE_PREFIX)
     )
     existing = [f for f in merged.get("validation_failures") or [] if isinstance(f, str)]
     if "validation_failures" in merged or failures:
