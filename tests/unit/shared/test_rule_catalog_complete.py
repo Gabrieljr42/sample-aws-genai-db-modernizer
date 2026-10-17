@@ -282,7 +282,7 @@ ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
         _PLUMBING,
     ),
     "src/tools/schema/aurora_common/delta_merge.py": (
-        frozenset({"_GENERATORS", "_DIALECTS"}),
+        frozenset({"_GENERATORS", "_DIALECTS", "_OUTPUT_CONTRACTS"}),
         _PLUMBING,
     ),
     "src/tools/schema/aurora_common/source_family.py": (

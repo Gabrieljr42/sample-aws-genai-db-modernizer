@@ -75,7 +75,6 @@ def analyze_for_dynamodb_deterministic(
     duration = (datetime.now() - start_time).total_seconds()
 
     output = AnalysisOutputContract(
-        contract_version="2.1",
         agent_metadata=AgentMetadata(
             agent_name="dynamodb-analysis-agent",
             agent_version="1.1.0",

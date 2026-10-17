@@ -33,18 +33,16 @@ Database Modernizer Assessment uses contracts (Pydantic models) to define input/
 **Example:**
 
 ```python
-# Agent v2.3.1 produces contract v1.2
+# Agent v2.3.1 produces contract v1.2 (the model's contract_version default)
 output = CollectorOutput(
     collector_version="2.3.1",  # Agent version
-    contract_version="1.2",      # Contract version
-    ...
+    ...                         # contract_version: the model's default, "1.2"
 )
 
 # Agent v2.4.0 also produces contract v1.2 (no contract change)
 output = CollectorOutput(
     collector_version="2.4.0",  # Different agent version
-    contract_version="1.2",      # Same contract version
-    ...
+    ...                         # contract_version: still the model's default, "1.2"
 )
 ```
 
@@ -176,7 +174,6 @@ class MySQLCollectorAgent:
     """MySQL Collector Agent"""
 
     AGENT_VERSION = "2.3.1"      # Agent code version
-    CONTRACT_VERSION = "1.2"     # Contract version this agent produces
 
     def collect(self, input_contract: dict) -> CollectorOutput:
         """
@@ -186,7 +183,7 @@ class MySQLCollectorAgent:
         """
         output = CollectorOutput(
             collector_version=self.AGENT_VERSION,    # Agent version
-            contract_version=self.CONTRACT_VERSION,  # Contract version
+            # contract_version is not passed: the model's default applies (Decision 2)
             job_id=input_contract['job_id'],
             ...
         )
@@ -353,7 +350,6 @@ class MySQLCollectorAgent:
     """
 
     AGENT_VERSION = "2.3.1"      # This agent's code version
-    CONTRACT_VERSION = "1.2"     # Contract version this agent produces
 
     def __init__(self, input_contract: dict):
         self.input_contract = input_contract
@@ -371,7 +367,7 @@ class MySQLCollectorAgent:
         output = CollectorOutput(
             # Version fields (REQUIRED)
             collector_version=self.AGENT_VERSION,    # Agent version
-            contract_version=self.CONTRACT_VERSION,  # Contract version
+            # contract_version: the model's default, never passed (Decision 2)
 
             # Data fields
             job_id=self.job_id,
@@ -586,7 +582,7 @@ Each decision names the guard test that fails when the code stops following it. 
 | Decision | Enforced by |
 |---|---|
 | 1. Every contract carries a `contract_version` | `tests/contract/test_written_contracts_versioned.py::test_every_written_model_carries_contract_version`<br>`tests/contract/test_written_contracts_legacy_load.py::test_a_file_written_before_the_version_still_loads`<br>`tests/unit/agents/referee/test_derived_versions_carry_contract_version.py`<br>none yet -- #1006 (five contracts still declare the version without the MAJOR.MINOR pattern)<br>none yet -- #973 (the DynamoDB decision trace is untyped) |
-| 2. The agent version is a separate field | none yet -- #974 (writers still use a literal) |
+| 2. The agent version is a separate field | `tests/contract/test_writers_take_version_from_model.py::test_no_writer_passes_a_contract_version_literal`<br>`tests/unit/agents/analysis/test_analysis_writes_the_model_version.py`<br>`tests/unit/tools/schema/aurora_common/test_delta_merge.py::test_the_output_version_is_the_engine_contract_default` |
 | 3. Contract versions are MAJOR.MINOR, and a shape change moves the version | `tests/contract/test_schema_snapshot.py::test_schema_snapshot_file_matches_a_fresh_rebuild`<br>`tests/unit/scripts/test_contract_schema_snapshot.py`<br>`tests/contract/test_value_set_snapshot.py::test_value_set_snapshot_matches_a_fresh_rebuild` |
 | 4. Readers accept any MINOR of the same MAJOR and refuse a different MAJOR | none yet -- #971 |
 | 5. Optional fields by default | `tests/unit/scripts/test_contract_schema_snapshot.py`<br>none yet -- #976 (`extra="forbid"` per contract) |

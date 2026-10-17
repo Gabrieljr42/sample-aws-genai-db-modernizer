@@ -57,7 +57,6 @@ def analyze_for_aurora_mysql_deterministic(
 
     # === 4. Output contract v2.1 ===
     output = AnalysisOutputContract(
-        contract_version="2.1",
         agent_metadata=AgentMetadata(
             agent_name="aurora-mysql-analysis-agent",
             agent_version="1.0.0",

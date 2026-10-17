@@ -138,8 +138,7 @@ Multiple agent versions can produce the same contract version.
 # Agent v2.3.1 produces contract v1.2
 output = CollectorOutput(
     collector_version="2.3.1",  # Agent version
-    contract_version="1.2",      # Contract version
-    ...
+    ...                         # contract_version: the model's default, "1.2"
 )
 
 # Agent v2.4.0 also produces contract v1.2
