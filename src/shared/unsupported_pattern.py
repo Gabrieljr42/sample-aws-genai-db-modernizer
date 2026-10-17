@@ -58,6 +58,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.shared.sql_spans import LITERALS_AND_COMMENTS, sub_spans
+
 
 def unsupported_pattern_ids(u: dict[str, Any]) -> list[str]:
     """Query ids for one entry, whichever key they're under.
@@ -119,16 +121,10 @@ def unsupported_pattern_mitigation(u: dict[str, Any]) -> str | None:
 # Comments and string literals are stripped before any other check, so a
 # GROUP BY, HAVING, function call, OVER, or ROLLUP/CUBE/GROUPING SETS that
 # only appears inside one of them (dead SQL, or incidental text in a quoted
-# value) never changes the verdict either way. A single alternation, applied
-# left to right, so an opening ``'``/``"``/``--``/``/*`` is never
-# misinterpreted while a different kind of literal is still open.
-_STRIP_RE = re.compile(
-    r"/\*.*?\*/"  # block comment
-    r"|--[^\n]*"  # line comment
-    r"|'(?:[^'\\]|\\.|'')*'"  # single-quoted string (backslash or doubled '' escapes)
-    r'|"(?:[^"\\]|\\.|"")*"',  # double-quoted string/identifier (same escapes)
-    re.DOTALL,
-)
+# value) never changes the verdict either way. One left-to-right scan
+# (``sql_spans.LITERALS_AND_COMMENTS``, linear time, #886), so an opening
+# ``'``/``"``/``--``/``/*`` is never misinterpreted while a different kind of
+# literal is still open.
 
 _GROUP_BY_RE = re.compile(r"\bGROUP\s+BY\b", re.IGNORECASE)
 _HAVING_RE = re.compile(r"\bHAVING\b", re.IGNORECASE)
@@ -139,7 +135,7 @@ _SUPER_AGGREGATE_RE = re.compile(
 _FUNCTION_CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 # A function name quoted with backticks or double quotes (e.g.
 # ``GROUP_CONCAT`` ( x ) or "string_agg"(x)) must be matched against the
-# ORIGINAL text, before _STRIP_RE runs: a double-quoted name is stripped
+# ORIGINAL text, before the stripping runs: a double-quoted name is stripped
 # outright (treated as a string literal), and a backtick-quoted one survives
 # but no longer sits directly next to "(" (the closing backtick is in the
 # way), so _FUNCTION_CALL_RE's word-boundary match never fires for either.
@@ -258,7 +254,7 @@ def is_dedup_only_group_by(query_sql: str | None) -> bool:
       aggregate, an unrecognised one, or a window function the ``OVER``
       check alone might miss -- disqualifies the query. A quoted function
       name (`` `GROUP_CONCAT` (x) `` or ``"string_agg"(x)``) is checked
-      against the original text first, before stripping: ``_STRIP_RE``
+      against the original text first, before stripping: the stripping
       would otherwise erase a double-quoted name outright (it reads as a
       string literal) or leave a backtick-quoted one with its closing
       backtick between the name and ``(``, so neither ever matches
@@ -280,7 +276,7 @@ def is_dedup_only_group_by(query_sql: str | None) -> bool:
         if match.group(1).lower() not in _SCALAR_OPERATION_ALLOWLIST:
             return False
 
-    sql = _STRIP_RE.sub(" ", original)
+    sql = strip_comments_and_literals(original)
     if not _GROUP_BY_RE.search(sql):
         return False
     if _HAVING_RE.search(sql):
@@ -317,7 +313,7 @@ def strip_comments_and_literals(query_sql: str | None) -> str:
     operator or function call that only appears inside a literal or comment
     never counts as part of the query.
     """
-    return _STRIP_RE.sub(" ", query_sql or "")
+    return sub_spans(query_sql or "", LITERALS_AND_COMMENTS, lambda _span: " ")
 
 
 def non_scalar_function_names(query_sql: str | None) -> set[str]:
@@ -340,7 +336,7 @@ def non_scalar_function_names(query_sql: str | None) -> set[str]:
         for m in _QUOTED_FUNCTION_CALL_RE.finditer(original)
         if m.group(1).lower() not in _SCALAR_OPERATION_ALLOWLIST
     }
-    for match in _FUNCTION_CALL_RE.finditer(_STRIP_RE.sub(" ", original)):
+    for match in _FUNCTION_CALL_RE.finditer(strip_comments_and_literals(original)):
         name = match.group(1).lower()
         if name not in _SCALAR_OPERATION_ALLOWLIST:
             names.add(name)
