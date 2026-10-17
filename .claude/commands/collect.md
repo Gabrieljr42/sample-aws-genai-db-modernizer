@@ -15,7 +15,7 @@ Read files with the Read tool (use `offset`/`limit` for large files). Search fil
 
 - A collector output JSON file exists (from running the collection SQL script against the source database)
 - The file path is provided as argument OR the user specifies it
-- The path points at the `.json` file itself, not a `.zip` archive (unzip it first if needed)
+- The path points at the `.json` file; a bundled sample's missing `.json` is extracted from its tracked `.zip` by the script, so no unzip step is needed
 
 ## Steps
 

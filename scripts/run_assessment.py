@@ -254,8 +254,12 @@ def _write_state(state: dict) -> None:
 def phase_collect(collector_file: str, db_name: str | None, store) -> tuple[str, str]:
     """Parse collector output and initialize artifacts. Returns (job_id, db_name)."""
     _banner("COLLECT")
-    if not os.path.exists(collector_file):
-        _error("collect", f"File not found: {collector_file}")
+    from src.shared.sample_collection import CollectionPathError, resolve_collection_path
+
+    try:
+        collector_file = resolve_collection_path(collector_file)
+    except CollectionPathError as exc:
+        _error("collect", str(exc))
 
     # Check the file size before reading it into memory (#142).
     try:

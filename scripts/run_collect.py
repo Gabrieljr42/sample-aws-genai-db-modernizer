@@ -110,8 +110,12 @@ def main() -> None:
         except ValueError as exc:
             _error(str(exc))
 
-    if not os.path.exists(args.file):
-        _error(f"File not found: {args.file}")
+    from src.shared.sample_collection import CollectionPathError, resolve_collection_path
+
+    try:
+        args.file = resolve_collection_path(args.file)
+    except CollectionPathError as exc:
+        _error(str(exc))
 
     # Check the file size before reading it into memory (#142).
     try:

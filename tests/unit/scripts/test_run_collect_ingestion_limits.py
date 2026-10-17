@@ -8,14 +8,10 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 import pytest
 
 from scripts import run_collect
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-WORDPRESS_ZIP = REPO_ROOT / "docs" / "examples" / "wordpress" / "wordpress.zip"
 
 RAW_COLLECTION = {
     "collection_version": 1,
@@ -108,10 +104,15 @@ def test_rejects_too_many_queries(tmp_path, monkeypatch, capsys):
 
 
 def test_rejects_zip_archive_with_clear_message(tmp_path, monkeypatch, capsys):
-    """#142 round 1 (I1): the bundled samples are shipped as .zip; passing one
-    directly (instead of the .json inside) must fail with a clear message."""
+    """#142 round 1 (I1): a zip that is not a collection archive must fail with
+    a clear message. (A sample zip with its expected member is extracted, #331.)"""
+    import zipfile
+
+    bogus = tmp_path / "bogus.zip"
+    with zipfile.ZipFile(bogus, "w") as zf:
+        zf.writestr("something-else.txt", "x")
     with pytest.raises(SystemExit):
-        _run(monkeypatch, tmp_path, str(WORDPRESS_ZIP))
+        _run(monkeypatch, tmp_path, str(bogus))
 
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["status"] == "error"

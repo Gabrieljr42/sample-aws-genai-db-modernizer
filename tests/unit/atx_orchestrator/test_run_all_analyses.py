@@ -29,8 +29,9 @@ from src.atx_orchestrator.core import _ANALYSIS_ENGINES, ingest_offline_collecti
 from src.atx_orchestrator.runtime.store import upgrade_store
 from src.storage.local_store import LocalArtifactStore
 
-# Only the .zip is committed (the README has you unzip it), so read the sample
-# straight from the archive — the unzipped .json is not present in a fresh checkout.
+# Only the .zip is committed (the scripts extract the .json on first use, #331),
+# so read the sample straight from the archive — the .json is not present in a
+# fresh checkout.
 SAMPLE_ZIP = Path(__file__).resolve().parents[3] / "docs/examples/wordpress/wordpress.zip"
 SAMPLE_MEMBER = "wordpress-collection.json"
 
