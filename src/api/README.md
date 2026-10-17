@@ -31,3 +31,5 @@ uv run python scripts/redact_stored_inputs.py --artifact-dir ./artifacts
 ```
 
 It prints the rewritten and skipped file paths (never their contents) and is safe to run more than once.
+
+Live collection reads the secret named by either form. The API forwards `connection.secret_arn` or `connection.secret_name` as the collector's one secret id (`secret_arn` in the execution input, `SECRET_ARN` for the collector), and the collector passes it to Secrets Manager as `SecretId`, which takes an ARN or a name. When both are given, `credentials_type` picks one (`secrets-arn` or `secrets-name`); when only one is given, that one is used. A name is looked up in the collector's own account and region; a secret shared from another account needs its full ARN.

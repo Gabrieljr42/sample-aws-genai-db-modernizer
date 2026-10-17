@@ -102,7 +102,7 @@ curl -X POST http://localhost:8000/api/v1/analyses \
 | `port` | Yes | — | Database port (typically 3306) |
 | `database_name` | Yes | — | Schema/database to analyze |
 | `mode` | Yes | — | `live` or `ddl` |
-| `live_config.secret_arn` | Yes (live) | — | Secrets Manager ARN with DB credentials |
+| `live_config.secret_arn` | Yes (live) | — | Secrets Manager secret with the DB credentials: its ARN or its name (either form of `SecretId`); a name is looked up in the collector's own account and region, so a secret shared from another account needs its full ARN |
 | `live_config.automation_instance_id` | Yes (live) | — | SSM-managed EC2 instance ID |
 | `aws_config.region` | Yes | — | AWS region |
 | `aws_config.db_instance_identifier` | No | — | RDS instance ID (enables RDS API + CloudWatch + PI) |

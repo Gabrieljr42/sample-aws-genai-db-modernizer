@@ -31,7 +31,12 @@ class CollectionMode(str, Enum):
 class LiveConnectionConfig(BaseModel):
     """Configuration for LIVE mode — DB access via SSM Run Command on automation instance."""
 
-    secret_arn: str = Field(description="AWS Secrets Manager ARN containing username/password")
+    secret_arn: str = Field(
+        description=(
+            "AWS Secrets Manager secret id (its ARN or its name) of the secret holding "
+            "username/password"
+        )
+    )
     automation_instance_id: str = Field(
         description="EC2 instance ID of the automation machine (SSM-managed, has DB drivers)"
     )

@@ -190,6 +190,18 @@ class ConnectionDetails(BaseModel):
     def _normalize_credentials_type(cls, value: object) -> object:
         return value.strip().lower() if isinstance(value, str) else value
 
+    def secret_reference(self) -> str:
+        """The secret id live collection reads: the ARN or the name, whichever was given.
+
+        The collector passes it to Secrets Manager as ``SecretId``, which takes either form
+        (#991). ``credentials_type`` picks one when both are set; otherwise the one given is
+        used, and ``""`` when neither is.
+        """
+        by_arn, by_name = self.secret_arn or "", self.secret_name or ""
+        if self.credentials_type == "secrets-name":
+            return by_name or by_arn
+        return by_arn or by_name
+
 
 class CollectionOptions(BaseModel):
     anonymize_pii: bool = True
