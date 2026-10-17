@@ -325,6 +325,7 @@ class AssignmentResolver:
                     homogeneous_aurora,
                     analysis,
                     pattern_model=scoring_ctx.pattern_model,
+                    cost_score=scoring_ctx.cost_score(query, homogeneous_aurora),
                 )
                 penalty = anti_pattern_map.get((qid, homogeneous_aurora), 0)
                 scores.setdefault(qid, {})[homogeneous_aurora] = max(0, base_score - penalty)
@@ -771,7 +772,12 @@ class AssignmentResolver:
                         ladder[engine] = {"gate": gate}
                         continue
                     base = compute_query_confidence(
-                        qid, query, engine, analysis, pattern_model=scoring_ctx.pattern_model
+                        qid,
+                        query,
+                        engine,
+                        analysis,
+                        pattern_model=scoring_ctx.pattern_model,
+                        cost_score=scoring_ctx.cost_score(query, engine),
                     )
                     penalty = anti_pattern_map.get((qid, engine), 0)
                     used = scores.get(qid, {}).get(engine, 0)

@@ -140,7 +140,10 @@ class TestTheRerouteOnWordpress:
         # The reroute's version carries its access-pattern record too (#728).
         assert rerouted["v3_access_patterns"]["queries"]
         (reroute,) = rerouted["v3"]["post_schema_reroutes"]
-        assert (reroute["score_before"], reroute["score_after"]) == (90, 51)
+        # #494 slice 2: the INSERT's cost dimension is its own, not its table's cost band:
+        # DynamoDB 100 (its writes cost $0.16 a month) instead of 65, Aurora MySQL 98 (its
+        # $250 standing cost shared by 107 queries) instead of 55; the scores were 90 and 51.
+        assert (reroute["score_before"], reroute["score_after"]) == (95, 55)
 
     def test_the_rerouted_version_never_claims_customer_approval(self, rerouted):
         assert rerouted["v2"]["status"] == "customer_approved"

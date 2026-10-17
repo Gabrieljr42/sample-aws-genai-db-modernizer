@@ -1201,8 +1201,10 @@ class TestTextSearchCapabilityScopedPenalty:
         result = resolver.resolve(triage, analysis, collector)
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         assert q1.assigned_engine == "documentdb"
-        # unpenalized -- documentdb is exempt from wildcard-search: its base score, 75
-        assert q1.confidence == int(0.45 * 45 + 0.25 * 100 + 0.15 * 100 + 0.15 * 100)
+        # unpenalized -- documentdb is exempt from wildcard-search: its base score, 65.
+        # #494: the cost dimension is the query's own, DocumentDB's $200 standing cost
+        # carried by the workload's one query: 100 * 100 / (100 + 200) = 33.
+        assert q1.confidence == int(0.45 * 45 + 0.25 * 100 + 0.15 * 100 + 0.15 * 33)
         assert "documentdb lacks required capability" not in q1.assignment_reason
         # #493: the reason is the substring-match pattern's, the more specific one for a
         # literal leading wildcard -- here a word search, so not penalised, with the redesign.
@@ -1246,7 +1248,8 @@ class TestTextSearchCapabilityScopedPenalty:
         result = resolver.resolve(triage, analysis, collector)
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         assert q1.assigned_engine == "documentdb"
-        assert q1.confidence == int(0.45 * 75 + 0.25 * 100 + 0.15 * 100 + 0.15 * 100)  # unpenalized
+        # unpenalized; #494: the query's own cost on DocumentDB, as above (33).
+        assert q1.confidence == int(0.45 * 75 + 0.25 * 100 + 0.15 * 100 + 0.15 * 33)
         assert "runs this search pattern natively" in q1.assignment_reason
 
 
@@ -1374,8 +1377,8 @@ class TestComputeQueryConfidence:
         }
         query = {"query_id": "q1", "tables_accessed": []}
         score = compute_query_confidence(
-            "q1", query, "dynamodb", analysis, pattern_model=QueryPatternModel()
-        )
+            "q1", query, "dynamodb", analysis, pattern_model=QueryPatternModel(), cost_score=0
+        )  # cost_score: a statement with no class does not read it (#494)
         assert score == 60  # mean(80, 40)
 
     def test_opensearch_scores_zero_without_its_own_pattern_match(self):
@@ -1388,8 +1391,8 @@ class TestComputeQueryConfidence:
         analysis = _make_analysis("opensearch", ["db.users"], confidence=90)
         query = {"query_id": "q1", "tables_accessed": ["db.users"]}
         score = compute_query_confidence(
-            "q1", query, "opensearch", analysis, pattern_model=QueryPatternModel()
-        )
+            "q1", query, "opensearch", analysis, pattern_model=QueryPatternModel(), cost_score=0
+        )  # cost_score: a statement with no class does not read it (#494)
         assert score == 0
 
     def test_non_pattern_only_engine_still_gets_the_table_average_fallback(self):
@@ -1400,8 +1403,8 @@ class TestComputeQueryConfidence:
         analysis = _make_analysis("dynamodb", ["db.users"], confidence=90)
         query = {"query_id": "q1", "tables_accessed": ["db.users"]}
         score = compute_query_confidence(
-            "q1", query, "dynamodb", analysis, pattern_model=QueryPatternModel()
-        )
+            "q1", query, "dynamodb", analysis, pattern_model=QueryPatternModel(), cost_score=0
+        )  # cost_score: a statement with no class does not read it (#494)
         assert score == 90
 
     def test_pattern_only_engine_is_unaffected_by_the_302_fix(self):
@@ -1431,8 +1434,8 @@ class TestComputeQueryConfidence:
         # average over it, nor add a bonus on top of the pattern's own score.
         query = {"query_id": "q1", "tables_accessed": ["db.users", "db.posts"]}
         score = compute_query_confidence(
-            "q1", query, "opensearch", analysis, pattern_model=QueryPatternModel()
-        )
+            "q1", query, "opensearch", analysis, pattern_model=QueryPatternModel(), cost_score=0
+        )  # cost_score: a statement with no class does not read it (#494)
         assert score == 70
 
 
@@ -2429,10 +2432,15 @@ class TestRoutingTraceAdjustment:
         collector = _make_collector(["q1"])
         analysis = {"dynamodb": _make_analysis("dynamodb", ["db.users"], confidence=70)}
 
-        def drifted(query_id, query, engine, analysis_output, *, pattern_model=None):
+        def drifted(query_id, query, engine, analysis_output, *, pattern_model, cost_score):
             return (
                 compute_query_confidence(
-                    query_id, query, engine, analysis_output, pattern_model=pattern_model
+                    query_id,
+                    query,
+                    engine,
+                    analysis_output,
+                    pattern_model=pattern_model,
+                    cost_score=cost_score,
                 )
                 + 5
             )

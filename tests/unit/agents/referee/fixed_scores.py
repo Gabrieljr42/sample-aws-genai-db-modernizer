@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from src.agents.referee.query_cost import QueryCostModel
 from src.agents.referee.query_pattern import QueryPatternModel
 
 
@@ -39,6 +40,20 @@ class FixedPatternModel(QueryPatternModel):
         return super().pattern_score(query, engine)
 
 
+@dataclass(frozen=True)
+class FixedCostModel(QueryCostModel):
+    """``scores[(query_id, engine)]`` is that query's cost score on that engine; a pair
+    it does not list keeps the real cost model's answer."""
+
+    scores: Mapping[tuple[str, str], int] = field(default_factory=dict)
+
+    def score(self, query: Mapping, engine: str, servable: frozenset[str]) -> int:
+        key = (str(query.get("query_id") or ""), engine)
+        if key in self.scores:
+            return int(self.scores[key])
+        return super().score(query, engine, servable)
+
+
 def flat_row(table_id: str, score: float) -> dict:
     """A table row whose four dimensions (and so its confidence) are all ``score``."""
     value = int(score)
@@ -57,6 +72,13 @@ def flat_row(table_id: str, score: float) -> dict:
 def fixed_model(scores: Mapping[str, Mapping[str, float]]) -> FixedPatternModel:
     """``scores[query_id][engine]`` as each query's pattern score."""
     return FixedPatternModel(
+        scores={(qid, engine): int(s) for qid, per in scores.items() for engine, s in per.items()}
+    )
+
+
+def fixed_cost_model(scores: Mapping[str, Mapping[str, float]]) -> FixedCostModel:
+    """``scores[query_id][engine]`` as each query's cost score."""
+    return FixedCostModel(
         scores={(qid, engine): int(s) for qid, per in scores.items() for engine, s in per.items()}
     )
 

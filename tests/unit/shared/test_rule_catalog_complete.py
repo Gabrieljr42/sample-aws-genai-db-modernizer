@@ -527,6 +527,14 @@ INLINE_ENGINE_LITERALS: dict[str, tuple[int, str]] = {
         5,
         _PLUMBING + ": which catalog module's score weights each engine's analysis uses (#728)",
     ),
+    "src/tools/analysis/dynamodb_analysis_tools.py": (
+        1,
+        _PLUMBING + ": the engine's own cost estimate reads its request prices (#494)",
+    ),
+    "src/tools/analysis/documentdb_analysis_tools.py": (
+        1,
+        _PLUMBING + ": the engine's own cost estimate reads its I/O price (#494)",
+    ),
 }
 
 

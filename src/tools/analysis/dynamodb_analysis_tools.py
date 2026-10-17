@@ -27,6 +27,7 @@ from src.contracts.analysis_output import (
     TableRecommendation,
     WorkloadAnalysis,
 )
+from src.shared import catalog
 from src.tools.analysis.dynamodb_pattern_catalog import (
     ANTI_PATTERN_BY_ID,
     DYNAMODB_ANTI_PATTERNS,
@@ -1404,14 +1405,14 @@ def estimate_dynamodb_costs(
         elif qt in ("INSERT", "UPDATE", "DELETE", "REPLACE"):
             total_write_cps += cps
 
-    # On-demand pricing (us-east-1)
-    # Read: $0.125 per million RRUs, Write: $0.625 per million WRUs
-    # Storage: $0.25 per GB-month
+    # On-demand pricing (us-east-1): the request unit prices are the engine file's
+    # (``src/catalog/engines/dynamodb.toml``, #494). Storage: $0.25 per GB-month
+    prices = catalog.pricing("dynamodb")
     read_units_per_month = total_read_cps * 86400 * 30
     write_units_per_month = total_write_cps * 86400 * 30
 
-    read_cost = (read_units_per_month / 1_000_000) * 0.125
-    write_cost = (write_units_per_month / 1_000_000) * 0.625
+    read_cost = (read_units_per_month / 1_000_000) * (prices.read_unit_price_per_million or 0.0)
+    write_cost = (write_units_per_month / 1_000_000) * (prices.write_unit_price_per_million or 0.0)
     storage_cost = max(total_size_gb, 0.01) * 0.25  # Minimum for small DBs
 
     total = round(read_cost + write_cost + storage_cost, 2)

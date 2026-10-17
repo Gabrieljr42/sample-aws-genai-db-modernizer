@@ -266,6 +266,44 @@ class TestPricingIsInTheCatalog:
         assert pg.instance_hourly == {"db.r6g.large": 0.24, "db.r6g.xlarge": 0.48}
         assert my.instance_hourly == {"db.r6g.large": 0.22, "db.r6g.xlarge": 0.44}
 
+    def test_request_unit_prices(self) -> None:
+        """The per-request prices the per-query cost dimension reads (#494 slice 2): the
+        same numbers the DynamoDB and DocumentDB cost estimates used."""
+        got = {
+            e.id: (
+                e.pricing.read_unit_price_per_million,
+                e.pricing.read_unit_bytes,
+                e.pricing.write_unit_price_per_million,
+                e.pricing.write_unit_bytes,
+                e.pricing.reads_billed_on_cache_miss_only,
+            )
+            for e in catalog.engines()
+            if e.pricing
+        }
+        assert got == {
+            "dynamodb": (0.125, 4096, 0.625, 1024, False),
+            "documentdb": (0.20, 8192, 0.20, 4096, True),
+            "opensearch": (None, None, None, None, False),
+            "elasticache": (None, None, None, None, False),
+            "aurora_postgresql": (None, None, None, None, False),
+            "aurora_mysql": (None, None, None, None, False),
+        }
+
+    def test_a_unit_price_needs_its_unit_size(self, tmp_path: Path) -> None:
+        src = (ROOT / "src/catalog/engines/dynamodb.toml").read_text()
+        (tmp_path / "dynamodb.toml").write_text(src.replace("read_unit_bytes = 4096\n", ""))
+        with pytest.raises(CatalogError):
+            load_engine_catalog(tmp_path)
+
+    def test_the_cost_estimates_read_the_request_prices_from_the_catalog(self) -> None:
+        for rel, needles in {
+            "src/tools/analysis/dynamodb_analysis_tools.py": ["* 0.125", "* 0.625"],
+            "src/tools/analysis/documentdb_analysis_tools.py": ["* 0.20"],
+        }.items():
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            for needle in needles:
+                assert needle not in text, f"{rel} still holds a request price: {needle!r}"
+
     def test_an_engine_without_a_pricing_table_gets_the_defaults(self) -> None:
         assert catalog.pricing("neptune") == EnginePricing()
         assert catalog.pricing("not_an_engine").base_monthly == 100

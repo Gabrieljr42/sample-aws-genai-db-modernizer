@@ -17,3 +17,4 @@ report_badge = "#c62f25"
 base_monthly = 50
 extra_engine_burden_monthly = 300
 max_burden_per_unique_query = 100
+# A cluster is billed by its nodes, not per request (#494).
