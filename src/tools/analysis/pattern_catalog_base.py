@@ -12,7 +12,12 @@ engine catalog's list from those files.
 
 from dataclasses import dataclass, field
 
-from src.shared.catalog.patterns import CatalogName, catalog_entries
+from src.shared.catalog.patterns import (
+    CatalogName,
+    SegmentWeighting,
+    catalog_entries,
+    segment_weighting,
+)
 
 # A table's summed INSERT calls per second at or above which it is a
 # high-ingest table, for every engine's detector (#493). OpenSearch's os-07
@@ -34,6 +39,8 @@ class CatalogPattern:
     description: str
     base_score: int  # Specialist-assigned confidence (0-100)
     concerns: list[str] = field(default_factory=list)
+    # How a table's score weighs this pattern's segment (``segment_weighting`` in its file).
+    segment_weighting: SegmentWeighting = "segment"
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,7 @@ def catalog_patterns(catalog: CatalogName) -> list[CatalogPattern]:
             description=support.why,
             base_score=support.score or 0,
             concerns=list(support.concerns),
+            segment_weighting=segment_weighting(pattern_type),
         )
         for pattern_type, support in catalog_entries(catalog, "fit")
     ]

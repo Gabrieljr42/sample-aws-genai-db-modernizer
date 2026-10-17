@@ -475,7 +475,7 @@ _INLINE_DETECTION = (
 # String literals naming a pattern type inside function bodies (not in a module-level
 # constant or a docstring), counted per file. path: (count, why)
 INLINE_PATTERN_LITERALS: dict[str, tuple[int, str]] = {
-    "src/tools/analysis/aurora_common_analysis_tools.py": (2, _INLINE_DETECTION),
+    "src/tools/analysis/aurora_common_analysis_tools.py": (1, _INLINE_DETECTION),
     "src/tools/analysis/aurora_mysql_analysis_tools.py": (9, _INLINE_DETECTION),
     "src/tools/analysis/aurora_pg_analysis_tools.py": (7, _INLINE_DETECTION),
     "src/tools/analysis/documentdb_analysis_tools.py": (9, _INLINE_DETECTION),

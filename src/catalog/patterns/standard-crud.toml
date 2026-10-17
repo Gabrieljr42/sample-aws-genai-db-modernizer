@@ -4,6 +4,7 @@ detectors = [
     "src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases",
 ]
 penalty = 0
+segment_weighting = "per_table"
 
 [engines.dynamodb]
 kind = "unscored"

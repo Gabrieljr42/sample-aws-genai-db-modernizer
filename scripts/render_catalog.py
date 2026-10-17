@@ -197,6 +197,11 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
                 f"Scan threshold: {t.min_calls_per_second:g} calls per second and "
                 f"{t.min_table_rows:,} table rows, both reached. {md_text(t.why)}"
             )
+        if p.segment_weighting == "per_table":
+            out.append(
+                "Segment weighting: per table. A table's score weighs this pattern by the "
+                "calls of the segment's queries that access that table, not the whole segment."
+            )
         if p.write_pattern:
             out.append(
                 "Writes only: no parity anchor borrows from it and no access class lists it."

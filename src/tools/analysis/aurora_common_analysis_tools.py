@@ -182,8 +182,9 @@ def analyze_aurora_common_use_cases(
     sj_query_ids: list[str] = []
     sj_table_ids: list[str] = []
 
-    # aurora-common-10: standard-crud (per-table accumulator)
-    crud_per_table: dict[str, dict] = {}
+    # aurora-common-10: standard-crud (one segment for every matching query, ADR-017 Decision 5)
+    crud_query_ids: list[str] = []
+    crud_table_ids: list[str] = []
 
     # aurora-common-11: batch-in-list
     bl_query_ids: list[str] = []
@@ -287,11 +288,9 @@ def analyze_aurora_common_use_cases(
             and not has_joins
             and cps >= STANDARD_CRUD_MIN_CPS
         ):
-            for tid in tables:
-                if tid not in crud_per_table:
-                    crud_per_table[tid] = {"query_ids": [], "total_cps": 0.0}
-                crud_per_table[tid]["query_ids"].append(qid)
-                crud_per_table[tid]["total_cps"] += cps
+            if qid not in crud_query_ids:
+                crud_query_ids.append(qid)
+            crud_table_ids.extend(tables)
 
         # aurora-common-11: batch-in-list (WHERE col IN (...))
         if facts.in_list and qt == "SELECT":
@@ -434,25 +433,17 @@ def analyze_aurora_common_use_cases(
             )
         )
 
-    # aurora-common-10: standard-crud — emit per-table for tables with active CRUD
-    for tid, data in crud_per_table.items():
-        if data["total_cps"] >= STANDARD_CRUD_MIN_CPS:
-            frequency_pct = (
-                round(len(data["query_ids"]) / total_query_count * 100.0, 2)
-                if total_query_count > 0
-                else None
+    # aurora-common-10: standard-crud, one segment holding every matching query (ADR-017 Decision 5)
+    if crud_query_ids:
+        patterns.append(
+            _build_pattern(
+                "aurora-common-10",
+                Confidence.MEDIUM,
+                crud_query_ids,
+                crud_table_ids,
+                total_query_count,
             )
-            patterns.append(
-                Pattern(
-                    pattern_id="aurora-common-10",
-                    pattern_type="standard-crud",
-                    confidence=Confidence.MEDIUM,
-                    description=PATTERN_BY_ID["aurora-common-10"].description,
-                    query_ids=data["query_ids"],
-                    table_ids=[tid],
-                    frequency_percent=frequency_pct,
-                )
-            )
+        )
 
     if bl_query_ids:
         patterns.append(
@@ -962,14 +953,25 @@ def compute_catalog_pattern_score(
     table_patterns: list[Pattern],
     collector_output: dict,
     pattern_by_id: dict,
+    table_id: str | None = None,
 ) -> int:
-    """Compute pattern_match_score from catalog base scores weighted by query frequency."""
+    """Compute pattern_match_score from catalog base scores weighted by query frequency.
+
+    A pattern is one segment across tables (ADR-017 Decision 5). Its catalog entry declares
+    ``segment_weighting``: ``segment`` weighs by the calls of the whole segment, ``per_table``
+    (with ``table_id``) by the calls of the segment's queries that access the table, so one
+    table's traffic does not move another table's score (#720).
+    """
     if not table_patterns:
         return 0
 
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     query_cps: dict[str, float] = {
         q.get("query_id", ""): float(q.get("calls_per_second") or 0) for q in queries
+    }
+
+    query_tables: dict[str, set[str]] = {
+        q.get("query_id", ""): set(q.get("tables_accessed") or []) for q in queries
     }
 
     weighted_sum = 0.0
@@ -979,7 +981,13 @@ def compute_catalog_pattern_score(
         catalog = pattern_by_id.get(p.pattern_id)
         if not catalog:
             continue
-        pattern_cps = sum(query_cps.get(qid, 0) for qid in (p.query_ids or []))
+        pattern_cps = sum(
+            query_cps.get(qid, 0)
+            for qid in (p.query_ids or [])
+            if table_id is None
+            or catalog.segment_weighting != "per_table"
+            or table_id in query_tables.get(qid, ())
+        )
         weight = max(pattern_cps, 0.01)
         weighted_sum += catalog.base_score * weight
         total_weight += weight

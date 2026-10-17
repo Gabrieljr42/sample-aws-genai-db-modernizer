@@ -43,6 +43,12 @@ Pattern fields:
   upsert shape). No parity anchor may borrow from one, and no access class lists one
   (#936: OpenSearch is not a system of record and is never credited for a write).
 
+- ``segment_weighting``: how a table's score weighs this pattern's segment when the
+  segment spans tables (ADR-017 Decision 5). ``segment`` (the default) weighs by the
+  calls of every query in the segment; ``per_table`` by the calls of the segment's queries
+  that access the table being scored, so one table's traffic does not move another's
+  score (#720). Read by ``compute_catalog_pattern_score``; no pattern id is named in code.
+
 Engine entry fields (``[engines.<engine_id>]``, one per engine):
 
 - ``kind``: ``fit`` (the engine's analysis reports it as a fit), ``anti_pattern`` (as a
@@ -119,6 +125,7 @@ CatalogName = Literal[
     "elasticache",
 ]
 Capability = Literal["acid_transactions", "text_search", "fuzzy_search", "substring_index"]
+SegmentWeighting = Literal["segment", "per_table"]
 PenaltyBasis = Literal[
     "cannot_run",
     "needs_redesign",
@@ -278,6 +285,7 @@ class PatternEntry(BaseModel):
     redesign_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     scan_threshold: ScanThreshold | None = None
     write_pattern: bool = False
+    segment_weighting: SegmentWeighting = "segment"
     engines: dict[str, EngineSupport]
 
     @model_validator(mode="after")
@@ -456,6 +464,14 @@ def catalog_entries(
             if support.catalog == catalog and support.kind == kind and support.catalog_id:
                 found.setdefault(support.catalog_id, (entry.id, support))
     return tuple(found[cid] for cid in sorted(found))
+
+
+def segment_weighting(pattern_type: str) -> SegmentWeighting:
+    """The declared ``segment_weighting`` of one pattern type (``segment`` when unknown)."""
+    for entry in patterns():
+        if entry.id == pattern_type:
+            return entry.segment_weighting
+    return "segment"
 
 
 def anti_pattern_penalties() -> dict[str, int]:

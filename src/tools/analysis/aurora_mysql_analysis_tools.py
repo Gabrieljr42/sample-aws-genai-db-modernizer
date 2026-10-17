@@ -233,7 +233,9 @@ def analyze_aurora_mysql_patterns(
         tap = table_anti_patterns_map.get(table_id, [])
 
         # Catalog-driven pattern_match override
-        catalog_score = compute_catalog_pattern_score(tp, collector_output, all_pattern_by_id)
+        catalog_score = compute_catalog_pattern_score(
+            tp, collector_output, all_pattern_by_id, table_id=table_id
+        )
         base_scores = compute_base_scores(profile)
 
         # Determine pattern_match_score:
