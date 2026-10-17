@@ -678,15 +678,22 @@ class TestStoredSecretsAreScrubbed:
         assert run.skipped == ["db/job/_meta.json"]  # refused by the store's containment
         assert SECRET in (outside / "x" / "y" / "_meta.json").read_text()
 
-    def test_a_read_only_file_is_skipped_and_the_rest_still_redacted(self, tmp_path) -> None:
+    def test_a_read_only_file_is_skipped_and_the_rest_still_redacted(
+        self, tmp_path, monkeypatch
+    ) -> None:
         self._seed(tmp_path)
         LocalArtifactStore(base_dir=str(tmp_path)).write_json("ro_db/job/_meta.json", _old_meta())
-        locked = tmp_path / "ro_db" / "job"
-        locked.chmod(0o500)
-        try:
-            run = redact_stored_inputs(tmp_path)
-        finally:
-            locked.chmod(0o700)
+        # Simulate a file the process can't rewrite. chmod doesn't do it for every user (root
+        # writes read-only folders), so the write itself fails the way the OS reports it.
+        real_write = LocalArtifactStore.write_json
+
+        def write_json(store, key, data, *args, **kwargs):
+            if key.startswith("ro_db/"):
+                raise PermissionError(13, "Permission denied", key)
+            return real_write(store, key, data, *args, **kwargs)
+
+        monkeypatch.setattr(LocalArtifactStore, "write_json", write_json)
+        run = redact_stored_inputs(tmp_path)
 
         assert run.skipped == ["ro_db/job/_meta.json"]
         assert "test_db/job-1/_meta.json" in run.rewritten
