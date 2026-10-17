@@ -7,12 +7,11 @@ Uses the specialist-curated pattern catalog for detection and scoring.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
+from dataclasses import asdict, dataclass
 from itertools import combinations
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, TypeAdapter
 
 from src.agents.referee.access_pattern import SMALL_TABLE_MAX_ROWS, UNPARSED, UTILITY
 from src.agents.referee.table_resolution import SourceScope
@@ -26,6 +25,26 @@ from src.contracts.analysis_output import (
     ScoreBreakdown,
     TableRecommendation,
     WorkloadAnalysis,
+)
+from src.contracts.dynamodb_decision_trace import (
+    AggregateKeyDesign,
+    AggregateTrace,
+    DenormalizationOpportunityTrace,
+    DenormStrategy,
+    DenormSubtype,
+    DynamoDBDecisionTrace,
+    GsiCandidateTrace,
+    LlmAdvisorTrace,
+    PatternSummary,
+    PkClassificationTrace,
+    QueryMatch,
+    RecommendationDerivation,
+    Relationship,
+    SecondaryIndexDominanceTrace,
+    TableGroup,
+    TimestampColumnsTrace,
+    TraceSummary,
+    TransactionShapeTrace,
 )
 from src.shared import catalog
 from src.tools.analysis.dynamodb_pattern_catalog import (
@@ -55,31 +74,6 @@ from src.tools.sql.query_facts import (
 # ---------------------------------------------------------------------------
 # LLM Advisor Pydantic models (structured LLM response parsing only)
 # ---------------------------------------------------------------------------
-
-
-class AggregateKeyDesign(BaseModel):
-    """Recommended DynamoDB key design for an aggregate."""
-
-    aggregate_id: str
-    partition_key: str
-    sort_key: str | None = None
-    rationale: str
-    supporting_access_patterns: list[str] = Field(
-        default_factory=list,
-        description="query_ids from the input that justify this key design",
-    )
-
-
-class DenormStrategy(BaseModel):
-    """Denormalization strategy recommendation for a detected opportunity."""
-
-    opportunity_id: str  # references DenormalizationOpportunity
-    strategy: str  # e.g., "embed child items", "adjacency list with GSI"
-    rationale: str
-    supporting_access_patterns: list[str] = Field(
-        default_factory=list,
-        description="query_ids from the input that justify this strategy",
-    )
 
 
 class LlmAdvisorOutput(BaseModel):
@@ -558,18 +552,6 @@ BOUNDED_PARENT_CHILD_RATIO_THRESHOLD = 100  # child:parent row ratio
 CO_ACCESS_FREQUENCY_THRESHOLD = 50.0  # calls/hour for co-accessed tables
 GSI_FREQUENCY_THRESHOLD = 100.0  # calls/hour for GSI candidates
 SECONDARY_INDEX_DOMINANCE_THRESHOLD = 0.5  # >50% frequency share
-
-
-class DenormSubtype(str, Enum):
-    """Denormalization sub-type classification.
-
-    Each maps to a specific DynamoDB modeling strategy.
-    """
-
-    BOUNDED_PARENT_CHILD = "bounded-parent-child"
-    MANY_TO_MANY_JUNCTION = "many-to-many-junction"
-    CO_ACCESSED_TABLES = "co-accessed-tables"
-    ADJACENCY_LIST = "adjacency-list"
 
 
 @dataclass
@@ -1445,6 +1427,8 @@ def estimate_dynamodb_costs(
 # Decision trace
 # ---------------------------------------------------------------------------
 
+_RELATIONSHIP: TypeAdapter[Relationship] = TypeAdapter(Relationship)
+
 
 def build_decision_trace(
     collector_output: dict,
@@ -1456,6 +1440,7 @@ def build_decision_trace(
     gsi_candidates: list | None = None,
     denorm_opportunities: list | None = None,
     si_dominance: list | None = None,
+    relationships: list[dict] | None = None,
     llm_status: str = "skipped",
     llm_duration: float = 0.0,
     llm_attempts: int = 0,
@@ -1463,12 +1448,12 @@ def build_decision_trace(
 ) -> dict:
     """Build the decision trace artifact for specialist calibration.
 
-    This is a separate S3 artifact — not part of the agent-to-agent contract.
-    Trace version 1.1 adds: pk_classifications, aggregates, gsi_candidates,
-    denormalization_opportunities, secondary_index_dominance, llm_advisor.
+    This is a separate artifact, not part of the agent-to-agent contract
+    (ADR-017 Decision 3). It is built as ``DynamoDBDecisionTrace`` (#973), so
+    every section is typed and the dict returned carries the contract's
+    ``contract_version``; writers write it through the model again
+    (``src/agents/analysis/decision_trace.py``).
     """
-    from dataclasses import asdict
-
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     scope = SourceScope.from_collector(collector_output)
 
@@ -1491,38 +1476,39 @@ def build_decision_trace(
     query_matches = []
     for q in queries:
         qid = q.get("query_id", "")
-        match = {
-            "query_id": qid,
-            "query_text_preview": (q.get("query_text") or "")[:120],
-            "matched_patterns": query_pattern_map.get(qid, []),
-            "matched_anti_patterns": query_anti_pattern_map.get(qid, []),
-        }
         # Which transaction shape a write matched and why (ADR-031 Decision 3).
         shape = transaction_shape(q, scope)
-        if shape is not None:
-            match["transaction_shape"] = shape.as_trace()
-        query_matches.append(match)
+        query_matches.append(
+            QueryMatch(
+                query_id=qid,
+                query_text_preview=(q.get("query_text") or "")[:120],
+                matched_patterns=query_pattern_map.get(qid, []),
+                matched_anti_patterns=query_anti_pattern_map.get(qid, []),
+                transaction_shape=(
+                    TransactionShapeTrace.model_validate(shape.as_trace())
+                    if shape is not None
+                    else None
+                ),
+            )
+        )
 
     # Per-pattern summaries
-    from src.tools.analysis.dynamodb_pattern_catalog import PATTERN_BY_ID
-
     pattern_summaries = []
     for p in workload_analysis.patterns_detected:
-        catalog = PATTERN_BY_ID.get(p.pattern_id)
+        catalog_pattern = PATTERN_BY_ID.get(p.pattern_id)
         pattern_summaries.append(
-            {
-                "pattern_id": p.pattern_id,
-                "pattern_type": p.pattern_type,
-                "catalog_base_score": catalog.base_score if catalog else None,
-                "queries_matched_count": len(p.query_ids or []),
-                "tables_involved": p.table_ids or [],
-            }
+            PatternSummary(
+                pattern_id=p.pattern_id,
+                pattern_type=p.pattern_type,
+                catalog_base_score=catalog_pattern.base_score if catalog_pattern else None,
+                queries_matched_count=len(p.query_ids or []),
+                tables_involved=p.table_ids or [],
+            )
         )
 
     # Per-table recommendation derivations
-    derivations = []
-    for rec in table_recommendations:
-        derivations.append(
+    derivations = [
+        RecommendationDerivation.model_validate(
             {
                 "table_id": rec.table_id,
                 "segments_contributing": rec.supporting_patterns or [],
@@ -1536,53 +1522,55 @@ def build_decision_trace(
                 "weighted_confidence": rec.confidence_score,
             }
         )
+        for rec in table_recommendations
+    ]
 
-    trace = {
-        "trace_version": "1.1",
-        "agent": "dynamodb-analysis-agent",
-        "summary": {
-            "queries_analyzed": len(queries),
-            "queries_matched": len(matched_qids),
-            "queries_unmatched": len(queries) - len(matched_qids),
-            "patterns_detected": len(workload_analysis.patterns_detected),
-            "anti_patterns_detected": len(workload_analysis.anti_patterns_detected or []),
-        },
-        "query_matches": query_matches,
-        "pattern_summaries": pattern_summaries,
-        "recommendation_derivations": derivations,
-        "table_groups": [
-            {"group_root": root, "tables": members}
+    trace = DynamoDBDecisionTrace(
+        summary=TraceSummary(
+            queries_analyzed=len(queries),
+            queries_matched=len(matched_qids),
+            queries_unmatched=len(queries) - len(matched_qids),
+            patterns_detected=len(workload_analysis.patterns_detected),
+            anti_patterns_detected=len(workload_analysis.anti_patterns_detected or []),
+        ),
+        query_matches=query_matches,
+        pattern_summaries=pattern_summaries,
+        recommendation_derivations=derivations,
+        table_groups=[
+            TableGroup(group_root=root, tables=members)
             for root, members in table_groups.items()
             if len(members) > 1
         ],
-    }
-
-    # How the timestamp-column fact was read (#935): by type, or by name and why.
-    trace["timestamp_columns"] = timestamp_column_trace(collector_output)
-
-    # --- New trace sections (v1.1) ---
-    trace["pk_classifications"] = (
-        [asdict(pk) for pk in pk_classifications.values()] if pk_classifications else []
-    )
-    trace["aggregates"] = [asdict(a) for a in aggregates] if aggregates else []
-    trace["gsi_candidates"] = [asdict(g) for g in gsi_candidates] if gsi_candidates else []
-    trace["denormalization_opportunities"] = (
-        [asdict(d) for d in denorm_opportunities] if denorm_opportunities else []
-    )
-    trace["secondary_index_dominance"] = [asdict(s) for s in si_dominance] if si_dominance else []
-    trace["llm_advisor"] = {
-        "status": llm_status,
-        "duration_seconds": llm_duration,
-        "attempts": llm_attempts,
-        "aggregate_key_designs": (
-            [r.model_dump() for r in llm_output.aggregate_recommendations] if llm_output else []
+        # How the timestamp-column fact was read (#935): by type, or by name and why.
+        timestamp_columns=TimestampColumnsTrace.model_validate(
+            timestamp_column_trace(collector_output)
         ),
-        "denormalization_strategies": (
-            [s.model_dump() for s in llm_output.denormalization_strategies] if llm_output else []
+        # The v1.1 sections, from the detectors' dataclasses.
+        pk_classifications=[
+            PkClassificationTrace.model_validate(asdict(pk))
+            for pk in (pk_classifications or {}).values()
+        ],
+        aggregates=[AggregateTrace.model_validate(asdict(a)) for a in aggregates or []],
+        gsi_candidates=[GsiCandidateTrace.model_validate(asdict(g)) for g in gsi_candidates or []],
+        denormalization_opportunities=[
+            DenormalizationOpportunityTrace.model_validate(asdict(d))
+            for d in denorm_opportunities or []
+        ],
+        secondary_index_dominance=[
+            SecondaryIndexDominanceTrace.model_validate(asdict(s)) for s in si_dominance or []
+        ],
+        llm_advisor=LlmAdvisorTrace(
+            status=llm_status,
+            duration_seconds=llm_duration,
+            attempts=llm_attempts,
+            aggregate_key_designs=list(llm_output.aggregate_recommendations) if llm_output else [],
+            denormalization_strategies=(
+                list(llm_output.denormalization_strategies) if llm_output else []
+            ),
         ),
-    }
-
-    return trace
+        relationships=[_RELATIONSHIP.validate_python(r) for r in relationships or []],
+    )
+    return trace.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------

@@ -462,7 +462,12 @@ INLINE_PATTERN_LITERALS: dict[str, tuple[int, str]] = {
     "src/tools/analysis/aurora_mysql_analysis_tools.py": (9, _INLINE_DETECTION),
     "src/tools/analysis/aurora_pg_analysis_tools.py": (7, _INLINE_DETECTION),
     "src/tools/analysis/documentdb_analysis_tools.py": (9, _INLINE_DETECTION),
-    "src/tools/analysis/dynamodb_analysis_tools.py": (14, _INLINE_DETECTION),
+    "src/tools/analysis/dynamodb_analysis_tools.py": (10, _INLINE_DETECTION),
+    "src/contracts/dynamodb_decision_trace.py": (
+        4,
+        "the DynamoDB denormalization subtypes the decision trace contract publishes "
+        "(moved from the analysis tools, #973)",
+    ),
     "src/tools/analysis/opensearch_analysis_tools.py": (13, _INLINE_DETECTION),
     "src/tools/analysis/redis_analysis_tools.py": (
         11,

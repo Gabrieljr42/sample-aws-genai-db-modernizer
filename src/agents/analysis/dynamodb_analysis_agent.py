@@ -111,12 +111,12 @@ def analyze_for_dynamodb_deterministic(
         gsi_candidates=gsi_candidates,
         denorm_opportunities=denorm_opportunities,
         si_dominance=si_dominance,
+        relationships=relationships,
         llm_status="skipped",
         llm_duration=0.0,
         llm_attempts=0,
         llm_output=None,
     )
-    decision_trace["relationships"] = relationships
 
     mermaid_diagram = generate_mermaid_er_diagram(collector_output, relationships)
 

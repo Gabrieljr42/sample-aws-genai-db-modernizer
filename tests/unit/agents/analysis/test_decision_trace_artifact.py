@@ -58,7 +58,8 @@ def _assert_separate_artifacts(store: ArtifactStore, folder: str) -> None:
     assert not [k for k in analysis if "trace" in k], folder
     AnalysisOutputContract.model_validate(analysis)
     # And the trace content did not leak into the contract under another name.
-    assert not set(trace) & set(analysis) - {"agent"}, folder
+    # Both say a contract_version: each is its own contract (#973).
+    assert not set(trace) & set(analysis) - {"agent", "contract_version"}, folder
 
 
 @pytest.mark.parametrize("engine", HANDLER_ENGINES)

@@ -700,7 +700,9 @@ def run_analysis_core(engine: str, job_id: str, database_name: str, store=None) 
     trace_key = f"{prefix}/decision-trace.json"
 
     store.write_json(analysis_key, contract.model_dump(mode="json"))
-    store.write_json(trace_key, decision_trace)
+    from src.agents.analysis.decision_trace import write_decision_trace
+
+    write_decision_trace(store, trace_key, decision_trace)
 
     mermaid_key: str | None = None
     if spec.mermaid_always or mermaid_diagram:
