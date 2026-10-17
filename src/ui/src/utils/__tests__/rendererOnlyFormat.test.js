@@ -76,7 +76,7 @@ const NOT_A_FIGURE = new Set(['engines', 'waves', 'wave', 'index']);
 // Helpers that return a facts-owned list or record.
 const LIST_HELPERS = new Set([
   'waveFacts', 'realityCheckDecisions', 'currentTradeOffs', 'filterRisksWithContent',
-  'groupRisksBySeverity', 'splitRankingByRole', 'cacheLayerCostBreakdown',
+  'groupRisksBySeverity', 'splitRankingByRole', 'cacheLayerCostBreakdown', 'accessPatternTotals',
 ]);
 const ARRAY_WALKERS = new Set([
   'forEach', 'map', 'filter', 'some', 'every', 'find', 'findIndex', 'flatMap', 'reduce', 'sort',
@@ -676,6 +676,8 @@ function render(synthesis, facts) {
     test.each([
       ['src/ui/src/pages/AnalysisResults.js', 'count: severityCount }', 'count: risksAtSeverity.length }'],
       ['src/ui/src/pages/AnalysisResults.js', 'count: resolvedRiskCountOf(synthesis, resolvedRisksList)', 'count: resolvedRisksList.length'],
+      ['src/ui/src/pages/AnalysisResults.js', 'const explorerTotal = patternTotals.listed;', 'const explorerTotal = totalAccessPatterns + cachePatternCount;'],
+      ['src/ui/src/pages/AnalysisResults.js', 'const totalAccessPatterns = patternTotals.owned;', 'const totalAccessPatterns = patternTotals.owned + patternTotals.cacheLayer;'],
       ['src/ui/src/utils/cacheLayer.js', 'finite(facts?.projected_monthly_cost_usd);', 'finite(facts?.projected_monthly_cost_usd) ?? items.reduce((s, cb) => s + cb.monthly_cost_usd, 0);'],
     ])('%s: %s is caught when it is a recomputation', (file, fact, recomputed) => {
       const real = fs.readFileSync(`${REPO}/${file}`, 'utf8');

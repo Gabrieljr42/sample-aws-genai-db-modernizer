@@ -15975,6 +15975,47 @@
             {
               "kind": "object",
               "properties": {
+                "access_pattern_totals": {
+                  "required": false,
+                  "schema": {
+                    "kind": "anyOf",
+                    "members": [
+                      {
+                        "kind": "object",
+                        "properties": {
+                          "cache_layer_pattern_count": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "listed_pattern_count": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "owned_pattern_count": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "kind": "scalar",
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
                 "close_calls": {
                   "required": false,
                   "schema": {
@@ -20286,8 +20327,8 @@
         }
       }
     },
-    "schema_hash": "e0289ed76c46ab62478cba22159c7a10fb2dead955a6db45b8db81d9c5821654",
-    "version": "1.25"
+    "schema_hash": "0830f9a352201c73afe85ac413892909ab9384890931ecc27b2b888b1fc8b8c0",
+    "version": "1.26"
   },
   "triage_output.TriageOutputContract": {
     "fields": {

@@ -4,6 +4,7 @@
  * for a report synthesized before them.
  */
 import {
+  accessPatternTotals,
   closeCallsOf,
   currentTradeOffs,
   mappedTableCountOf,
@@ -150,6 +151,33 @@ describe('the counts the deliverables print are facts (#748)', () => {
     expect(resolvedRiskCountOf({}, [{}, {}, {}])).toBe(3);
     expect(tradeOffCountOf(undefined, [{}])).toBe(1);
     expect(mappedTableCountOf({ facts: {} }, [{}, {}])).toBe(2);
+  });
+});
+
+// #792: the access-pattern totals the results page shows are the stored facts.
+describe('access-pattern totals (#792)', () => {
+  const facts = {
+    access_pattern_totals: {
+      owned_pattern_count: 54,
+      cache_layer_pattern_count: 10,
+      listed_pattern_count: 64,
+    },
+  };
+
+  test('read the stored totals, not the rows on screen', () => {
+    expect(accessPatternTotals({ facts }, 3, 1)).toEqual({ owned: 54, cacheLayer: 10, listed: 64 });
+  });
+
+  test('a stored zero is a zero, not a fall back to the rows', () => {
+    const zero = { access_pattern_totals: { owned_pattern_count: 0, cache_layer_pattern_count: 0, listed_pattern_count: 0 } };
+    expect(accessPatternTotals({ facts: zero }, 3, 1)).toEqual({ owned: 0, cacheLayer: 0, listed: 0 });
+  });
+
+  test('a report with no such fact shows the rows it has', () => {
+    const rows = { owned: 3, cacheLayer: 1, listed: 4 };
+    expect(accessPatternTotals({ facts: {} }, 3, 1)).toEqual(rows);
+    expect(accessPatternTotals({ facts: { access_pattern_totals: null } }, 3, 1)).toEqual(rows);
+    expect(accessPatternTotals(undefined, 3, 1)).toEqual(rows);
   });
 });
 

@@ -114,6 +114,33 @@ class TestGetResults:
             1,
         )
 
+    def test_a_facts_block_before_1_26_gains_the_access_pattern_totals(self, mock_services):
+        """#792: a stored block without ``access_pattern_totals`` gets it from
+        ``query_groups``; every other stored figure stays as written."""
+        stored = {"engines": [], "engine_count": 7, "tables_migrate": 3}
+        mock_services["s3"].read_synthesis.return_value = {
+            "ranking": [],
+            "facts": stored,
+            "query_groups": [
+                {"access_patterns": [{"engine": "dynamodb", "pattern_id": "DDB-AP-1"}]}
+            ],
+        }
+        mock_services["s3"].read_triage.return_value = None
+        facts = client.get("/api/v1/assessments/job-1/results").json()["synthesis"]["facts"]
+        assert facts["access_pattern_totals"]["owned_pattern_count"] == 1
+        assert (facts["engine_count"], facts["tables_migrate"]) == (7, 3)
+
+    def test_keeps_stored_access_pattern_totals(self, mock_services):
+        totals = {"owned_pattern_count": 9, "cache_layer_pattern_count": 0}
+        mock_services["s3"].read_synthesis.return_value = {
+            "ranking": [],
+            "facts": {"engines": [], "access_pattern_totals": totals},
+            "query_groups": [],
+        }
+        mock_services["s3"].read_triage.return_value = None
+        facts = client.get("/api/v1/assessments/job-1/results").json()["synthesis"]["facts"]
+        assert facts["access_pattern_totals"] == totals
+
     def test_keeps_the_stored_waves_when_present(self, mock_services):
         stored = [{"wave": 1, "engines": ["elasticache"], "moves_from": [], "serves_from": []}]
         mock_services["s3"].read_synthesis.return_value = {

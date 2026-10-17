@@ -545,6 +545,10 @@ def test_every_figure_field_of_the_facts_contract_is_owned() -> None:
         "no_migration",
         "moving_tables",
         "kept_in_sync",
+        "access_pattern_totals",
+        "owned_pattern_count",
+        "cache_layer_pattern_count",
+        "listed_pattern_count",
     ):
         assert key in OWNED_KEYS, key
 
@@ -714,6 +718,27 @@ def test_a_recount_of_the_listed_traces_is_caught(tmp_path: Path) -> None:
         found = _violations(sample)
         line = source[: source.index(needle)].count("\n") + 2
         assert [v.split(":")[1] for v in found] == [str(line)], (plant, found)
+
+
+def test_a_recount_of_the_access_pattern_totals_is_caught(tmp_path: Path) -> None:
+    """#792: each way of adding up ``facts.access_pattern_totals`` in a renderer is
+    flagged; reading one of its figures is not."""
+    plants = [
+        'n = sum(facts["access_pattern_totals"].values())\n',
+        'n = facts["access_pattern_totals"]["owned_pattern_count"] + 1\n',
+        'n = max(facts["access_pattern_totals"]["owned_pattern_count"], 2)\n',
+        'n = facts["access_pattern_totals"]["owned_pattern_count"]'
+        ' + facts["access_pattern_totals"]["cache_layer_pattern_count"]\n',
+    ]
+    for i, plant in enumerate(plants):
+        sample = tmp_path / f"sample{i}.py"
+        sample.write_text("def render(facts):\n    " + plant + "    return n\n")
+        assert [v.split(":")[1] for v in _violations(sample)] == ["2"], plant
+    ok = tmp_path / "ok.py"
+    ok.write_text(
+        'def render(facts):\n    return facts["access_pattern_totals"]["owned_pattern_count"]\n'
+    )
+    assert _violations(ok) == []
 
 
 JS_GUARD = REPO / "src" / "ui" / "src" / "utils" / "__tests__" / "rendererOnlyFormat.test.js"

@@ -306,6 +306,14 @@ Version History:
   to None; a report before 1.25 still loads, and its ``eliminated_engine_costs``
   rows read back as ``considered_not_recommended``, never as a saving
   (``src.shared.engines_in_use``).
+- 1.26 (2026-10-17, #792, ADR-032): ``facts.access_pattern_totals``
+  (``AccessPatternFacts``): the access-pattern figures the results page shows,
+  computed once from ``query_groups`` -- the patterns the owner engines serve,
+  the cache layer's own patterns apart (they never count as owned workload)
+  and the two together (the explorer's header total). The explorer's live
+  filter counts stay presentation. Backward
+  compatible: ``None`` for a report with no ``query_groups`` and for a facts
+  block written before 1.26 (the results API recomputes it from ``query_groups``).
 """
 
 from datetime import datetime
@@ -1018,6 +1026,20 @@ class UnservableFacts(BaseModel):
     more_unservable_count: int = Field(0, ge=0, description="The ones not named")
 
 
+class AccessPatternFacts(BaseModel):
+    """The access-pattern totals the results page shows (#792), from ``query_groups``."""
+
+    owned_pattern_count: int = Field(
+        0, ge=0, description="Access patterns the owner engines serve (the cache layer is apart)"
+    )
+    cache_layer_pattern_count: int = Field(
+        0, ge=0, description="The cache layer's own patterns; never owned workload"
+    )
+    listed_pattern_count: int = Field(
+        0, ge=0, description="Owned plus cache-layer patterns: the explorer's header total"
+    )
+
+
 class ReportFacts(BaseModel):
     """Every customer-facing figure, computed once at synthesis (#615, ADR-032).
 
@@ -1087,6 +1109,13 @@ class ReportFacts(BaseModel):
             "when query_traces predates unservable"
         ),
     )
+    access_pattern_totals: AccessPatternFacts | None = Field(
+        None,
+        description=(
+            "The access-pattern totals the results page shows (#792); None when the report "
+            "has no query_groups"
+        ),
+    )
 
 
 class CappedList(BaseModel):
@@ -1131,7 +1160,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.25",
+        default="1.26",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

@@ -139,3 +139,21 @@ export function unservableOf(synthesis) {
   if (!u || !Array.isArray(u.unservable_queries) || u.unservable_queries.length === 0) return null;
   return u;
 }
+
+// #792: the access-pattern totals the results page shows
+// (facts.access_pattern_totals: the patterns the owner engines serve, the cache
+// layer's own apart). The explorer's live filter counts stay presentation. A
+// hand-built report with no such fact returns the shown rows' own totals
+// (`shownOwned`, `shownCacheLayer`); the /results API fills the fact in for a
+// real report.
+export function accessPatternTotals(synthesis, shownOwned, shownCacheLayer) {
+  const totals = factsOf(synthesis) && factsOf(synthesis).access_pattern_totals;
+  if (totals && typeof totals.owned_pattern_count === 'number') {
+    return {
+      owned: totals.owned_pattern_count,
+      cacheLayer: totals.cache_layer_pattern_count || 0,
+      listed: totals.listed_pattern_count || 0,
+    };
+  }
+  return { owned: shownOwned || 0, cacheLayer: shownCacheLayer || 0, listed: (shownOwned || 0) + (shownCacheLayer || 0) };
+}

@@ -59,7 +59,7 @@ import { costBaselineStats } from "../utils/tcoAnalysis";
 import { ENGINE_LABELS } from "../utils/engineNames";
 import { WORKLOAD_FIT_DEFINITION } from "../utils/workloadFitLabels";
 import { optimizationLabel } from "../utils/optimizationLabels";
-import { openRiskCountAt, resolvedRiskCountOf, routingHistoryRecorded, routingKindsById, tradeOffsByTab, tradeOffTabLabel } from "../utils/reportFacts";
+import { accessPatternTotals, openRiskCountAt, resolvedRiskCountOf, routingHistoryRecorded, routingKindsById, tradeOffsByTab, tradeOffTabLabel } from "../utils/reportFacts";
 
 
 // ============================================
@@ -697,16 +697,20 @@ const AnalysisResultsPage = memo(() => {
 
   // Total access patterns (owner engines only -- see the #361 note on
   // allAccessPatterns above for why the cache layer is excluded).
-  const totalAccessPatterns = allAccessPatterns.length;
+  // #792: the total and the cache layer's count are report facts
+  // (facts.access_pattern_totals); the rows the explorer lists below are its own.
 
   // #361: the cache layer's own pattern count, tracked separately so the page
   // can say "+N cache-layer patterns" instead of silently dropping them or
   // folding them into the owner total/pie. #405: 0 without a cache_overlay --
   // see the overlay guard note on allAccessPatterns above.
-  const cachePatternCount = useMemo(
+  const shownCachePatternCount = useMemo(
     () => cacheAccessPatternCount(activeDesigns, !!cacheOverlay),
     [activeDesigns, cacheOverlay]
   );
+  const patternTotals = accessPatternTotals(synthesis, allAccessPatterns.length, shownCachePatternCount);
+  const totalAccessPatterns = patternTotals.owned;
+  const cachePatternCount = patternTotals.cacheLayer;
 
   // #361: the Query flow's query count (afterDist is already owner-only, see
   // ownerDistribution above) -- the number "Access patterns" is compared
@@ -722,7 +726,7 @@ const AnalysisResultsPage = memo(() => {
   // rows), used for its header count ("64 (54 owned + 10 cache layer)") --
   // kept separate from totalAccessPatterns, which must stay owner-only (the
   // "Access patterns" stat above compares against it).
-  const explorerTotal = totalAccessPatterns + cachePatternCount;
+  const explorerTotal = patternTotals.listed;
 
 
   // ============================================

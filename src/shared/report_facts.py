@@ -1170,6 +1170,56 @@ def unservable_query_facts(report: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+# ---------------------------------------------------------------------------
+# Access-pattern totals (#792)
+# ---------------------------------------------------------------------------
+
+
+def access_pattern_facts(report: dict[str, Any]) -> dict[str, Any] | None:
+    """The access-pattern totals the results page shows (``AccessPatternFacts``), or None.
+
+    Counted from ``query_groups``, where every engine's designed patterns sit:
+    one per ``(engine, pattern_id)`` (a pattern listed in several groups counts
+    once; one with no id counts each time), in scope or not, as the explorer
+    lists them. A relational query still awaiting its schema design is a
+    routing record, not an access pattern, and is left out. The cache layer's
+    own patterns are counted apart: they are never owned workload (#361). None
+    for a report with no ``query_groups`` field.
+    """
+    groups = report.get("query_groups")
+    if not isinstance(groups, list):
+        return None
+    seen: set[tuple[str, str]] = set()
+    cache_layer = 0
+    owned = 0
+    is_cache: dict[str, bool] = {}
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("access_patterns"), list):
+            continue
+        for ap in group["access_patterns"]:
+            engine = ap.get("engine") if isinstance(ap, dict) else None
+            if not isinstance(engine, str) or not engine:
+                continue
+            pid = ap.get("pattern_id")
+            if isinstance(pid, str) and pid:
+                if pid.startswith(f"relational-{engine}-"):
+                    continue
+                if (engine, pid) in seen:
+                    continue
+                seen.add((engine, pid))
+            if engine not in is_cache:
+                is_cache[engine] = cache_layer_counts(report, engine) is not None
+            if is_cache[engine]:
+                cache_layer += 1
+                continue
+            owned += 1
+    return {
+        "owned_pattern_count": owned,
+        "cache_layer_pattern_count": cache_layer,
+        "listed_pattern_count": owned + cache_layer,
+    }
+
+
 def _unrounded(x: float) -> float:
     """A sum of percentages, kept at full precision: each renderer rounds it
     once, to the places it prints (``99.45`` prints "99%", never a second
@@ -1290,4 +1340,6 @@ def compute_report_facts(
         "close_calls": close_call_facts(report),
         # #729: the queries that landed on a fallback engine.
         "unservable": unservable_query_facts(report),
+        # #792: the access-pattern totals the results page shows.
+        "access_pattern_totals": access_pattern_facts(report),
     }
