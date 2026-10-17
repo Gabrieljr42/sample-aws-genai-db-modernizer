@@ -322,6 +322,15 @@ Version History:
   rejects parts that do not. ``gate`` itself is unchanged, and the Markdown and
   PDF reports keep printing it. Backward compatible: ``None`` for a wave written
   before 1.27, which shows its gate string as it is.
+- 1.28 (2026-10-17, #1020, ADR-032): ``facts.in_scope_query_count`` and
+  ``facts.moving_query_count``: the in-scope queries the owner engines serve and
+  how many of them move to a migration target or a search read model, the
+  executive report's "Queries moved" total; and ``facts.resolved_risks_by_severity``,
+  the risks the assignment resolved by severity, as ``open_risks_by_severity``
+  counts the open ones. Backward compatible: the counts default to 0 and the map to
+  empty, and a facts block written before 1.28 gains them from ``ranking`` and
+  ``risk_assessment.resolved_risks`` when read (``src.report.facts.report_facts``
+  and the results API).
 """
 
 from datetime import datetime
@@ -1113,6 +1122,17 @@ class ReportFacts(BaseModel):
     )
     engines: list[EngineFacts] = Field(default_factory=list)
     tables_migrate: int = Field(..., ge=0, description='The "Tables migrate" figure')
+    in_scope_query_count: int = Field(
+        0, ge=0, description="In-scope queries the owner engines serve; the cache layer owns none"
+    )
+    moving_query_count: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Of them, the queries on a migration target or a search read model: they leave "
+            "the source engine (#1020)"
+        ),
+    )
     workload_total_percent: float = Field(0.0, ge=0)
     engine_cost_total_usd: float = Field(0.0, ge=0)
     table_basis: TableBasis
@@ -1136,6 +1156,10 @@ class ReportFacts(BaseModel):
     )
     open_risks_by_type: dict[str, int] = Field(default_factory=dict)
     resolved_risk_count: int = Field(0, ge=0)
+    resolved_risks_by_severity: dict[str, int] = Field(
+        default_factory=dict,
+        description="The resolved risks by severity (#1020), as open_risks_by_severity",
+    )
     tied_query_count: int = Field(0, ge=0)
     post_schema_reroute_count: int = Field(
         0, ge=0, description="Queries moved after approval (#629, post_schema_reroutes)"
@@ -1212,7 +1236,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.27",
+        default="1.28",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

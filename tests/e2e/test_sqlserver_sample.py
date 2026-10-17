@@ -172,7 +172,7 @@ def test_every_deliverable_source_carries_the_same_choice(trailgear_run: Pipelin
     ).format(**report["assignment_summary"]["aurora_engine_choice"]["totals"])
     from tests.e2e.deliverable_figures import pdf_page_texts
 
-    pdf = " ".join(pdf_page_texts(str(trailgear_run.deliverable("assessment.pdf"))))
+    pdf = " ".join(pdf_page_texts(str(trailgear_run.deliverable("executive-report.pdf"))))
     engineering = trailgear_run.deliverable("engineering-report.md").read_text()
     assert " ".join(sentence.split()) in pdf
     assert sentence in engineering
@@ -334,12 +334,14 @@ def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineR
     assert final[merge]["tied_engines"] == []
     report = _json(trailgear_run.artifact_root / trailgear_run.report["report"])
     assert report["tied_queries"] == []
-    # #987: with no open tie, neither the engineering report nor the PDF states one.
+    # #987: with no open tie, neither the engineering report nor the executive report states one.
     from tests.e2e.deliverable_figures import pdf_page_texts
 
     heading = "Unresolved engine ties"
     assert heading not in trailgear_run.deliverable("engineering-report.md").read_text()
-    assert heading not in " ".join(pdf_page_texts(str(trailgear_run.deliverable("assessment.pdf"))))
+    assert heading not in " ".join(
+        pdf_page_texts(str(trailgear_run.deliverable("executive-report.pdf")))
+    )
 
 
 # ---------------------------------------------------------------------------
