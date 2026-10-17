@@ -228,7 +228,8 @@ async def create_assessment(request: AssessmentRequest):
         "offline_s3_key": request.offline_s3_key or "",
         # Live mode fields — empty defaults for ddl/offline (SFN JSONPath requires all keys)
         "cluster_endpoint": request.connection.host if request.connection else "offline",
-        "secret_arn": request.connection.secret_arn or "" if request.connection else "",
+        # The one secret id the collector reads (SECRET_ARN): an ARN or a name (#991).
+        "secret_arn": request.connection.secret_reference() if request.connection else "",
         "automation_instance_id": "",
         "port": str(request.connection.port) if request.connection else "0",
         "engine": request.source_database_type,
