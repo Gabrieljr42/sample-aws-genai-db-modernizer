@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from src.agents.analysis.decision_trace import write_decision_trace
 from src.contracts.analysis_output import (
     AgentMetadata,
     AnalysisOutputContract,
@@ -67,9 +68,9 @@ def run_analysis(
                 f"[analysis/{agent_type}] Cost estimate: ${result.cost_estimate.monthly_cost_usd:.2f}/mo"
             )
 
-            # Write decision trace
+            # Write decision trace (through its contract, #973)
             trace_key = f"{database_name}/{job_id}/analysis-{agent_type}/decision-trace.json"
-            store.write_json(trace_key, decision_trace)
+            write_decision_trace(store, trace_key, decision_trace)
             print(f"[analysis/{agent_type}] Decision trace written")
 
             # Write Mermaid ER diagram as JSON wrapper
@@ -109,7 +110,7 @@ def run_analysis(
             )
 
             trace_key = f"{database_name}/{job_id}/analysis-{agent_type}/decision-trace.json"
-            store.write_json(trace_key, decision_trace)
+            write_decision_trace(store, trace_key, decision_trace)
             print(f"[analysis/{agent_type}] Decision trace written")
 
             mermaid_key = f"{database_name}/{job_id}/analysis-{agent_type}/er-diagram.json"
@@ -129,7 +130,7 @@ def run_analysis(
 
             # Write decision trace as separate artifact
             trace_key = f"{database_name}/{job_id}/analysis-{agent_type}/decision-trace.json"
-            store.write_json(trace_key, decision_trace)
+            write_decision_trace(store, trace_key, decision_trace)
             print(f"Decision trace written to {trace_key}")
             # No Mermaid ER diagram for OpenSearch — skipped intentionally
 
@@ -160,7 +161,7 @@ def run_analysis(
             )
 
             trace_key = f"{database_name}/{job_id}/analysis-{agent_type}/decision-trace.json"
-            store.write_json(trace_key, decision_trace)
+            write_decision_trace(store, trace_key, decision_trace)
             print(f"[analysis/{agent_type}] Decision trace written")
 
         case "aurora_postgresql":
@@ -190,7 +191,7 @@ def run_analysis(
             )
 
             trace_key = f"{database_name}/{job_id}/analysis-{agent_type}/decision-trace.json"
-            store.write_json(trace_key, decision_trace)
+            write_decision_trace(store, trace_key, decision_trace)
             print(f"[analysis/{agent_type}] Decision trace written")
 
         case "aurora_mysql":
@@ -220,7 +221,7 @@ def run_analysis(
             )
 
             trace_key = f"{database_name}/{job_id}/analysis-{agent_type}/decision-trace.json"
-            store.write_json(trace_key, decision_trace)
+            write_decision_trace(store, trace_key, decision_trace)
             print(f"[analysis/{agent_type}] Decision trace written")
 
         case _:

@@ -102,7 +102,9 @@ def _write_analysis_artifacts(
     """
     prefix = f"{db}/{job_id}/analysis-{engine}"
     store.write_json(f"{prefix}/analysis.json", json.loads(contract.model_dump_json()))
-    store.write_json(f"{prefix}/decision-trace.json", trace)
+    from src.agents.analysis.decision_trace import write_decision_trace
+
+    write_decision_trace(store, f"{prefix}/decision-trace.json", trace)
     if mermaid:
         # Write mermaid as plain text via raw write
         from pathlib import Path
@@ -221,6 +223,7 @@ def run_finalize(store, job_id: str, db: str, engine: str) -> None:
     if engine == "dynamodb":
         from src.agents.analysis.dynamodb_analysis_agent import apply_dynamodb_llm_output
         from src.contracts.analysis_output import AnalysisOutputContract
+        from src.contracts.dynamodb_decision_trace import DynamoDBDecisionTrace
         from src.shared.contract_versioning import load_contract
         from src.tools.analysis.dynamodb_analysis_tools import LlmAdvisorOutput
 
@@ -229,7 +232,10 @@ def run_finalize(store, job_id: str, db: str, engine: str) -> None:
         )
         llm_ddb = LlmAdvisorOutput.model_validate(llm_response)
         updated_contract = apply_dynamodb_llm_output(contract, llm_ddb)
-        trace = partial_data["decision_trace"]
+        # The partial's trace is checked like the stored one (#973).
+        trace = load_contract(
+            DynamoDBDecisionTrace, partial_data["decision_trace"], artifact=partial_path
+        ).model_dump(mode="json")
         mermaid = partial_data.get("mermaid_diagram", "")
 
     elif engine == "documentdb":

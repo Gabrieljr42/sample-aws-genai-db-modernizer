@@ -318,6 +318,25 @@
     ],
     "version": "1.0"
   },
+  "dynamodb_decision_trace.DenormSubtype": {
+    "module": "dynamodb_decision_trace",
+    "values": [
+      "adjacency-list",
+      "bounded-parent-child",
+      "co-accessed-tables",
+      "many-to-many-junction"
+    ],
+    "version": "1.0"
+  },
+  "dynamodb_decision_trace.TransactionShapeKind": {
+    "module": "dynamodb_decision_trace",
+    "values": [
+      "bounded",
+      "single item",
+      "unbounded"
+    ],
+    "version": "1.0"
+  },
   "dynamodb_model_output.AGGREGATE_PATTERNS": {
     "module": "dynamodb_model_output",
     "values": [

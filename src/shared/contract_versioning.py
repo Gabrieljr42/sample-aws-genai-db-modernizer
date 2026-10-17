@@ -250,6 +250,11 @@ _ARTIFACT_CONTRACTS: tuple[tuple[str, str], ...] = (
     (r"uploads/collector-output\.json", _COLLECTOR),
     (r"referee-triage/triage\.json", "src.contracts.triage_output:TriageOutputContract"),
     (r"analysis-[^/]+/analysis\.json", "src.contracts.analysis_output:AnalysisOutputContract"),
+    # Only the DynamoDB trace is a contract (#973); the other engines' are plain dicts.
+    (
+        r"analysis-dynamodb/decision-trace\.json",
+        "src.contracts.dynamodb_decision_trace:DynamoDBDecisionTrace",
+    ),
     (r"assignment/v\d+/assignment\.json", "src.contracts.assignment_models:Assignment"),
     (r"assignment/v\d+/validation\.json", "src.contracts.assignment_models:ValidationResult"),
     (

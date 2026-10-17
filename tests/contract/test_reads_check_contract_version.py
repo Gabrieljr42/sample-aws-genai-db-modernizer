@@ -534,6 +534,13 @@ _PLACEHOLDER = "1"  # stands in for every value a path f-string interpolates
 # it bound (a parameter set by the caller).
 PATH_HINTS: dict[tuple[str, str], str] = {
     ("src/agents/load_test/handler.py", "base"): "db/job/load-test-dynamodb/v1",
+    # The one decision-trace writer takes the key from its callers (the analysis
+    # handler, scripts/run_analysis.py, the transform core); it writes through the model
+    # only the trace registered as a contract, the DynamoDB one (#973).
+    (
+        "src/agents/analysis/decision_trace.py",
+        "key",
+    ): "db/job/analysis-dynamodb/decision-trace.json",
 }
 
 

@@ -1,0 +1,246 @@
+{
+  "trace_version": "1.1",
+  "agent": "dynamodb-analysis-agent",
+  "summary": {
+    "queries_analyzed": 1654,
+    "queries_matched": 1098,
+    "queries_unmatched": 556,
+    "patterns_detected": 7,
+    "anti_patterns_detected": 4
+  },
+  "query_matches": [
+    {
+      "query_id": "8949129557926170169",
+      "query_text_preview": "SELECT a.attname\n  FROM (\n         SELECT indrelid, indkey, generate_subscripts(indkey, $1) idx\n           FROM pg_index",
+      "matched_patterns": [],
+      "matched_anti_patterns": [
+        "dynamodb-ap-01"
+      ]
+    },
+    {
+      "query_id": "1422270904523722912",
+      "query_text_preview": "INSERT INTO \"scheduler_stats\" (\"name\", \"hostname\", \"pid\", \"duration_ms\", \"live_slots_start\", \"live_slots_finish\", \"start",
+      "matched_patterns": [
+        "dynamodb-03"
+      ],
+      "matched_anti_patterns": [],
+      "transaction_shape": {
+        "shape": "single item",
+        "items": 1,
+        "reason": "changes about 1 row(s) per call (measured)"
+      }
+    },
+    {
+      "query_id": "7611281791412075472",
+      "query_text_preview": "UPDATE topic_hot_scores thsOrig\nSET\n    recent_likes = COALESCE(new_values.likes_count, $1),\n    recent_posters = COALES",
+      "matched_patterns": [],
+      "matched_anti_patterns": [
+        "dynamodb-ap-02",
+        "dynamodb-ap-04"
+      ],
+      "transaction_shape": {
+        "shape": "unbounded",
+        "items": 324,
+        "reason": "changes about 324 row(s) per call (measured), more than the 100 items one transaction can hold"
+      }
+    },
+    {
+      "query_id": "1774165768408117787",
+      "query_text_preview": "UPDATE posts\nSET percent_rank = X.percent_rank\nFROM (\n  SELECT posts.id, Y.percent_rank\n  FROM posts\n  JOIN (\n    SELECT",
+      "matched_patterns": [],
+      "matched_anti_patterns": [],
+      "transaction_shape": {
+        "shape": "bounded",
+        "items": 2,
+        "reason": "changes about 2 row(s) per call (measured)"
+      }
+    }
+  ],
+  "pattern_summaries": [
+    {
+      "pattern_id": "dynamodb-01",
+      "pattern_type": "key-value-lookup",
+      "catalog_base_score": 100,
+      "queries_matched_count": 470,
+      "tables_involved": [
+        "discourse.ai_agents",
+        "discourse.anonymous_users"
+      ]
+    },
+    {
+      "pattern_id": "dynamodb-02",
+      "pattern_type": "range-query",
+      "catalog_base_score": 90,
+      "queries_matched_count": 27,
+      "tables_involved": [
+        "discourse.anonymous_users",
+        "discourse.api_keys"
+      ]
+    }
+  ],
+  "recommendation_derivations": [
+    {
+      "table_id": "discourse.ad_plugin_house_ads",
+      "segments_contributing": [],
+      "score_breakdown": {
+        "pattern_match": 0,
+        "complexity": 90,
+        "performance": 0,
+        "cost": 60
+      },
+      "weights_used": {
+        "pattern_match": 0.6,
+        "complexity": 0.2,
+        "performance": 0.05,
+        "cost": 0.15
+      },
+      "weighted_confidence": 27
+    },
+    {
+      "table_id": "discourse.ad_plugin_house_ads_categories",
+      "segments_contributing": [],
+      "score_breakdown": {
+        "pattern_match": 0,
+        "complexity": 55,
+        "performance": 0,
+        "cost": 60
+      },
+      "weights_used": {
+        "pattern_match": 0.6,
+        "complexity": 0.2,
+        "performance": 0.05,
+        "cost": 0.15
+      },
+      "weighted_confidence": 20
+    }
+  ],
+  "table_groups": [
+    {
+      "group_root": "discourse.ad_plugin_house_ads",
+      "tables": [
+        "discourse.ad_plugin_house_ads",
+        "discourse.ad_plugin_house_ads_categories",
+        "discourse.ad_plugin_house_ads_groups"
+      ]
+    }
+  ],
+  "pk_classifications": [
+    {
+      "table_id": "discourse.ad_plugin_house_ads",
+      "pk_columns": [
+        "id"
+      ],
+      "partition_key_candidate": "id",
+      "sort_key_candidate": null,
+      "needs_redesign": false,
+      "no_pk": false
+    },
+    {
+      "table_id": "discourse.ad_plugin_house_ads_categories",
+      "pk_columns": [],
+      "partition_key_candidate": null,
+      "sort_key_candidate": null,
+      "needs_redesign": false,
+      "no_pk": true
+    }
+  ],
+  "aggregates": [
+    {
+      "aggregate_id": "agg-admin_notices",
+      "root_table": "discourse.admin_notices",
+      "member_tables": [
+        "discourse.admin_notices"
+      ],
+      "co_access_evidence": [],
+      "co_access_confidence": 40,
+      "combined_migration_complexity": "LOW"
+    },
+    {
+      "aggregate_id": "agg-ai_agent_mcp_servers",
+      "root_table": "discourse.ai_agent_mcp_servers",
+      "member_tables": [
+        "discourse.ai_agent_mcp_servers"
+      ],
+      "co_access_evidence": [],
+      "co_access_confidence": 40,
+      "combined_migration_complexity": "LOW"
+    }
+  ],
+  "gsi_candidates": [],
+  "denormalization_opportunities": [
+    {
+      "subtype": "bounded-parent-child",
+      "tables": [
+        "discourse.categories",
+        "discourse.ad_plugin_house_ads_categories"
+      ],
+      "cardinality_ratio": 0.0,
+      "co_access_frequency": null,
+      "hierarchy_depth": null,
+      "is_cyclic": null,
+      "evidence": {
+        "parent_table": "discourse.categories",
+        "child_table": "discourse.ad_plugin_house_ads_categories",
+        "fk_columns": [
+          "category_id"
+        ],
+        "referenced_columns": [
+          "id"
+        ],
+        "parent_rows": 8,
+        "child_rows": 0
+      }
+    },
+    {
+      "subtype": "co-accessed-tables",
+      "tables": [
+        "pg_attribute",
+        "pg_index"
+      ],
+      "cardinality_ratio": null,
+      "co_access_frequency": 188.95833333333334,
+      "hierarchy_depth": null,
+      "is_cyclic": null,
+      "evidence": {
+        "query_ids": [
+          "8949129557926170169"
+        ],
+        "total_frequency_per_hour": 188.95833333333334
+      }
+    }
+  ],
+  "secondary_index_dominance": [],
+  "llm_advisor": {
+    "status": "skipped",
+    "duration_seconds": 0.0,
+    "attempts": 0,
+    "aggregate_key_designs": [],
+    "denormalization_strategies": []
+  },
+  "relationships": [
+    {
+      "type": "1:M",
+      "from_table": "discourse.ad_plugin_house_ads_categories",
+      "to_table": "categories",
+      "from_columns": [
+        "category_id"
+      ],
+      "to_columns": [
+        "id"
+      ],
+      "description": "1:M: ad_plugin_house_ads_categories.category_id → categories.id"
+    },
+    {
+      "type": "1:1",
+      "from_table": "discourse.javascript_caches",
+      "to_table": "themes",
+      "from_columns": [
+        "theme_id"
+      ],
+      "to_columns": [
+        "id"
+      ],
+      "description": "1:1: javascript_caches.theme_id → themes.id"
+    }
+  ]
+}
