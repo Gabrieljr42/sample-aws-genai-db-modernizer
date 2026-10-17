@@ -181,3 +181,128 @@ def test_new_contract_missing_from_snapshot_fails() -> None:
     assert len(problems) == 1
     assert "synthetic.Model" in problems[0]
     assert "new contract" in problems[0]
+
+
+# --- contract_version's own MAJOR.MINOR pattern (#1006) ------------------------------
+# Every published contract_version default is MAJOR.MINOR, so adding exactly that
+# pattern to the field (or turning a Literal version into that patterned string)
+# rejects no file ever written: MINOR. Any other pattern change stays MAJOR.
+
+_VERSION_PATTERN = r"^\d+\.\d+$"
+
+
+def test_adding_the_version_pattern_to_contract_version_is_minor() -> None:
+    class Before(BaseModel):
+        contract_version: str = Field(default="1.0")
+
+    class After(BaseModel):
+        contract_version: str = Field(default="1.1", pattern=_VERSION_PATTERN)
+
+    bump, changes = _bump_for(Before, After)
+    assert bump == "minor", changes
+    assert [path for path, _, _ in changes] == ["contract_version"]
+
+
+def test_a_literal_version_becoming_the_patterned_string_is_minor() -> None:
+    from typing import Literal
+
+    class Before(BaseModel):
+        contract_version: Literal["1.0"] = "1.0"
+
+    class After(BaseModel):
+        contract_version: str = Field(default="1.1", pattern=_VERSION_PATTERN)
+
+    bump, changes = _bump_for(Before, After)
+    assert bump == "minor", changes
+
+
+def test_a_literal_version_becoming_an_unpatterned_string_is_still_major() -> None:
+    from typing import Literal
+
+    class Before(BaseModel):
+        contract_version: Literal["1.0"] = "1.0"
+
+    class After(BaseModel):
+        contract_version: str = Field(default="1.1")
+
+    assert _bump_for(Before, After)[0] == "major"
+
+
+def test_a_literal_that_is_not_major_minor_becoming_the_patterned_string_is_major() -> None:
+    from typing import Literal
+
+    class Before(BaseModel):
+        contract_version: Literal["v1"] = "v1"
+
+    class After(BaseModel):
+        contract_version: str = Field(default="1.1", pattern=_VERSION_PATTERN)
+
+    assert _bump_for(Before, After)[0] == "major"
+
+
+def test_another_pattern_on_contract_version_is_still_major() -> None:
+    class Before(BaseModel):
+        contract_version: str = Field(default="1.0")
+
+    class After(BaseModel):
+        contract_version: str = Field(default="1.1", pattern=r"^\d+\.\d+\.\d+$")
+
+    assert _bump_for(Before, After)[0] == "major"
+
+
+def test_changing_the_version_pattern_is_still_major() -> None:
+    class Before(BaseModel):
+        contract_version: str = Field(default="1.0", pattern=_VERSION_PATTERN)
+
+    class After(BaseModel):
+        contract_version: str = Field(default="1.1", pattern=r"^1\.\d+$")
+
+    assert _bump_for(Before, After)[0] == "major"
+
+
+def test_the_version_pattern_on_another_field_is_still_major() -> None:
+    class Before(BaseModel):
+        schema_version: str = Field(default="1.0")
+
+    class After(BaseModel):
+        schema_version: str = Field(default="1.0", pattern=_VERSION_PATTERN)
+
+    assert _bump_for(Before, After)[0] == "major"
+
+
+def test_the_version_pattern_on_a_nested_contract_version_is_still_major() -> None:
+    class Inner(BaseModel):
+        contract_version: str = Field(default="1.0")
+
+    class InnerAfter(BaseModel):
+        contract_version: str = Field(default="1.0", pattern=_VERSION_PATTERN)
+
+    class Before(BaseModel):
+        inner: Inner
+
+    class After(BaseModel):
+        inner: InnerAfter
+
+    assert _bump_for(Before, After)[0] == "major"
+
+
+def test_the_pattern_with_a_minor_bump_needs_no_major_bump() -> None:
+    """``evaluate_snapshot`` compares a committed snapshot with a fresh one: with the
+    pattern added and a MINOR bump, the only problem left is "regenerate the
+    snapshot"; with no bump it asks for a MINOR one, never a MAJOR one."""
+
+    class Before(BaseModel):
+        contract_version: str = Field(default="1.0")
+
+    class After(BaseModel):
+        contract_version: str = Field(default="1.1", pattern=_VERSION_PATTERN)
+
+    def entry(model: type[BaseModel], version: str) -> dict:
+        fields = field_summary(model)
+        return {"version": version, "schema_hash": schema_hash(fields), "fields": fields}
+
+    committed = {"m.C": entry(Before, "1.0")}
+    (bumped,) = evaluate_snapshot(committed, {"m.C": entry(After, "1.1")})
+    assert "wasn't regenerated" in bumped and "MAJOR" not in bumped
+    (unbumped,) = evaluate_snapshot(committed, {"m.C": entry(After, "1.0")})
+    assert "requires a MINOR version bump" in unbumped

@@ -12210,8 +12210,9 @@
       "contract_version": {
         "required": false,
         "schema": {
-          "kind": "const",
-          "value": "1.0"
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
         }
       },
       "executive_summary": {
@@ -12223,8 +12224,8 @@
         }
       }
     },
-    "schema_hash": "2df46f91ea0d5015bbb231a1141dadc55cebc5a898157816c1786a3432a0973d",
-    "version": "1.0"
+    "schema_hash": "4005aac2eb1d11a9dbb38b589da22e782fcfea74a393999dcc8ed6e649c37f21",
+    "version": "1.1"
   },
   "load_test_models.InfrastructureManifest": {
     "fields": {
@@ -13109,6 +13110,7 @@
         "required": false,
         "schema": {
           "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
           "type": "string"
         }
       },
@@ -13781,8 +13783,8 @@
         }
       }
     },
-    "schema_hash": "2f460c43abe4a65aee7128a45dbe6457ff256f068cc5c8a46d760af88946af18",
-    "version": "1.0"
+    "schema_hash": "d860ad38aa4f25c14d314e375e124388f53298de1533b78098ada6e41e46f2f2",
+    "version": "1.1"
   },
   "phase_models.PhaseProgression": {
     "fields": {
@@ -14497,8 +14499,9 @@
       "contract_version": {
         "required": false,
         "schema": {
-          "kind": "const",
-          "value": "1.0"
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
         }
       },
       "executive_summary": {
@@ -14519,8 +14522,8 @@
         }
       }
     },
-    "schema_hash": "f0834a52f5d59f096e2a4efb9bd172c87ddaccc3ae8e6a461457907cb27dd672",
-    "version": "1.0"
+    "schema_hash": "62aacfdd30449e7850203c6ebfc7b84235b2839f9e0c33ddfcc9fbfb0ba6eb62",
+    "version": "1.1"
   },
   "reality_check_output.RealityCheckOutputContract": {
     "fields": {
@@ -14690,6 +14693,7 @@
         "required": false,
         "schema": {
           "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
           "type": "string"
         }
       },
@@ -15137,8 +15141,8 @@
         }
       }
     },
-    "schema_hash": "8f45ffe65964e63f6005ec3bb08f2f4fe478025022a691f8d6ac09b75ec91f7f",
-    "version": "2.0"
+    "schema_hash": "dca7795e6c66e1d28f6315ae2661e699520dc91fe94634e721204d7ad4bfea21",
+    "version": "2.1"
   },
   "referee_input.RefereeInput": {
     "fields": {
@@ -21962,6 +21966,7 @@
         "required": false,
         "schema": {
           "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
           "type": "string"
         }
       },
@@ -22144,7 +22149,7 @@
         }
       }
     },
-    "schema_hash": "06564118320f00af82c41a4e05960b0b53c0a31a71f589138334be65ca63b51e",
-    "version": "1.1"
+    "schema_hash": "27ebc82f67298d9ed7ac9064ec3a660bbb0a55c3b595862d9e71e4688e77b62a",
+    "version": "1.2"
   }
 }

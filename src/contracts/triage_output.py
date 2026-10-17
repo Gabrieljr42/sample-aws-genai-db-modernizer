@@ -6,6 +6,10 @@ workload signals, and confidence scoring.
 
 Version History:
 - 1.0 (2026-04-16): Initial version — extracted from triage_handler raw dict
+- 1.1 (by 2026-06-01): The version the contract shipped at in this repository; the
+  change from 1.0 predates it and was not recorded.
+- 1.2 (2026-10-17, #1006): ``contract_version`` declares the MAJOR.MINOR pattern
+  every published version already matched (ADR-008 Decision 1).
 
 Note (#493, no schema change, version unchanged): the capability id
 ``inverted_index`` in ``query_capabilities`` is now ``text_pattern_match``. A
@@ -62,7 +66,9 @@ class TriageOutputContract(BaseModel):
     what workload signals were detected, and the overall triage confidence.
     """
 
-    contract_version: str = Field(default="1.1", description="Contract version")
+    contract_version: str = Field(
+        default="1.2", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
     job_id: str = Field(..., description="Job identifier")
     database_name: str = Field(..., description="Source database name")
     agent_type: str = Field(default="referee-triage", description="Agent identifier")

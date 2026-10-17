@@ -31,7 +31,10 @@ class TestOutputContract:
             trade_offs=[],
             validation_passed=True,
         )
-        assert contract.contract_version == "1.0"
+        assert (
+            contract.contract_version
+            == OpenSearchModelOutputContract.model_fields["contract_version"].default
+        )
 
     def test_contract_with_index_mapping(self):
         mapping = IndexMapping(

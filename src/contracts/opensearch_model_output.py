@@ -3,6 +3,11 @@
 Defines the structured output that the OpenSearch schema design agent
 produces — index mappings (search workload) and data stream configurations
 with ISM policies (time-series workload), plus access pattern translations.
+
+Version History:
+- 1.0: Initial version.
+- 1.1 (2026-10-17, #1006): ``contract_version`` declares the MAJOR.MINOR pattern
+  every published version already matched (ADR-008 Decision 1).
 """
 
 from __future__ import annotations
@@ -306,7 +311,8 @@ class OpenSearchModelOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.0",
+        default="1.1",
+        pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )
     job_id: str = Field(..., description="job_id from collector output")

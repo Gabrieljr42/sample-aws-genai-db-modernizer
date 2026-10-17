@@ -260,8 +260,8 @@ class TestRealityCheckOutputContract:
 
     def test_contract_version_defaults(self, valid_reality_check_data):
         output = RealityCheckOutputContract.model_validate(valid_reality_check_data)
-        # #790: 2.0 removed lightweight_recommendations.
-        assert output.contract_version == "2.0"
+        # #790: 2.0 removed lightweight_recommendations; #1006: 2.1 declares the pattern.
+        assert output.contract_version == "2.1"
 
     def test_lightweight_recommendations_is_not_a_field(self, valid_reality_check_data):
         output = RealityCheckOutputContract.model_validate(valid_reality_check_data)
