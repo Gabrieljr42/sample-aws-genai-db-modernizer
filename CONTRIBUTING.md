@@ -502,6 +502,7 @@ Many pull requests land on `main` every day, so a branch that was green yesterda
 - Take the next contract version at rebase time. If another PR already used your `contract_version`, bump to the next one and regenerate the schema snapshot.
 - Never hand-merge a generated snapshot (the routing snapshot, `tests/contract/schema_snapshot.json`, `tests/contract/value_set_snapshot.json`, rendered catalog docs). Take main's copy and regenerate it on top of it.
 - Run `./ci/needs_llm_run.sh` early. If it says `e2e-llm: required`, start that run before the review rounds, not after.
+- `main` has a merge queue. Use "Merge when ready" to add your PR to it: the queue re-runs the required checks on top of main and the PRs ahead of yours, then merges it, or removes it from the queue and shows the failing check.
 
 ## Maintainer Sync
 
