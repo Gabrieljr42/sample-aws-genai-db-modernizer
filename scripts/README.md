@@ -80,6 +80,14 @@ git commit  # Pre-commit hook runs validation automatically
 - Has required metadata fields (title, version, description, type)
 - Version follows semantic versioning (MAJOR.MINOR.PATCH)
 
+#### redact_stored_inputs.py
+
+Removes database credentials that Assessments API versions before #723 stored in `artifacts/<db>/<job>/_meta.json` (and any credential-shaped agent answer). The API also does this once, in the background, after it starts. It prints the rewritten and skipped file paths, never their contents, skips (and reports) a file it cannot read or write, and is safe to run more than once.
+
+```bash
+uv run python scripts/redact_stored_inputs.py --artifact-dir ./artifacts
+```
+
 ## Planned Scripts
 
 - [ ] **validate_all_schemas.py** - Batch validate all schemas

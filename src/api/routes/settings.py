@@ -1,6 +1,8 @@
 """Settings routes — system configuration."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from src.api.secret_guard import refuse_submitted_secrets
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
@@ -35,9 +37,9 @@ async def get_settings():
     return _settings
 
 
-@router.put("")
+@router.put("", dependencies=[Depends(refuse_submitted_secrets)])
 async def update_settings(settings: dict):
-    """Update settings."""
+    """Update settings. A body carrying a secret is refused with a 400 (#723)."""
     _settings.update(settings)
     return _settings
 

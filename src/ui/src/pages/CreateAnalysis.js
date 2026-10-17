@@ -36,6 +36,7 @@ import { SideNavigationConfigurations, ApiConfigurations } from "../config/Globa
 import AppHeader from "../components/AppHeader";
 import ApiManager from "../classes/ApiManager";
 import { isValidDatabaseName } from "../utils/databaseName";
+import { buildConnection } from "../utils/connectionPayload";
 function SourceDatabaseSection({ formData, setFormData, errors }) {
   const { t } = useTranslation();
   const rdsOptions = [
@@ -69,12 +70,6 @@ function SourceDatabaseSection({ formData, setFormData, errors }) {
         "Provide the name of a secret stored in AWS Secrets Manager.",
       label: "AWS Secrets Manager name",
       value: "secrets-name",
-    },
-    {
-      description:
-        "Enter username and password directly. Not recommended for production use.",
-      label: "Direct credentials",
-      value: "direct",
     },
   ];
   return (
@@ -214,36 +209,6 @@ function SourceDatabaseSection({ formData, setFormData, errors }) {
         </FormField>
       )}
 
-      {formData.credentialsType === "direct" && (
-        <SpaceBetween size="l">
-          <FormField label={t("create-analysis.source.username.label")} errorText={errors.username}>
-            <Input
-              placeholder="admin"
-              type="text"
-              value={formData.username}
-              onChange={({ detail }) =>
-                setFormData({
-                  ...formData,
-                  username: detail.value,
-                })
-              }
-            />
-          </FormField>
-          <FormField label={t("create-analysis.source.password.label")} errorText={errors.password}>
-            <Input
-              placeholder={t("create-analysis.source.password.placeholder")}
-              type="password"
-              value={formData.password}
-              onChange={({ detail }) =>
-                setFormData({
-                  ...formData,
-                  password: detail.value,
-                })
-              }
-            />
-          </FormField>
-        </SpaceBetween>
-      )}
     </SpaceBetween>
   );
 }
@@ -780,8 +745,6 @@ function DatabaseAnalysisForm() {
     credentialsType: "secrets-arn",
     secretArn: "",
     secretName: "",
-    username: "",
-    password: "",
     // Collection options
     anonymizePii: true,
     includeSampleData: true,
@@ -882,13 +845,6 @@ function DatabaseAnalysisForm() {
         if (!formData.secretName.trim()) {
           newErrors.secretName = "Secret name is required";
         }
-      } else if (formData.credentialsType === "direct") {
-        if (!formData.username.trim()) {
-          newErrors.username = "Username is required";
-        }
-        if (!formData.password.trim()) {
-          newErrors.password = "Password is required";
-        }
       }
     } else if (stepIndex === 2) {
       // Step 3: Target databases validation
@@ -949,13 +905,6 @@ function DatabaseAnalysisForm() {
     } else if (formData.credentialsType === "secrets-name") {
       if (!formData.secretName.trim()) {
         newErrors.secretName = "Secret name is required";
-      }
-    } else if (formData.credentialsType === "direct") {
-      if (!formData.username.trim()) {
-        newErrors.username = "Username is required";
-      }
-      if (!formData.password.trim()) {
-        newErrors.password = "Password is required";
       }
     }
 
@@ -1185,23 +1134,9 @@ function DatabaseAnalysisForm() {
       const targetDatabasesArray = Object.keys(formData.targetDatabases)
         .filter(key => formData.targetDatabases[key]);
 
-      // Build connection object
-      const connection = {
-        host: formData.host,
-        port: parseInt(formData.port),
-        database: formData.databaseName.trim(),
-        credentials_type: formData.credentialsType
-      };
-
-      // Add credentials based on type
-      if (formData.credentialsType === 'secrets-arn') {
-        connection.secret_arn = formData.secretArn;
-      } else if (formData.credentialsType === 'secrets-name') {
-        connection.secret_name = formData.secretName;
-      } else if (formData.credentialsType === 'direct') {
-        connection.username = formData.username;
-        connection.password = formData.password;
-      }
+      // Credentials go by reference only (a Secrets Manager ARN or name),
+      // never a password (#723, ADR-004 Decision 5).
+      const connection = buildConnection(formData);
 
       // Build options object
       const options = {

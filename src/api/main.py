@@ -2,6 +2,9 @@
 
 import hashlib
 import os
+import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -11,7 +14,26 @@ from fastapi.responses import JSONResponse
 
 from src.shared.package_version import get_package_version
 
-app = FastAPI(title="Database Modernizer Assessment API", version=get_package_version())
+#: The background thread of the one-time redaction of stored inputs (#723), for tests.
+redaction_thread: threading.Thread | None = None
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    global redaction_thread
+    # In the background, after start-up: it can never delay or stop the API.
+    redaction_thread = threading.Thread(
+        target=_redact_stored_inputs, name="stored-input-redaction", daemon=True
+    )
+    redaction_thread.start()
+    yield
+
+
+app = FastAPI(
+    title="Database Modernizer Assessment API",
+    version=get_package_version(),
+    lifespan=_lifespan,
+)
 
 _raw_sha = os.environ.get("COMMIT_SHA", "unknown")
 BUILD_VERSION = (
@@ -35,14 +57,28 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# Cap every request body (413) before any route or parser sees it (#723).
+from src.api.body_limit import BodySizeLimitMiddleware, max_body_bytes_from_env  # noqa: E402
+
 # Only answer requests addressed to the loopback host names
 # (MODERNIZER_ALLOWED_HOSTS overrides; see src/api/host_guard.py). Added last
 # so it runs first.
 from src.api.host_guard import HostAllowlistMiddleware, allowed_hosts_from_env  # noqa: E402
 
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=max_body_bytes_from_env())
+
 _allowed_hosts = allowed_hosts_from_env()
 if _allowed_hosts is not None:
     app.add_middleware(HostAllowlistMiddleware, allowed_hosts=_allowed_hosts)
+
+
+# A request carrying a secret is refused (src/api/secret_guard.py, #723); keep the
+# server's access log from recording one sent in a query string.
+import logging  # noqa: E402
+
+from src.api.secret_guard import RedactSecretQueryFilter  # noqa: E402
+
+logging.getLogger("uvicorn.access").addFilter(RedactSecretQueryFilter())
 
 
 # ============================================================
@@ -113,6 +149,17 @@ _artifact_store = create_artifact_store()
 # filesystem-backed services (ADR: hosted deployment retired, #175).
 _sfn = LocalExecutionService(_artifact_store)
 _s3 = LocalS3Service(_artifact_store)
+
+
+def _redact_stored_inputs() -> None:
+    """Once (see the marker in stored_input_redaction): redact credentials stored by API
+    versions before #723. Never raises."""
+    from src.api.stored_input_redaction import redact_stored_inputs_once
+
+    base_dir = getattr(_artifact_store, "base_dir", None)
+    if base_dir is not None:
+        redact_stored_inputs_once(base_dir)
+
 
 # Wire both services to all route modules that need them
 assessments.sfn_service = _sfn
