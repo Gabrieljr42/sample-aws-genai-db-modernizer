@@ -1,7 +1,7 @@
 /**
  * Customer-facing label and definition for the routing fit score (#152, bug:
  * Deliverables present a fit score as a confidence percentage), imported by
- * ExportReport.js's standalone export and the live React results page.
+ * the live React results page.
  *
  * The underlying score (`routed_confidence`, `engine_confidence`, `confidence`,
  * `confidence_score`) keeps its internal field names -- only the word a reader

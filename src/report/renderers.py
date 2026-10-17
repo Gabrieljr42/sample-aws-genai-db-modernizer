@@ -1,8 +1,8 @@
-"""Pure renderers for the synthesis deliverables (decision report HTML, engineering
-report Markdown, architecture SVG, provenance).
+"""Pure renderers for the synthesis deliverables (engineering report Markdown,
+provenance).
 
-The code lives in one module per deliverable or section (``decision_report``,
-``engineering_report``, ``architecture``, ``roadmap``, ``cache_layer``,
+The code lives in one module per deliverable or section (``engineering_report``,
+``architecture``, ``roadmap``, ``cache_layer``,
 ``engine_choices``, ``risks``, ``engine_roles``, ``formatting``); this module
 re-exports their names so callers keep importing from ``renderers``.
 """
@@ -11,9 +11,8 @@ from __future__ import annotations
 
 from src.shared.report_facts import cache_layer_counts
 
-from .architecture import SHARED_TABLES_LABEL, SHARED_TABLES_NOTE, architecture_svg
+from .architecture import SHARED_TABLES_LABEL, SHARED_TABLES_NOTE
 from .cache_layer import cache_layer_text, cache_wave_note
-from .decision_report import render_decision_report_html
 from .engine_roles import SEARCH_READ_MODEL
 from .engineering_report import render_engineering_report_md
 from .formatting import (
@@ -40,7 +39,6 @@ __all__ = [
     "SHARED_TABLES_LABEL",
     "SHARED_TABLES_NOTE",
     "access_pattern_scope",
-    "architecture_svg",
     "artifact_stem",
     "cache_layer_counts",
     "cache_layer_text",
@@ -55,7 +53,6 @@ __all__ = [
     "plural_noun",
     "plural_verb",
     "provenance",
-    "render_decision_report_html",
     "render_engineering_report_md",
     "resolve_migration_waves",
     "resolved_risk_label",

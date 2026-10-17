@@ -1,10 +1,10 @@
 """Unit tests for the customer-facing report renderers (Increment 2).
 
-The renderers (``render_decision_report_html``, ``render_engineering_report_md``)
+The renderers (``render_engineering_report_md`` and the PDF report's sections)
 and their helpers are pure functions of the synthesis ``report.json``. They are
 exercised against a committed fixture — the real report from the deployed
 ``v2-e2e-09`` run — so the assertions check genuine reconciliation
-($814.12 / 100% workload / 92 migrated tables) and the executive/engineering
+($814.12 / 100% workload / 90 tables that migrate) and the executive/engineering
 content split, not a hand-built stub.
 
 The ATX orchestrator's publish wiring (``_publish_synthesis_deliverables`` /
@@ -16,12 +16,11 @@ covers only the renderers themselves.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
 
-from src.report import architecture, decision_report, engine_roles, engineering_report, renderers
+from src.report import architecture, engineering_report, renderers
 from src.shared import report_facts
 
 FIXTURE = Path(__file__).parent / "fixtures" / "e2e09_report.json"
@@ -34,32 +33,21 @@ def report() -> dict:
 
 
 # =============================================================================
-# Decision Report (HTML, executive)
+# The five-engine picture, as the engineering report and the PDF report show it
 
 
-class TestDecisionReport:
-    def test_renders_html_document(self, report: dict) -> None:
-        h = renderers.render_decision_report_html(report)
-        low = h.lstrip().lower()
-        assert low.startswith("<!doctype html") or low.startswith("<html")
-        assert len(h) > 3000
-
-    def test_offline_no_external_loads(self, report: dict) -> None:
-        """Self-contained: no CDN/CSS/JS/font loads. The only URI allowed is the
-        inline SVG xmlns."""
-        h = renderers.render_decision_report_html(report)
-        assert "https://" not in h
-        assert set(re.findall(r"http://[^\s\"'>]+", h)) <= {"http://www.w3.org/2000/svg"}
-        assert "<script" not in h.lower()
-        assert "<link" not in h.lower()
-        assert "cdn" not in h.lower()
-
+class TestFiveEngineReconciliation:
     def test_five_engine_reconciliation(self, report: dict) -> None:
-        h = renderers.render_decision_report_html(report)
-        for eng in ("aurora", "elasticache", "documentdb", "dynamodb", "opensearch"):
-            assert eng in h.lower()
-        assert "814.12" in h
-        assert "92" in h
+        m = renderers.render_engineering_report_md(report)
+        for eng in ("Aurora PostgreSQL", "ElastiCache", "DocumentDB", "DynamoDB", "OpenSearch"):
+            assert f"| {eng} |" in m
+        migrated = report_facts.compute_report_facts(report)["tables_migrate"]
+        assert f"| {migrated} tables migrate |" in m
+
+    def test_the_pdf_states_the_reconciled_total(self, report: dict) -> None:
+        from tests.unit.report.pdf_text import pdf_text
+
+        assert "Total $814.12" in pdf_text(report)
 
     def test_architecture_engines_all_five_with_roles(self, report: dict) -> None:
         engines = architecture._architecture_engines(report)
@@ -74,20 +62,12 @@ class TestDecisionReport:
         assert any("igration" in r for r in roles)
         assert any("ache" in r for r in roles)
 
-    def test_no_per_risk_list_no_tradeoffs(self, report: dict) -> None:
-        h = renderers.render_decision_report_html(report)
-        assert "Risk posture" in h
-        assert "Key trade-offs" not in h
-        # no per-risk cards in the body
-        assert 'class="risk ' not in h
-
     def test_risk_posture_counts_and_strategies(self, report: dict) -> None:
-        h = renderers.render_decision_report_html(report)
-        assert "22" in h
-        assert "Mitigation strategies" in h
+        from tests.unit.report.pdf_text import pdf_text
 
-    def test_no_empty_unknown_risks(self, report: dict) -> None:
-        assert "unknown:" not in renderers.render_decision_report_html(report)
+        text = pdf_text(report)
+        assert "Open risks: 22" in text
+        assert "Mitigation strategies" in text
 
 
 # =============================================================================
@@ -368,53 +348,3 @@ class TestEngineRole:
         kept = [e for e in engines if e["role"] in ("Retained", "Cache layer")]
         assert [e["engine"] for e in kept] == ["aurora_postgresql", "elasticache"]
         assert abs(sum(e["workload"] for e in kept) - 78.7) < 0.05
-
-    def test_architecture_svg_renders_the_evaluated_engine_muted(
-        self, zero_workload_report: dict
-    ) -> None:
-        svg = renderers.architecture_svg(zero_workload_report)
-        assert engine_roles._ROLE_STROKE["Evaluated"] in svg
-        assert ">None<" not in svg
-
-
-# =============================================================================
-# Engine badges (accessibility)
-
-
-def _srgb_channel(value: float) -> float:
-    return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
-
-
-def _relative_luminance(hex_color: str) -> float:
-    hex_color = hex_color.lstrip("#")
-    r, g, b = (int(hex_color[i : i + 2], 16) / 255 for i in (0, 2, 4))
-    return 0.2126 * _srgb_channel(r) + 0.7152 * _srgb_channel(g) + 0.0722 * _srgb_channel(b)
-
-
-def _contrast_ratio(hex_a: str, hex_b: str) -> float:
-    lum_a, lum_b = _relative_luminance(hex_a), _relative_luminance(hex_b)
-    lighter, darker = max(lum_a, lum_b), min(lum_a, lum_b)
-    return (lighter + 0.05) / (darker + 0.05)
-
-
-class TestEngineBadgeContrast:
-    """The decision report's engine badges render white text on these backgrounds
-    (``_engine_badge``). axe's ``color-contrast`` rule caught the un-darkened
-    "aurora" orange (#ff9900, 2.14:1) and "elasticache" red (#dc382d, 4.52:1 — a
-    margin thin enough to flip pass/fail between Chromium and WebKit). Every
-    badge colour, including the no-match fallback, must clear WCAG AA's 4.5:1
-    for normal-weight small text.
-    """
-
-    @pytest.mark.parametrize("engine", sorted(decision_report._ENGINE_BADGE))
-    def test_badge_background_meets_aa_contrast_with_white_text(self, engine: str) -> None:
-        color = decision_report._ENGINE_BADGE[engine]
-        ratio = _contrast_ratio("#ffffff", color)
-        assert (
-            ratio >= 4.5
-        ), f"{engine} badge {color} only has {ratio:.2f}:1 contrast with white text"
-
-    def test_fallback_badge_meets_aa_contrast_with_white_text(self) -> None:
-        html = decision_report._engine_badge("some-unmapped-engine")
-        fallback = re.search(r"background:(#[0-9a-fA-F]{6})", html).group(1)
-        assert _contrast_ratio("#ffffff", fallback) >= 4.5

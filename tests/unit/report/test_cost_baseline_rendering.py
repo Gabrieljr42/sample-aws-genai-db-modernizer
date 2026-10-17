@@ -1,4 +1,4 @@
-"""The decision report and engineering report must show a known TCO baseline,
+"""The PDF report and engineering report must show a known TCO baseline,
 or say it is unknown, instead of a bare $0.00 / 0% (#380 review).
 
 A retired engine's own analysed cost (``tco_analysis.retired_engine_savings``, #949:
@@ -8,7 +8,8 @@ states savings.
 
 from __future__ import annotations
 
-from src.report.renderers import render_decision_report_html, render_engineering_report_md
+from src.report.renderers import render_engineering_report_md
+from tests.unit.report.pdf_text import pdf_text
 
 RANKING = [{"target": "aurora_mysql", "workload_percent": 100.0, "confidence_score": 80}]
 
@@ -29,7 +30,7 @@ def _report(tco: dict) -> dict:
     }
 
 
-class TestDecisionReportCostBaseline:
+class TestPdfReportCostBaseline:
     def test_unknown_baseline_says_so_not_zero_dollars(self) -> None:
         tco = {
             "current_monthly_cost": 0.0,
@@ -38,11 +39,11 @@ class TestDecisionReportCostBaseline:
             "savings_percent": 0,
             "cost_breakdown": [],
         }
-        html = render_decision_report_html(_report(tco))
-        assert "<p>Current monthly</p><p class=val>source cost not provided</p>" in html
-        assert "<p>Savings</p><p class=val>not available</p>" in html
-        assert "<p>Current monthly</p><p class=val>$0.00</p>" not in html
-        assert "<p>Savings</p><p class=val>0%</p>" not in html
+        text = pdf_text(_report(tco))
+        assert "Current monthly (source): source cost not provided" in text
+        assert "Savings: not available" in text
+        assert "Current monthly (source): $0.00" not in text
+        assert "Savings: 0%" not in text
 
     def test_known_baseline_shows_the_real_figures(self) -> None:
         tco = {
@@ -52,10 +53,10 @@ class TestDecisionReportCostBaseline:
             "savings_percent": 75.8,
             "cost_breakdown": [],
         }
-        html = render_decision_report_html(_report(tco))
-        assert "$500.00" in html
-        assert "75.8%" in html
-        assert "source cost not provided" not in html
+        text = pdf_text(_report(tco))
+        assert "$500.00" in text
+        assert "75.8%" in text
+        assert "source cost not provided" not in text
 
     def test_missing_current_cost_known_with_a_real_cost_shows_the_number(self) -> None:
         """A report written before current_cost_known existed, with a real
@@ -67,8 +68,8 @@ class TestDecisionReportCostBaseline:
             "savings_percent": 75.8,
             "cost_breakdown": [],
         }
-        html = render_decision_report_html(_report(tco))
-        assert "$500.00" in html
+        text = pdf_text(_report(tco))
+        assert "$500.00" in text
 
     def test_missing_current_cost_known_with_a_zero_cost_is_unknown(self) -> None:
         """#334: a report written before current_cost_known existed (no field
@@ -84,11 +85,11 @@ class TestDecisionReportCostBaseline:
             "savings_percent": 0.0,
             "cost_breakdown": [],
         }
-        html = render_decision_report_html(_report(tco))
-        assert "<p>Current monthly</p><p class=val>source cost not provided</p>" in html
-        assert "<p>Savings</p><p class=val>not available</p>" in html
-        assert "<p>Current monthly</p><p class=val>$0.00</p>" not in html
-        assert "<p>Savings</p><p class=val>0%</p>" not in html
+        text = pdf_text(_report(tco))
+        assert "Current monthly (source): source cost not provided" in text
+        assert "Savings: not available" in text
+        assert "Current monthly (source): $0.00" not in text
+        assert "Savings: 0%" not in text
 
     def test_retired_engine_savings_are_traceable(self) -> None:
         tco = {
@@ -102,9 +103,9 @@ class TestDecisionReportCostBaseline:
                 {"database": "opensearch", "monthly_cost_usd": 240.96},
             ],
         }
-        html = render_decision_report_html(_report(tco))
-        assert "$271.80/mo" in html
-        assert "$240.96/mo" in html
+        text = pdf_text(_report(tco))
+        assert "$271.80/mo" in text
+        assert "$240.96/mo" in text
 
     def test_no_retired_engine_savings_adds_no_note(self) -> None:
         tco = {
@@ -113,8 +114,8 @@ class TestDecisionReportCostBaseline:
             "savings_percent": 50.0,
             "cost_breakdown": [],
         }
-        html = render_decision_report_html(_report(tco))
-        assert "Retired by this plan" not in html
+        text = pdf_text(_report(tco))
+        assert "Retired by this plan" not in text
 
 
 class TestEngineeringReportCostBaseline:
@@ -155,26 +156,3 @@ class TestEngineeringReportCostBaseline:
         }
         md = render_engineering_report_md(_report(tco))
         assert "$271.80/mo" in md
-
-
-class TestDecisionReportTileTextOrder:
-    """A text reader (the quality judge, a screen reader) must see each tile's
-    label before its value, or "source cost not provided" reads as the label of
-    the next tile's figure (Discourse validation run on 7aa6ec1)."""
-
-    def test_each_tile_label_comes_right_before_its_value(self) -> None:
-        from ci.llm.judge import html_to_text
-
-        tco = {
-            "current_monthly_cost": 0.0,
-            "current_cost_known": False,
-            "projected_monthly_cost": 301.36,
-            "savings_percent": 0,
-            "cost_breakdown": [],
-        }
-        lines = html_to_text(render_decision_report_html(_report(tco))).splitlines()
-        pairs = {lines[i]: lines[i + 1] for i in range(len(lines) - 1)}
-        assert pairs["Current monthly"] == "source cost not provided"
-        assert pairs["Projected monthly"] == "$301.36"
-        assert pairs["Savings"] == "not available"
-        assert pairs["Engines"] == "1"

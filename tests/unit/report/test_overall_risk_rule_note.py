@@ -1,8 +1,8 @@
-"""The decision report states how the overall risk level is derived (#248)."""
+"""The PDF report states how the overall risk level is derived (#248)."""
 
 from __future__ import annotations
 
-from src.report import renderers
+from tests.unit.report.pdf_text import pdf_text
 
 _NOTE = (
     "Overall risk is the highest severity among the open risks; risks the assignment "
@@ -28,10 +28,10 @@ def test_rule_is_shown_next_to_the_level() -> None:
         "severity": "MEDIUM",
         "description": "[dynamodb] aggregation: DynamoDB has no native equivalent.",
     }
-    html = renderers.render_decision_report_html(_report([risk]))
-    assert "Overall risk <b>MEDIUM</b>." in html
-    assert _NOTE in html
+    text = pdf_text(_report([risk]))
+    assert "Overall risk: MEDIUM" in text
+    assert _NOTE in text
 
 
-def test_no_risk_posture_section_without_risks() -> None:
-    assert _NOTE not in renderers.render_decision_report_html(_report([]))
+def test_no_rule_note_without_open_risks() -> None:
+    assert _NOTE not in pdf_text(_report([]))

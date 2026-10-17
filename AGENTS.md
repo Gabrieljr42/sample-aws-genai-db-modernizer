@@ -15,12 +15,12 @@ and the CI scripts are documented in [ci/README.md](ci/README.md).
 | `src/agents/` | Pipeline agents: `collector/`, `analysis/` (one per engine), `referee/` (triage, reality check, synthesis), `schema_design/`, `load_test/`; `prompt_framing.py` |
 | `src/contracts/` | Pydantic models for every agent's input and output (contract changes: see CONTRIBUTING.md) |
 | `src/tools/` | Deterministic tools: `analysis/`, `schema/`, `validation/`, `database/`, `aws/` |
-| `src/report/` | Deliverable renderers (decision/analysis HTML, engineering Markdown, multi-page PDF) from one synthesis `report.json`; `escaping.py` |
+| `src/report/` | Deliverable renderers (engineering Markdown, multi-page PDF) from one synthesis `report.json`; `escaping.py` |
 | `src/shared/` | Cross-cutting helpers, including `engine_names.py` (engine display names) |
 | `src/catalog/` | Rule catalog (ADR-031 Decision 8): `engines/` one TOML per engine (display name, colours, status, role), `patterns/` one TOML per pattern type (per-engine fit score, anti-pattern severity, penalty, why), loaded by `src/shared/catalog/`; `scripts/render_catalog.py` generates the UI's `engineCatalog.generated.js` and `docs/architecture/rule-catalog.md` (`--check` runs in lint) |
 | `src/skills/` | Markdown prompts (data-modeling and PE-review guidance per engine) that agents and commands load |
 | `src/orchestrator/`, `src/storage/`, `src/graph/` | Local phase orchestrator, artifact store and assignment versioning, context graph |
-| `src/api/`, `src/ui/` | FastAPI backend and React UI (the interactive report template is extracted from `src/ui/src/utils/ExportReport.js`) |
+| `src/api/`, `src/ui/` | FastAPI backend and React UI (the results page, with the wave plan and the deliverables download panel) |
 | `src/atx_orchestrator/` | AWS Transform integration |
 | `scripts/` | CLI entry points (`run_*.py`) the commands call, plus validators and helpers |
 | `.claude/commands/` | Claude Code slash commands (`/modernize`, `/analyze-<engine>`, `/design-schema-<engine>`, `/reality-check`, `/synthesize`, ...) |
@@ -109,8 +109,7 @@ and `ci/e2e-llm.sh` build it for you.
 - Before pushing or asking for a merge: `./ci/pre_merge.sh` (fetch, behind count, conflict and contract-version checks, lint, tests, `needs_llm_run` verdict); see CONTRIBUTING.md's "Working with a fast-moving main".
 - A `tests/e2e` test that works only on the deterministic job (it skips when `run.external`) needs `@pytest.mark.deterministic`, or `e2e-llm` fails on `--fail-on-skip`; `tests/unit/ci/test_e2e_deterministic_markers.py` enforces it.
 - Pipeline output or `src/report/`: add `make e2e` (or
-  `uv run pytest tests/e2e/test_pipeline.py -p no:xdist -q` for a quick pass);
-  after a UI report change run `uv run python scripts/sync_report_template.py --check`.
+  `uv run pytest tests/e2e/test_pipeline.py -p no:xdist -q` for a quick pass).
 - `make e2e-llm` when `./ci/needs_llm_run.sh` prints `e2e-llm: required` (its
   lists are the source of truth; `bedrock-smoke` covers Bedrock call sites).
 - `E2E_LLM_MODE` is `chat`, `ui` or `both`; `E2E_LLM_FIXTURE` is `wordpress`
@@ -192,15 +191,15 @@ truth.
 
 - **Assignments map queries to engines.** A table can be served by several
   engines; the single recommended engine in `table_mappings` is not ownership.
-- **Deliverables agree.** The decision report, engineering report, PDF and
-  UI render the same `report.json`; a fact changed in one must change in all.
+- **Deliverables agree.** The PDF report, the engineering report and the UI
+  render the same `report.json`; a fact changed in one must change in all.
   Engine names come from `src/shared/engine_names.py` (`display_engine`),
   never a local copy.
-- **Renderers only format.** Synthesis computes each customer-facing figure once into `report.json`'s `facts`; renderers read it and never count or total it, in Python (`tests/unit/report/test_renderers_only_format.py`) and in the UI and interactive report (`src/ui/src/utils/__tests__/rendererOnlyFormat.test.js`). A new figure goes into `src/shared/report_facts.py` first ([ADR-032](docs/architecture/decisions/ADR-032-one-facts-layer-renderers-only-format.md)).
+- **Renderers only format.** Synthesis computes each customer-facing figure once into `report.json`'s `facts`; renderers read it and never count or total it, in Python (`tests/unit/report/test_renderers_only_format.py`) and in the UI (`src/ui/src/utils/__tests__/rendererOnlyFormat.test.js`). A new figure goes into `src/shared/report_facts.py` first ([ADR-032](docs/architecture/decisions/ADR-032-one-facts-layer-renderers-only-format.md)).
 - **Untrusted text is data.** Customer and LLM text is wrapped with
   `frame_untrusted` (`src/agents/prompt_framing.py`) in prompts and escaped
-  with the helpers in `src/report/escaping.py` (`html_text`, `html_attr`,
-  `md_cell`, `md_text`, `mermaid_label`, ...) when rendered. Generated DDL
+  with the helpers in `src/report/escaping.py` (`md_cell`, `md_text`,
+  `md_code`, `mermaid_label`, ...) when rendered. Generated DDL
   types pass an allowlist (`validate_aurora_type` in
   `src/contracts/aurora_design_delta.py`), so collector text never reaches
   DDL unchecked.

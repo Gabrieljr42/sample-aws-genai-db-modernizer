@@ -55,6 +55,13 @@ def _json(path: Path) -> dict:
     return data
 
 
+def _pdf_text(paths: list[Path]) -> str:
+    from tests.e2e.deliverable_figures import pdf_page_texts
+
+    pdf = next(p for p in paths if p.name == "assessment.pdf")
+    return " ".join(pdf_page_texts(str(pdf)))
+
+
 def _copy(run: PipelineResult, root: Path) -> Path:
     job = root / run.db / JOB
     shutil.copytree(run.job_dir(), job)
@@ -70,7 +77,7 @@ def _finish(run: PipelineResult, root: Path, rc_args: list[str]) -> dict:
     return {
         "rc": _json(job / "reality-check" / "output.json"),
         "report": _json(root / step["report"]),
-        "paths": [Path(p) for p in step["paths"]],
+        "paths": [Path(p) for p in step["deliverables"]],
         "root": root,
         "db": run.db,
     }
@@ -190,14 +197,13 @@ def test_a_kept_consolidation_is_shown_and_never_called_reversed(
         if t["from_engine"] in kept:
             assert t["index"] in shown, t
 
-    md = next(p for p in flow["paths"] if p.name.endswith(".md") and "engineering" in p.name)
+    md = next(p for p in flow["paths"] if p.name == "engineering-report.md")
     if not any(t["reversed"] for t in facts["reality_check_trade_offs"]):
         assert "moved queries back" not in md.read_text()
-    html = next(p for p in flow["paths"] if p.suffix == ".html" and "decision" in p.name)
-    page = html.read_text()
+    pdf = _pdf_text(flow["paths"])
     for d in facts["reality_check_decisions"]:
-        if not d["with_removed_engine"]:
-            assert f'data-decision="{d["index"]}"' in page, d
+        # The PDF's fonts lack the arrow, so it reads "to".
+        assert " ".join(d["title"].replace(" → ", " to ").split()) in pdf, d
 
 
 def test_at_least_one_flow_kept_a_consolidation_partial(flows_of) -> None:  # type: ignore[no-untyped-def]
@@ -254,7 +260,7 @@ def _undo(flow: dict, tmp: Path, pick: str) -> dict | None:
         "line": line,
         "moved_back": len(ids),
         "report": report,
-        "paths": [Path(p) for p in step["paths"]],
+        "paths": [Path(p) for p in step["deliverables"]],
     }
 
 
@@ -291,7 +297,7 @@ def test_an_edit_that_undoes_every_move_of_a_line_reverses_it(
         assert row["queries_still_moved"] == 0, name
         shown = {d["index"] for d in undone["report"]["facts"]["reality_check_decisions"]}
         assert row["index"] not in shown, name
-        md = next(p for p in undone["paths"] if p.name.endswith(".md") and "engineering" in p.name)
+        md = next(p for p in undone["paths"] if p.name == "engineering-report.md")
         assert "### Reversed by a later assignment edit" in md.read_text(), name
 
 
@@ -308,7 +314,6 @@ def test_an_edit_that_undoes_part_of_a_line_states_what_stayed_moved(
         now = row["description_now"]
         assert now and "a later assignment edit moved 1 back to" in now, name
         title = now.split(":", 1)[0]
-        md = next(p for p in undone["paths"] if p.name.endswith(".md") and "engineering" in p.name)
-        html = next(p for p in undone["paths"] if p.suffix == ".html" and "decision" in p.name)
+        md = next(p for p in undone["paths"] if p.name == "engineering-report.md")
         assert title in md.read_text(), name
-        assert title in html.read_text(), name
+        assert " ".join(title.replace(" → ", " to ").split()) in _pdf_text(undone["paths"]), name

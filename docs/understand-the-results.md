@@ -21,17 +21,15 @@ Every run puts its deliverables in one folder, `artifacts/<db>/<job>/deliverable
 <!-- deliverables-list -->
 | File | What it is | Who it is for |
 | --- | --- | --- |
-| `assessment.pdf` | Executive summary (PDF): a short version of the decision report | Executives and stakeholders deciding whether to proceed |
+| `assessment.pdf` | Executive summary (PDF): the recommendation, cost, engines and roles, migration waves and risks | Executives and stakeholders deciding whether to proceed |
 | `engineering-report.md` | Engineering report (Markdown): the same facts with implementation detail (schemas, migration waves, risks) | The team that will build it |
 | `assessment-data.json` | Assessment Data (JSON): the complete machine-readable assessment the other files are rendered from | Tools and scripts |
-| `decision-report.html` | Decision report (HTML): the top-level recommendation, ranking, and reasoning | Decision makers |
-| `analysis-report.html` | Interactive analysis report (HTML): per-engine analysis detail, including the path of each query through the context graph | Architects and engineers |
 | `index.md` | This list for the run, with the assignment version the files come from | Anyone opening the folder |
 
 `deliverables/` always holds the latest assignment version. The job's other folders hold the pipeline's working files (per-phase outputs, versioned assignments, model inputs and traces), which you don't need to read the assessment.
 <!-- /deliverables-list -->
 
-All of them are rendered from one `report.json` by `src/report`, so a changed fact changes in every deliverable at once. The local UI shows the same report interactively.
+All of them are rendered from one `report.json` by `src/report`, so a changed fact changes in every deliverable at once. The local UI's results page reads the same `report.json`: it shows the assessment interactively, with each query's path and the reason for its engine, the migration wave plan, and a download panel for the files above.
 
 ## How to read an assignment
 
@@ -53,7 +51,7 @@ Each wave lists every table its queries use, not only the tables its engine owns
 
 ## Risks
 
-The engineering report and the decision report both carry a risk section: anything the deterministic scoring flagged as low-fit, any query that reality check had to redirect, and any assumption the model made that depends on data this tool couldn't see (traffic patterns, peak load, compliance requirements). Read it before treating the wave plan as a commitment.
+The engineering report and the PDF report both carry a risk section: anything the deterministic scoring flagged as low-fit, any query that reality check had to redirect, and any assumption the model made that depends on data this tool couldn't see (traffic patterns, peak load, compliance requirements). Read it before treating the wave plan as a commitment.
 
 ## See it on real data
 

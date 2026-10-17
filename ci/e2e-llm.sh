@@ -47,7 +47,7 @@
 # results.json is always written: every step after the preflight goes through
 # step(), and if the script exits before the results step (a preflight
 # failure such as missing credentials, an npm install or unzip error), the
-# EXIT trap writes {"schema_version": 1, "pass": false, "error": "<step>
+# EXIT trap writes {"schema_version": 2, "pass": false, "error": "<step>
 # failed before the run"}.
 #
 # Dry-run mode (E2E_LLM_DRY_RUN=1): skips the claude invocation and copies
@@ -104,7 +104,7 @@ on_exit() {
     uv run python scripts/start_local_ui.py --stop >/dev/null 2>&1 || true
   fi
   if [ ! -s "$OUT/results.json" ]; then
-    printf '{"schema_version": 1, "pass": false, "error": "%s failed before the run"}\n' \
+    printf '{"schema_version": 2, "pass": false, "error": "%s failed before the run"}\n' \
       "$PHASE" >"$OUT/results.json"
     [ "$rc" -ne 0 ] || rc=1
   fi

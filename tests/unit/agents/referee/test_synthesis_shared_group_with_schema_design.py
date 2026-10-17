@@ -13,7 +13,7 @@ reader downstream of ``build_query_groups`` must also tolerate the mixed
 shape this produces: some access patterns in the group carry
 ``reason_index`` (the relational branch's), others carry ``description``
 directly (DynamoDB's own) -- covered here through the deterministic
-summary, the engineering report and the export projection.
+summary and the engineering report.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from __future__ import annotations
 from src.agents.referee.synthesis_data import EngineArtifacts, SynthesisData
 from src.agents.referee.synthesis_report import build_query_groups, build_summary
 from src.report import renderers
-from src.report.analysis_report import _project_query_groups_for_export
 
 RANKING = [
     {
@@ -142,16 +141,3 @@ def test_engineering_report_does_not_raise_on_a_shared_group() -> None:
     # The generic table still lists the group too (shared with DynamoDB).
     generic_section = md.split("## Query groups", 1)[1].split("\n## ", 1)[0]
     assert "wp.wp_posts" in generic_section
-
-
-def test_export_projection_does_not_raise_on_a_shared_group() -> None:
-    """``_project_query_groups_for_export`` only reads ``engine``/``query_ids``
-    off each access pattern -- unaffected by the mixed reason-index shape --
-    but must still tolerate it when a shared group's entries are capped."""
-    data = _shared_table_data()
-    groups = build_query_groups(data)
-    (group,) = [g for g in groups if g["group_name"] == "wp.wp_posts"]
-    # Force the cap so query_count_by_engine actually gets computed.
-    (projected,) = _project_query_groups_for_export([group], max_entries=1)
-    assert projected["query_count_by_engine"] == {"dynamodb": 1, "aurora_mysql": 1}
-    assert len(projected["access_patterns"]) == 1

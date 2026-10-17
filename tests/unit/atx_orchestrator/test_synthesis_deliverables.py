@@ -1,14 +1,15 @@
 """Unit tests for the orchestrator publish wiring (Increment 2).
 
 ``_publish_synthesis_deliverables`` (in ``tools``) is tested with a fake store
-and a patched ``publish`` to confirm: three text deliverables plus the executive
-deck and its PDF are written to S3 under the canonical artifact names, all five
-deliverables are published as CUSTOMER_OUTPUT each carrying an explicit download
-filename, and the whole step is non-fatal when the report cannot be read.
+and a patched ``publish`` to confirm: the three deliverables (the engineering
+report, the assessment data and the PDF report) are written to S3 as the job's
+``deliverables/`` folder under their stable names, never next to report.json
+(#987); all three are published as CUSTOMER_OUTPUT each carrying an explicit
+download filename; and the whole step is non-fatal when the report cannot be read.
 
 ``_FakeStore`` implements ``write_bytes`` deliberately. While it did not, the
-executive-summary block raised ``AttributeError`` straight into its own
-``except`` and the fifth deliverable was never exercised at all.
+PDF block raised ``AttributeError`` straight into its own ``except`` and that
+deliverable was never exercised at all.
 
 Exercised against the same committed fixture used by the renderer tests (the real
 report from the deployed ``v2-e2e-09`` run) — see
@@ -27,7 +28,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.atx_orchestrator.runtime import graph_transport
 from src.atx_orchestrator.tools import run_synthesis_via_a2a
 from src.report import deliverables as report_deliverables
 from src.report.deliverables import DeliverableSet
@@ -84,7 +84,7 @@ class _JsonOnlyStore(_FakeStore):
 class TestSynthesisDeliverables:
     KEY = "discourse/job-x/synthesis/v1/report.json"
 
-    def test_writes_five_files_and_publishes_five(self, report: dict) -> None:
+    def test_writes_the_deliverables_folder_and_publishes_three(self, report: dict) -> None:
         payload = {"response": {"report_artifact": self.KEY, "engines_ranked": 5}}
         store = _FakeStore({self.KEY: report})
         captured: dict = {}
@@ -104,32 +104,22 @@ class TestSynthesisDeliverables:
         # provenance stems are date-stamped; derive the day rather than freezing time
         day = datetime.now(UTC).strftime("%Y%m%d")
 
-        # exactly the three rendered deliverables written to S3 (report.json untouched)
-        keys = list(store.text_writes)
-        assert len(keys) == 3
-        # canonical stem: {database}_{artifact}_{job8}_{YYYYMMDD}.{ext}
-        assert any(re.search(r"/discourse_decision-report_job-x_\d{8}\.html$", k) for k in keys)
-        assert any(re.search(r"/discourse_engineering-report_job-x_\d{8}\.md$", k) for k in keys)
-        assert any(re.search(r"/discourse_analysis-report_job-x_\d{8}\.html$", k) for k in keys)
-        assert self.KEY not in keys
-
-        # the executive summary writes its one binary under a fixed name
-        assert sorted(k.rsplit("/", 1)[-1] for k in store.byte_writes) == [
-            "summary-executive-report.pdf",
+        # The durable copies are the job's deliverables folder, under the stable
+        # names a local run uses; nothing lands next to report.json (#987).
+        assert sorted(store.text_writes) == [
+            "discourse/job-x/deliverables/assessment-data.json",
+            "discourse/job-x/deliverables/engineering-report.md",
         ]
-        assert (
-            store.byte_writes[f"{self.KEY.rsplit('/', 1)[0]}/summary-executive-report.pdf"][:5]
-            == b"%PDF-"
-        )
+        assert sorted(store.byte_writes) == ["discourse/job-x/deliverables/assessment.pdf"]
+        assert store.byte_writes["discourse/job-x/deliverables/assessment.pdf"][:5] == b"%PDF-"
+        assert not [k for k in [*store.text_writes, *store.byte_writes] if "/synthesis/" in k]
 
-        # five published, in order, all CUSTOMER_OUTPUT
+        # three published, in order, all CUSTOMER_OUTPUT
         items = captured["items"]
-        assert [it[1] for it in items] == ["HTML", "MARKDOWN", "JSON", "HTML", "PDF"]
+        assert [it[1] for it in items] == ["MARKDOWN", "JSON", "PDF"]
         assert [it[2] for it in items] == [
-            "Decision Report — discourse",
             "Engineering Report — discourse",
             "Assessment Data (raw) — discourse",
-            "Interactive Analysis Report — discourse",
             "Executive Summary Report — discourse (v1)",
         ]
         assert {it[3] for it in items} == {"CUSTOMER_OUTPUT"}
@@ -138,17 +128,15 @@ class TestSynthesisDeliverables:
         # publish() cannot set fileMetadata.path and the customer's download is named
         # after the artifact UUID -- a regression no other assertion here would catch.
         assert all(len(it) == 5 for it in items)
-        assert items[-1][4] == "summary-executive-report.pdf"
-        assert [it[4] for it in items[:4]] == [
-            f"discourse_decision-report_job-x_{day}.html",
+        assert [it[4] for it in items] == [
             f"discourse_engineering-report_job-x_{day}.md",
             f"discourse_assessment-data_job-x_{day}.json",
-            f"discourse_analysis-report_job-x_{day}.html",
+            "summary-executive-report.pdf",
         ]
 
-    def test_publishes_all_five_on_json_only_store(self, report: dict) -> None:
+    def test_publishes_all_three_on_json_only_store(self, report: dict) -> None:
         """On the JSON-only ATX backend the durable store copies raise
-        NotImplementedError, but publish() must still deliver all five reports --
+        NotImplementedError, but publish() must still deliver all three --
         publish is the actual customer-facing delivery, the store copy is only a
         system-of-record duplicate that backend has no place for."""
         payload = {"response": {"report_artifact": self.KEY, "engines_ranked": 5}}
@@ -167,9 +155,9 @@ class TestSynthesisDeliverables:
         # No durable copies landed (the store rejected them) ...
         assert store.text_writes == {}
         assert store.byte_writes == {}
-        # ... but all five deliverables were still published to the customer.
+        # ... but all three deliverables were still published to the customer.
         items = captured["items"]
-        assert [it[1] for it in items] == ["HTML", "MARKDOWN", "JSON", "HTML", "PDF"]
+        assert [it[1] for it in items] == ["MARKDOWN", "JSON", "PDF"]
         assert {it[3] for it in items} == {"CUSTOMER_OUTPUT"}
 
     def test_non_fatal_when_report_unreadable(self) -> None:
@@ -194,13 +182,9 @@ class TestSynthesisDeliverables:
         # resolution, which is best-effort and never fatal.)
         assert json.loads(out) == payload
 
-    def test_pins_the_graph_fetcher_and_assignment_version(self, report: dict) -> None:
-        """render_deliverables must be called with the ATX graph transport's
-        download_graph -- not the local-rebuild default -- and the
-        assignment_version resolved from the payload. The ATX store is
-        JSON-only; the graph travels as a published artifact, so silently
-        falling back to the local default here would rebuild from JSON
-        contracts instead of reading what synthesis actually published."""
+    def test_pins_the_assignment_version(self, report: dict) -> None:
+        """render_deliverables is called with the assignment_version resolved from
+        the payload, and with no graph: no remaining deliverable reads it (#987)."""
         payload = {"response": {"report_artifact": self.KEY, "engines_ranked": 5}}
         store = _FakeStore({self.KEY: report})
         mock_render = Mock(return_value=DeliverableSet())
@@ -214,7 +198,7 @@ class TestSynthesisDeliverables:
 
         assert mock_render.called
         _, kwargs = mock_render.call_args
-        assert kwargs["graph_fetcher"] is graph_transport.download_graph
+        assert "graph_fetcher" not in kwargs
         assert kwargs["assignment_version"] == 1
 
     def test_logs_failed_artifact_names_without_a_count(
@@ -229,7 +213,7 @@ class TestSynthesisDeliverables:
         failed_set = DeliverableSet(
             errors=[
                 "executive-summary: RuntimeError: boom",
-                "analysis-report: ValueError: no collector",
+                "engineering-report: ValueError: bad report",
             ]
         )
         with (
@@ -243,7 +227,7 @@ class TestSynthesisDeliverables:
 
         messages = [r.getMessage() for r in caplog.records]
         assert any(
-            "executive-summary" in m and "analysis-report" in m and "failed to render" in m
+            "executive-summary" in m and "engineering-report" in m and "failed to render" in m
             for m in messages
         )
         assert not any(re.search(r"\b\d+ of \d+\b", m) for m in messages)
@@ -295,22 +279,19 @@ class TestSynthesisDeliverables:
         # reported, not a value stuck at the first round's.
         assert [c["assignment_version"] for c in render_calls] == [1, 2]
 
-        # Each re-entry round published its own full set of five deliverables --
+        # Each re-entry round published its own full set of three deliverables --
         # the second round is not skipped because the first already ran.
         assert len(publishes) == 2
         for items in publishes:
-            assert [it[1] for it in items] == ["HTML", "MARKDOWN", "JSON", "HTML", "PDF"]
+            assert [it[1] for it in items] == ["MARKDOWN", "JSON", "PDF"]
 
-        # The durable copy of the executive summary PDF lands at each round's own
-        # version *path* (the filename itself is fixed, #147) -- v2 neither
-        # overwrites nor is skipped in favor of v1.
-        pdf_keys = sorted(k for k in store.byte_writes if k.endswith(".pdf"))
-        assert pdf_keys == [
-            "discourse/job-x/synthesis/v1/summary-executive-report.pdf",
-            "discourse/job-x/synthesis/v2/summary-executive-report.pdf",
-        ]
-
-        # The two rounds' content actually differs -- not just the path.
-        pdf_v1 = store.byte_writes["discourse/job-x/synthesis/v1/summary-executive-report.pdf"]
-        pdf_v2 = store.byte_writes["discourse/job-x/synthesis/v2/summary-executive-report.pdf"]
+        # The two rounds' published PDFs differ in content, not just in label.
+        pdf_v1, pdf_v2 = (items[-1][0] for items in publishes)
         assert pdf_v1 != pdf_v2
+
+        # The durable copy is the deliverables folder, which holds the latest round:
+        # v2 overwrote v1 there, and no copy was left under either synthesis version.
+        assert sorted(k for k in store.byte_writes) == [
+            "discourse/job-x/deliverables/assessment.pdf"
+        ]
+        assert store.byte_writes["discourse/job-x/deliverables/assessment.pdf"] == pdf_v2

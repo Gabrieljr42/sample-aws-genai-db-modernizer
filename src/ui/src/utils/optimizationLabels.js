@@ -1,9 +1,9 @@
 /**
- * Display names for Aurora Optimization.category values, imported by
- * ExportReport.js's standalone export (#587 round 3: the interactive
- * analysis report's "Aurora Design" section printed the raw category code
- * directly, e.g. "read_replica: Aurora cluster", "io_optimized: Aurora
- * MySQL cluster", instead of a readable label).
+ * Display names for Aurora Optimization.category values, shown by the results
+ * page's "Aurora Design" section (#587 round 3: the raw category code read
+ * "read_replica: Aurora cluster", "io_optimized: Aurora MySQL cluster",
+ * instead of a readable label; the retired HTML report had the fix, and the
+ * results page took it over in #987).
  *
  * Kept in sync with `src/shared/optimization_labels.py`'s
  * `OPTIMIZATION_DISPLAY_NAMES` by hand -- `tests/unit/report/

@@ -128,13 +128,11 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     (report_path,) = job_dir.glob("synthesis/v*/report.json")
     # ... and --all rendered every deliverable into deliverables/, like /modernize.
     (report_line,) = [line for line in lines if line.get("phase") == "report"]
-    assert report_line["status"] in ("complete", "partial"), report_line
+    assert report_line["status"] == "complete", report_line
     assert {p.name for p in (job_dir / "deliverables").iterdir()} == {
         "assessment.pdf",
         "engineering-report.md",
         "assessment-data.json",
-        "decision-report.html",
-        "analysis-report.html",
         "index.md",
     }
 

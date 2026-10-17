@@ -11,8 +11,9 @@ never counts, totals or filters a figure the facts layer owns. Nothing is clippe
 long text wraps and long tables continue on the next page.
 
 Sections, in order: cover, executive summary, cost, recommended engines and roles,
-migration wave plan, risks, close calls and queries without a fitting engine (when
-there are any), and a traceability appendix (the per-query "why this engine" record
+migration wave plan, risks, then (when there are any) the unresolved engine ties,
+the queries moved after approval, the queries without a fitting engine and the
+close calls, and a traceability appendix (the per-query "why this engine" record
 for the queries that moved or were tied).
 
 Determinism: reportlab runs in ``invariant`` mode (no creation date, no random
@@ -58,12 +59,14 @@ from src.shared.engine_names import display_engine
 from . import escaping, pdf_markdown
 from .architecture import _architecture_engines
 from .close_calls import close_calls_md
+from .engine_choices import _reroutes_md, _tied_queries_md
 from .engineering_report import _risk_register_md, _target_engines_md, _trade_offs_md
 from .facts import report_facts
 from .formatting import (
     _cost_baseline_text,
     _fmt_usd,
     _retired_engine_savings_text,
+    fallback_withheld_reason,
     label_summary_counts,
 )
 from .query_traces import query_traces_md
@@ -85,8 +88,21 @@ COPYRIGHT = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved."
 FOOTER = f"{COPYRIGHT} For informational purposes only."
 # Where the summary sends readers for the detail: real files in the job's
 # deliverables folder (src.report.deliverables.FOLDER_ENTRIES), by their names.
-SEE_ALSO_NOTE = (
-    "Full detail in the deliverables folder: decision-report.html and engineering-report.md."
+SEE_ALSO_NOTE = "Full detail in the deliverables folder: engineering-report.md."
+# Stated once, after the summary: the retired decision report's closing words (#987).
+NO_MODEL_DECIDES_NOTE = (
+    "Engine and query assignments are produced deterministically \u2014 no language model "
+    "decides which engine a table or query goes to. The executive summary is written over "
+    "already-computed results and cannot change a recommendation."
+)
+# How the overall risk level is derived (#248; synthesis_report.overall_risk_level).
+RISK_RULE_NOTE = (
+    "Overall risk is the highest severity among the open risks; risks the assignment "
+    "resolved do not count."
+)
+WITHHELD_UNTRUSTED_NOTE = (
+    "The generated narrative was withheld because it referenced schema work this run "
+    "did not perform; the figures here are unaffected."
 )
 
 # Section headings, in document order. "Close calls and queries without a fitting
@@ -322,6 +338,28 @@ def _trust(report: dict[str, Any]) -> bool:
     return any(r.get("schema_design_available") for r in (report.get("ranking") or []))
 
 
+def _withheld_note(report: dict[str, Any], trust: bool, summary: Any) -> str | None:
+    """Why the summary shown is not the generated one, worded as the retired decision
+    report worded it (#987): withheld because no schema design ran, or replaced by the
+    deterministic fallback for the reason synthesis recorded. A run that never generated
+    a narrative (``--llm-mode none``: the summary is the deterministic one) withheld
+    nothing, so it gets no note."""
+    if not summary:
+        return None
+    if not trust:
+        generated = report.get("summary")
+        if generated and generated != report.get("summary_deterministic"):
+            return WITHHELD_UNTRUSTED_NOTE
+        return None
+    if report.get("summary_source") == "deterministic_fallback":
+        return (
+            f"The generated narrative was withheld because it "
+            f"{fallback_withheld_reason(report)}; this summary is built from the "
+            "effective assignment."
+        )
+    return None
+
+
 def _cost_md(report: dict[str, Any]) -> list[str]:
     """Cost section lines: the baseline text and projected total as the engineering
     report words them, then one row per engine and the total, all stored figures."""
@@ -358,7 +396,8 @@ def _cost_md(report: dict[str, Any]) -> list[str]:
 
 
 def _risks_md(report: dict[str, Any]) -> list[str]:
-    """Risks section: the posture as the decision report words it, then the register."""
+    """Risks section: the posture, worded as the retired decision report worded it, then
+    the register."""
     facts = report_facts(report)
     risk = report.get("risk_assessment") or {}
     open_count = int(facts.get("open_risk_count") or 0)
@@ -367,6 +406,7 @@ def _risks_md(report: dict[str, Any]) -> list[str]:
     if filtered_risks(report):
         sev = _severity_counts_text(facts.get("open_risks_by_severity") or {})
         out.append(f"- Open risks: {open_count} ({escaping.md_text(sev)})")
+        out += ["", f"*{escaping.md_text(RISK_RULE_NOTE)}*", ""]
     else:
         out.append(
             f"- No open migration risks; {resolved_count} resolved by the assignment."
@@ -458,7 +498,11 @@ def build_story(report: dict[str, Any], *, trust_generated_summary: bool | None 
                 story.append(Paragraph(txt(chunk.strip()), st["body"]))
     else:
         story.append(Paragraph(txt("No executive summary was generated for this run."), st["body"]))
+    withheld = _withheld_note(report, trust, summary)
+    if withheld:
+        story.append(Paragraph(txt(withheld), st["note"]))
     story.append(Paragraph(txt(SEE_ALSO_NOTE), st["note"]))
+    story.append(Paragraph(txt(NO_MODEL_DECIDES_NOTE), st["note"]))
 
     # -- cost ----------------------------------------------------------------
     story += h1(H_COST) + md(_cost_md(report))
@@ -472,8 +516,16 @@ def build_story(report: dict[str, Any], *, trust_generated_summary: bool | None 
     # -- risks ---------------------------------------------------------------
     story += h1(H_RISKS) + md(_risks_md(report))
 
-    # -- close calls and unservable queries ----------------------------------
-    close = unservable_md(report) + close_calls_md(report)
+    # -- open ties, moves after approval, unservable queries, close calls -----
+    # The open ties and the moves after approval are the engineering report's own
+    # sections: the decision makers who read the retired decision report saw both
+    # there (#987).
+    close = (
+        _tied_queries_md(report)
+        + _reroutes_md(report)
+        + unservable_md(report)
+        + close_calls_md(report)
+    )
     if close:
         story += h1(H_CLOSE) + md(close)
 
@@ -498,14 +550,12 @@ def _glyphs() -> set[int] | None:
 
 def render_executive_summary_pdf(
     report: dict[str, Any],
-    export_data: dict[str, Any] | None = None,
     *,
     trust_generated_summary: bool | None = None,
 ) -> bytes:
     """Render the PDF report from ``report.json`` and return its bytes.
 
-    ``export_data`` is accepted for call compatibility and unused: every figure
-    comes from the report's facts layer. Deterministic for a given report.
+    Every figure comes from the report's facts layer. Deterministic for a given report.
     """
     story, footer, db = build_story(report, trust_generated_summary=trust_generated_summary)
     buf = io.BytesIO()

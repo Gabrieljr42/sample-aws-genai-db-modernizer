@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 
 from scripts import build_docs_sample
+from src.report.deliverables import RETIRED_FOLDER_FILENAMES
 
 
 @dataclass
@@ -47,14 +48,14 @@ def _make_job_paths(tmp_path: Path) -> list[str]:
     folder.mkdir(parents=True)
 
     files = {
-        "decision-report.html": b"<html><body>decision</body></html>",
         "engineering-report.md": b"# Engineering report\n\nSome **content**.\n",
-        "analysis-report.html": b"<html><body>analysis</body></html>",
         "assessment.pdf": b"%PDF-1.4 fake pdf bytes",
         "assessment-data.json": b"{}",
         "index.md": b"# index",
         # Not a documented deliverable: never published even if listed.
         "llm_input.json": b"{}",
+        # A retired deliverable an older round left behind (#987): never published.
+        **{name: b"<html>old</html>" for name in RETIRED_FOLDER_FILENAMES},
     }
     for name, content in files.items():
         (folder / name).write_bytes(content)
@@ -111,16 +112,14 @@ def test_build_sample_copies_deliverables_under_stable_names(
 
     dest = site_dir / "sample"
     assert result["status"] == "complete"
-    assert (dest / "decision-report.html").read_text(encoding="utf-8") == (
-        "<html><body>decision</body></html>"
-    )
     assert (dest / "engineering-report.md").exists()
-    assert (dest / "analysis-report.html").exists()
     assert (dest / "assessment.pdf").read_bytes() == b"%PDF-1.4 fake pdf bytes"
     assert (dest / "assessment-data.json").exists()
     assert (dest / "index.md").exists()
-    # Only the documented set: model I/O never reaches the site.
+    # Only the documented set: model I/O and retired reports never reach the site.
     assert not (dest / "llm_input.json").exists()
+    for name in RETIRED_FOLDER_FILENAMES:
+        assert not (dest / name).exists(), name
     for p in result["files"]:
         assert Path(p).name != "index.html"
 
@@ -136,6 +135,8 @@ def test_build_sample_renders_engineering_html_when_markdown_available(
     rendered = (site_dir / "sample" / "engineering-report.html").read_text(encoding="utf-8")
     assert "<p>FAKE RENDERED</p>" in rendered
     assert 'href="./"' in rendered  # links back to the themed sample page, not a generated one
+    # Landmarks for assistive tech: the links in a header, the report in one <main>.
+    assert rendered.count("<main>") == 1 and "<header>" in rendered
     assert any(Path(p).name == "engineering-report.html" for p in result["files"])
 
 

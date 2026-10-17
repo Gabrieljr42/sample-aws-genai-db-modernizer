@@ -1451,9 +1451,9 @@ def run_synthesis_core(
             f"is a known pipeline gap, not a failure."
         )
 
-    # The customer-facing deliverables (Decision Report HTML, Engineering Report
-    # MD) and their publication now live on the orchestrator, which owns the
-    # synthesis plan step -- see tools._publish_synthesis_deliverables. The
+    # The customer-facing deliverables (the PDF report, the Engineering Report MD,
+    # the assessment data JSON) and their publication live on the orchestrator,
+    # which owns the synthesis plan step -- see tools._publish_synthesis_deliverables. The
     # subagent's contract ends at writing report.json to S3 above (the system of
     # record, already durable). published_artifacts stays here for payload-shape
     # stability; the orchestrator populates the panel, not this subagent.

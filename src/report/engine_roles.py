@@ -17,18 +17,6 @@ __all__ = [
     "SEARCH_READ_MODEL",
     "_CACHE_ENGINES",
     "_RELATIONAL_ENGINES",
-    "_ROLE_STROKE",
     "_SEARCH_ENGINES",
     "_engine_role",
 ]
-
-_ROLE_STROKE = {
-    "Retained": "#1F7A3D",
-    "Migration target": "#146EB4",
-    "Cache layer": "#8B5CF6",
-    SEARCH_READ_MODEL: "#2EA597",
-    # Muted grey: an engine that was evaluated but serves nothing is not an active
-    # component of the target architecture, and must not read as one in the diagram.
-    "Evaluated": "#6B7280",
-    "Assessed": "#6B7280",
-}

@@ -47,14 +47,14 @@ def _with_long_gate(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_two_renders_are_byte_identical(report: dict[str, Any]) -> None:
-    first = pdf_report.render_executive_summary_pdf(report, None)
-    second = pdf_report.render_executive_summary_pdf(report, None)
+    first = pdf_report.render_executive_summary_pdf(report)
+    second = pdf_report.render_executive_summary_pdf(report)
     assert first == second
     assert first.startswith(b"%PDF")
 
 
 def test_the_document_carries_no_wall_clock_date(report: dict[str, Any]) -> None:
-    data = pdf_report.render_executive_summary_pdf(report, None)
+    data = pdf_report.render_executive_summary_pdf(report)
     meta = PdfReader(io.BytesIO(data)).metadata
     assert meta is not None
     assert meta.creation_date is not None and meta.creation_date.year == 2000  # invariant mode
@@ -102,7 +102,7 @@ def test_the_summary_keeps_its_cost_sentence(report: dict[str, Any]) -> None:
 
 
 def test_every_page_after_the_cover_has_a_header_and_page_number(report: dict[str, Any]) -> None:
-    pages = PdfReader(io.BytesIO(pdf_report.render_executive_summary_pdf(report, None))).pages
+    pages = PdfReader(io.BytesIO(pdf_report.render_executive_summary_pdf(report))).pages
     for n, page in enumerate(pages[1:], start=2):
         text = " ".join((page.extract_text() or "").split())
         assert f"Page {n} of {len(pages)}" in text

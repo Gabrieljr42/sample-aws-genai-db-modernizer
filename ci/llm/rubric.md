@@ -21,9 +21,8 @@ here, not in code, so adjusting them never requires touching `judge.py`.
   `eliminated_engines` (with `absorbed_by`), `reality_check` (before/after
   query distribution and each move), `tco`, `risks[]`, `mitigation_strategies`,
   `migration_waves`.
-- **`decision_report`**: full text of the decision report (HTML).
-- **`executive_pdf`**: full text of the executive summary deck, one
-  `[page N: title]` marker per slide.
+- **`executive_pdf`**: full text of the PDF report, one `[page N: title]`
+  marker per page.
 - **`engineering_report`**: full engineering report (Markdown, mermaid
   diagrams removed).
 
@@ -49,14 +48,14 @@ the deliverable.
 - **Engines eliminated by reality-check** (`facts.eliminated_engines`) are
   not part of the target. Their queries moved to `absorbed_by`.
 - **Cite your evidence.** Every note names the deliverable (`facts`,
-  `decision_report`, `executive_pdf`, `engineering_report`) and the section,
-  slide or field it relies on, for example `engineering_report > Risk
-  register`, `executive_pdf page 7: Migration Sequencing`, or
+  `executive_pdf`, `engineering_report`) and the section, page or field it
+  relies on, for example `engineering_report > Risk register`,
+  `executive_pdf > Migration wave plan`, or
   `facts.engines[dynamodb].tables_served`.
 
 ## 1. grounded
 
-Every claim in the executive summary and decision report is supported by
+Every claim in the executive summary and the PDF report is supported by
 `report.json` (engines, costs, table counts); no invented numbers.
 
 - **1** — Numbers in the report (engine names, costs, table/query counts) do
@@ -80,15 +79,15 @@ Each selected engine has a stated workload reason tied to query patterns.
 
 ## 3. cost
 
-The decision report states the monthly cost/TCO, it matches `report.json`,
+The PDF report states the monthly cost/TCO, it matches `report.json`,
 and no other deliverable contradicts it.
 
-- **1** — The decision report has no monthly cost, or its figures contradict
+- **1** — The PDF report has no monthly cost, or its figures contradict
   `facts.tco`, or another deliverable states a cost that contradicts it.
-- **3** — The decision report's total matches `facts.tco`, but a per-engine
+- **3** — The PDF report's total matches `facts.tco`, but a per-engine
   component is missing or doesn't reconcile with the total, or another
   deliverable presents a figure whose rounding makes it look inconsistent.
-- **5** — The decision report states the total and a per-engine breakdown
+- **5** — The PDF report states the total and a per-engine breakdown
   that match `facts.tco` and reconcile with each other, and no other
   deliverable contradicts them.
 
@@ -130,33 +129,30 @@ No hedging, no filler, no contradictions between sections.
 
 Where to look when scoring each criterion (the inputs are above).
 
-- **grounded:** check claims in `decision_report` and `executive_pdf` against
+- **grounded:** check claims in `executive_pdf` and `engineering_report` against
   `facts.totals` and `facts.engines`, with table placement per the
   multi-engine rule.
 
-- **justified_engines:** the engine rationale in `decision_report > Executive
-  summary` and `executive_pdf`, and the per-engine schema and trade-off
-  sections of `engineering_report`. Check them against
+- **justified_engines:** the engine rationale in `executive_pdf > Executive
+  summary` and `executive_pdf > Recommended engines and roles`, and the
+  per-engine schema and trade-off sections of `engineering_report`. Check them against
   `facts.engines[].assignment_reasons` and the workload split.
 
 - **cost:** `facts.tco` (`projected_monthly_cost`, `cost_breakdown`) and
-  `facts.engines[].monthly_cost_usd`, against `decision_report > Recommended
-  architecture`. The executive summary deck omits cost by design, and the
-  engineering report need not repeat it. A deliverable without a cost figure
-  is not a defect. One that states a figure that disagrees with `facts.tco`
-  is.
+  `facts.engines[].monthly_cost_usd`, against `executive_pdf > Cost`. The
+  engineering report's Cost section states the projected total (its per-engine
+  figures are in the Target engines "Why" cells). A deliverable
+  that states a figure that disagrees with `facts.tco` is a defect.
 
 - **risks:** `engineering_report > Risk register` (the full per-engine
-  register), `decision_report > Risk posture`, and the `executive_pdf` Risk
-  Profile slide. Check against `facts.risks[]`. Each risk's `engine` is the
+  register) and `executive_pdf > Risks`. Check against `facts.risks[]`. Each risk's `engine` is the
   engine it's raised for, and `queries_assigned_to` is where its queries
   actually run (source: `facts.source.risk_query_engines`).
 
 - **roadmap:** `facts.migration_waves` when present. Otherwise, read the waves
-  from the `executive_pdf` Migration Sequencing slide. Check every wave's
+  from `executive_pdf > Migration wave plan`. Check every wave's
   engines and tables against `facts.engines[].tables_served` (multi-engine
   rule) and `facts.eliminated_engines`, and ordering rationale against
   `facts.reality_check` and the per-engine risks.
 
-- **tone:** the prose of `decision_report`, `executive_pdf` and
-  `engineering_report`.
+- **tone:** the prose of `executive_pdf` and `engineering_report`.

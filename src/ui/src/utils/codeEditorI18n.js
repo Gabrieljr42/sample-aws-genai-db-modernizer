@@ -25,6 +25,15 @@ export function codeEditorI18nStrings(t, extra = {}) {
     errorsTab: t('common.code-editor.errors-tab'),
     warningsTab: t('common.code-editor.warnings-tab'),
     cursorPosition: (row, column) => t('common.code-editor.cursor-position', { row, column }),
+    // Accessible names for the editor's icon-only controls (#987: axe
+    // button-name on the preferences cog, aria-input-field-name on the
+    // resize handle) and its groups.
+    preferencesButtonAriaLabel: t('common.code-editor.preferences'),
+    resizeHandleAriaLabel: t('common.code-editor.resize-handle'),
+    editorGroupAriaLabel: t('common.code-editor.editor-group'),
+    statusBarGroupAriaLabel: t('common.code-editor.status-bar'),
+    paneCloseButtonAriaLabel: t('common.actions.close'),
+    preferencesModalCloseAriaLabel: t('common.actions.close'),
     ...extra,
   };
 }

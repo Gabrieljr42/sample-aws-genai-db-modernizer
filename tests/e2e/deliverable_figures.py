@@ -1,19 +1,19 @@
 """Key figures of every deliverable, read back from what each one renders (#573).
 
-AGENTS.md "Deliverables agree": the decision report, engineering report,
-the PDF and the interactive analysis report all render one synthesis
-``report.json``, so a figure shown in two of them must be the same figure.
+AGENTS.md "Deliverables agree": the engineering report and the PDF report
+render one synthesis ``report.json`` (the decision and interactive analysis
+HTML reports were retired in #987), so a figure shown in both must be the
+same figure.
 This module reads the key figures back out of each rendered deliverable and
 computes what ``report.json`` says they should be, so
 ``test_deliverable_figures.py`` can compare them one by one.
 
-Extraction reads stable hooks, never free prose: ``data-*`` attributes in the
-two HTML reports (``data-wave``, ``data-figure``, ``data-engine``), and fixed
-labels in the Markdown and PDF ("Projected monthly (target):",
-"N source tables migrate", "Kept in sync from X: N tables", ...). The one
-deliberate exception is the summary's "Other targets evaluated:" clause, the
-only place three of the deliverables name an engine the reality check
-removed; it is a fixed label too.
+Extraction reads fixed labels and table shapes, never free prose: the
+Markdown's tables and labels ("Projected monthly (target):", "N tables
+migrate", "Kept in sync from X: N tables", ...) and the same labels in the
+PDF's text. The one deliberate exception is the PDF summary's "Other targets
+evaluated:" clause, where it names an engine the reality check removed; it is
+a fixed label too.
 
 A figure is keyed by a short string (``"cost:dynamodb"``, ``"wave3:moving"``,
 ``"risks:HIGH"``...). Each deliverable records every observation of a key it
@@ -241,9 +241,6 @@ def expected_figures(report: dict[str, Any]) -> dict[str, Any]:
         exp["fallback_queries"] = sum(1 for r in digest["unservable"] if isinstance(r, dict))
     exp["engine_count"] = len(final_architecture(report))
     exp["removed"] = frozenset(removed_engines(report))
-    # A pointer to the decision report's "Engines not used" section must have
-    # the section to point at (#547).
-    exp["engines_not_used_section"] = True
     return exp
 
 
@@ -491,17 +488,9 @@ def report_invariant_violations(report: dict[str, Any]) -> list[tuple[str, str]]
 
 
 # --------------------------------------------------------------------------
-# Decision report (HTML, read in a browser)
+# Labels shared by the readers
 # --------------------------------------------------------------------------
 
-_DECISION_WAVE_CUTOVER = re.compile(
-    r"^all ([\d,]+) quer(?:y|ies) at cutover; ([\d,]+) \([\d.]+%\) remain on .+? at the end"
-    r"(?:, ([\d,]+) source tables? and views(?: \(([\d,]+) tables?, ([\d,]+) views?\))?)?$"
-)
-_DECISION_WAVE = re.compile(
-    r"^([\d,]+) quer(?:y|ies) \([\d.]+% of (?:calls|query patterns)\)"
-    r"(?:, ([\d,]+) served, ([\d,]+) move|, ([\d,]+) source tables?)?$"
-)
 _OTHER_TARGETS = re.compile(r"Other targets evaluated: (.+?)\.(?:\s|$)")
 
 
@@ -540,220 +529,8 @@ def _fallback_queries(f: Figures, text: str | None, where: str) -> None:
     f.add("fallback_queries", _int(m.group(1)) if m else 0, where)
 
 
-def decision_figures(page: Any) -> Figures:
-    """Figures the decision report shows, read from the rendered page."""
-    f = Figures("decision report")
-
-    def tile(label: str) -> str:
-        return str(
-            page.locator(".tile", has=page.locator(f"p:text-is('{label}')"))
-            .locator(".val")
-            .inner_text()
-        )
-
-    f.add("removal_savings", removal_savings(norm(page.locator("body").inner_text())), "page text")
-    f.add("cost:total", _usd(tile("Projected monthly")), "Projected monthly tile")
-    f.add("engine_count", _int(tile("Engines")), "Engines tile")
-    f.add("tables_migrate", _int(tile("Tables migrate")), "Tables migrate tile")
-
-    for row in page.locator("tr[data-engine]").all():
-        eng = row.get_attribute("data-engine")
-        f.name(eng, "engine table")
-        scope = norm(row.locator("[data-figure=scope]").inner_text())
-        m = re.match(r"^([\d,]+) source tables?\b", scope)
-        if m:
-            f.add(f"tables:{eng}", _int(m.group(1)), "engine table Scope")
-        cost = norm(row.locator("[data-figure=monthly-cost]").inner_text())
-        if cost.startswith("$"):
-            f.add(f"cost:{eng}", _usd(cost), "engine table Est. monthly")
-        m = re.match(
-            r"^([\d,]+) cached reads?\b", norm(row.locator("[data-figure=workload]").inner_text())
-        )
-        if m:
-            f.add(f"cached_reads:{eng}", _int(m.group(1)), "engine table Workload")
-    total = page.locator("tr[data-figure=total]")
-    if total.count():
-        f.add(
-            "cost:total",
-            _usd(norm(total.locator("[data-figure=monthly-cost]").inner_text())),
-            "engine table Total",
-        )
-        m = re.match(
-            r"^([\d,]+) tables? migrates?$", norm(total.locator("[data-figure=scope]").inner_text())
-        )
-        if m:
-            f.add("tables_migrate", _int(m.group(1)), "engine table Total")
-
-    for wave in page.locator("[data-wave]").all():
-        n = wave.get_attribute("data-wave")
-        stats = norm(wave.locator("[data-figure=wave-stats]").inner_text())
-        where = f"roadmap wave {n}"
-        f.name(engines_in(wave.locator("b").first.inner_text()), f"{where} title")
-        m = _DECISION_WAVE_CUTOVER.match(stats)
-        if m:
-            f.add(f"wave{n}:cutover_queries", _int(m.group(1)), where)
-            f.add(f"wave{n}:queries", _int(m.group(2)), where)
-            if m.group(3):
-                f.add(f"wave{n}:served", _int(m.group(3)), where)
-            if m.group(4):
-                f.add(f"wave{n}:tables_only", _int(m.group(4)), where)
-                f.add(f"wave{n}:views", _int(m.group(5)), where)
-            continue
-        m = _DECISION_WAVE.match(stats)
-        if not m:
-            f.add(f"wave{n}:unparsed", stats, where)
-            continue
-        f.add(f"wave{n}:queries", _int(m.group(1)), where)
-        if m.group(2):
-            served, moving = _int(m.group(2)), _int(m.group(3))
-            f.add(f"wave{n}:served", served, where)
-            f.add(f"wave{n}:moving", moving, where)
-            f.add(f"wave{n}:synced", served - moving, where)
-        elif m.group(4):
-            f.add(f"wave{n}:served", _int(m.group(4)), where)
-
-    risk = page.locator("[data-figure=risk-summary]")
-    if risk.count():
-        text = norm(risk.inner_text())
-        m = re.search(r"([\d,]+) open migration risks? \(([^)]*)\)", text)
-        if m:
-            f.add("risks:total", _int(m.group(1)), "Risk posture")
-            sev = {s.split()[1].upper(): _int(s.split()[0]) for s in m.group(2).split(", ")}
-            for s in SEVERITIES:
-                f.add(f"risks:{s}", sev.get(s, 0), "Risk posture")
-
-    tied = page.locator("[data-figure=tied-queries]")
-    if tied.count():
-        m = re.search(r"\(([\d,]+) quer(?:y|ies)\)", tied.locator("h2").inner_text())
-        f.add("tied", _int(m.group(1)) if m else UNREADABLE, "Pending engine choices heading")
-        items = tied.locator("li")
-        f.add("tied", items.count(), "Pending engine choices list")
-        for li in items.all():
-            f.name(engines_in(li.inner_text()), "Pending engine choices")
-    else:
-        f.add("tied", 0, "no Pending engine choices section")
-
-    fb = page.locator("[data-figure=unservable-queries] h2")
-    _fallback_queries(f, norm(fb.inner_text()) if fb.count() else None, "fallback heading")
-    close = page.locator("[data-figure=close-calls] h2")
-    _close_calls(f, norm(close.inner_text()) if close.count() else None, "Close calls heading")
-
-    removed: set[str] = set()
-    summary = page.locator("p.exec")
-    if summary.count():
-        removed |= _other_targets(norm(summary.inner_text()))
-    note = page.locator("[data-figure=retired-engines]")
-    if note.count():
-        removed |= engines_in(re.sub(r"see Engines not used below.*", "", note.inner_text()))
-        if "see Engines not used below" in note.inner_text():
-            f.add(
-                "engines_not_used_section",
-                page.locator("[data-figure=engines-not-used]").count() > 0,
-                "Retired by this plan note points to Engines not used",
-            )
-    not_used = page.locator("[data-figure=engines-not-used] li[data-engine]")
-    removed |= {li.get_attribute("data-engine") for li in not_used.all()}
-    if removed or summary.count():
-        f.add("removed", frozenset(removed), "summary, Retired note and Engines not used")
-    return f
-
-
 # --------------------------------------------------------------------------
-# Interactive analysis report (the UI export, read in a browser)
-# --------------------------------------------------------------------------
-
-_ANALYSIS_WAVE = re.compile(
-    r"^([\d,]+) queries · [\d.]+% of (?:calls|query patterns)"
-    r"(?: · ([\d,]+) served, ([\d,]+) move| · ([\d,]+) source tables"
-    r"(?: and views \(([\d,]+) tables?, ([\d,]+) views?\))?)?$"
-)
-
-
-def analysis_figures(page: Any) -> Figures:
-    """Figures the interactive analysis report shows, read from the rendered page."""
-    f = Figures("analysis report")
-
-    def stat(label: str):
-        return page.locator(
-            ".stat-card", has=page.locator(f".stat-label:text-is('{label}')")
-        ).locator(".stat-value")
-
-    f.add(
-        "removal_savings",
-        removal_savings(norm(page.locator("#tradeoffs-container").text_content() or "")),
-        "trade-offs tab",
-    )
-    m = re.match(r"^\$([\d,.]+)/mo$", norm(stat("Projected Cost").inner_text()))
-    f.add("cost:total", _usd(m.group(1)) if m else UNREADABLE, "Projected Cost stat")
-    badges = stat("Target Engines").locator("[data-engine]").all()
-    for b in badges:
-        f.name(b.get_attribute("data-engine"), "Target Engines")
-    f.add("engine_count", len(badges), "Target Engines stat")
-    cache_badges = [
-        b.get_attribute("data-engine") for b in badges if "(cache layer)" in b.inner_text()
-    ]
-    cache = stat("Cache Layer")
-    if cache.count() and cache_badges:
-        m = re.search(r"([\d,]+) cached reads?", cache.inner_text())
-        if m:
-            f.add(f"cached_reads:{cache_badges[0]}", _int(m.group(1)), "Cache Layer stat")
-
-    for card in page.locator("#migration-roadmap-container [data-wave]").all():
-        n = card.get_attribute("data-wave")
-        where = f"roadmap wave {n}"
-        for b in card.locator("[data-engine]").all():
-            f.name(b.get_attribute("data-engine"), where)
-        stats = norm(card.locator("[data-figure=wave-stats]").inner_text())
-        m = _ANALYSIS_WAVE.match(stats)
-        if not m:
-            f.add(f"wave{n}:unparsed", stats, where)
-            continue
-        f.add(f"wave{n}:queries", _int(m.group(1)), where)
-        if m.group(2):
-            served, moving = _int(m.group(2)), _int(m.group(3))
-            f.add(f"wave{n}:served", served, where)
-            f.add(f"wave{n}:moving", moving, where)
-            f.add(f"wave{n}:synced", served - moving, where)
-        elif m.group(4):
-            f.add(f"wave{n}:served", _int(m.group(4)), where)
-            if m.group(5):
-                f.add(f"wave{n}:tables_only", _int(m.group(5)), where)
-                f.add(f"wave{n}:views", _int(m.group(6)), where)
-
-    for card in page.locator("#cost-breakdown-container .stat-card").all():
-        eng = card.locator("[data-engine]").first.get_attribute("data-engine")
-        f.name(eng, "Cost Breakdown")
-        m = re.search(r"\$([\d,]+\.\d\d)", card.inner_text())
-        if m:
-            f.add(f"cost:{eng}", _usd(m.group(1)), "Cost Breakdown card")
-
-    risk_text = page.locator("#risk-assessment-container").inner_text()
-    total = 0
-    for sev, k in re.findall(r"^(CRITICAL|HIGH|MEDIUM|LOW|UNRATED) \((\d+)\)$", risk_text, re.M):
-        f.add(f"risks:{sev}", int(k), "Risk Assessment severity heading")
-        total += int(k)
-    f.add("risks:total", total, "Risk Assessment severity headings")
-    for b in page.locator("#risk-assessment-container > div [data-engine]").all():
-        f.name(b.get_attribute("data-engine"), "Risk Assessment")
-
-    for label in page.locator("#query-flow-container [data-figure=engine-queries]").all():
-        eng = label.get_attribute("data-engine")
-        f.name(eng, "Query Flow")
-        m = re.search(r"\(([\d,]+) quer(?:y|ies), [\d.]+%\)$", norm(label.text_content() or ""))
-        f.add(f"queries:{eng}", _int(m.group(1)) if m else UNREADABLE, "Query Flow label")
-
-    fb = page.locator("[data-figure=unservable-queries] .section-header")
-    _fallback_queries(f, norm(fb.inner_text()) if fb.count() else None, "fallback section")
-    close = page.locator("[data-figure=close-calls] .section-header")
-    _close_calls(f, norm(close.inner_text()) if close.count() else None, "Close calls section")
-
-    summary = page.locator(".section-body").first
-    f.add("removed", frozenset(_other_targets(norm(summary.inner_text()))), "summary")
-    return f
-
-
-# --------------------------------------------------------------------------
-# Engineering report (Markdown)
+# The engineering report (Markdown)
 # --------------------------------------------------------------------------
 
 
@@ -791,12 +568,23 @@ def engineering_figures(md_text: str) -> Figures:
 
     targets: set[str] = set()
     for row in _md_table_rows(h2.get("Target engines", "")):
+        if md_plain(row[0]) == "Total":
+            m = re.match(r"^([\d,]+) tables? migrates?$", md_plain(row[3]))
+            f.add(
+                "tables_migrate",
+                _int(m.group(1)) if m else UNREADABLE,
+                "Target engines Total",
+            )
+            continue
         eng = engine_id(md_plain(row[0]))
         targets.add(eng)
         f.name(eng, "Target engines table")
         m = re.match(r"^([\d,]+) cached reads?\b", md_plain(row[2]))
         if m:
             f.add(f"cached_reads:{eng}", _int(m.group(1)), "Target engines Workload")
+        m = re.match(r"^([\d,]+) source tables?\b", md_plain(row[3]))
+        if m:
+            f.add(f"tables:{eng}", _int(m.group(1)), "Target engines Scope")
     f.add("engine_count", len(targets), "Target engines table")
 
     m = re.search(r"^- Projected monthly \(target\): \$([\d,.]+)$", plain, re.M)
@@ -889,7 +677,7 @@ def engineering_figures(md_text: str) -> Figures:
 
 
 # --------------------------------------------------------------------------
-# The executive summary PDF
+# The PDF report
 # --------------------------------------------------------------------------
 
 
@@ -897,3 +685,49 @@ def pdf_page_texts(pdf_path: str) -> list[str]:
     from pypdf import PdfReader
 
     return [norm(p.extract_text() or "") for p in PdfReader(pdf_path).pages]
+
+
+_PDF_ROLES = "Retained|Migration target|Cache layer|Search read model|Evaluated|Assessed"
+_PDF_COST_ROW = re.compile(rf"({_NAMES_RE}) (?:{_PDF_ROLES}) \$([\d,]+\.\d\d)")
+
+
+def pdf_figures(text: str) -> Figures:
+    """Figures the PDF report shows, read from its extracted text (one string,
+    whitespace collapsed; the running header and footer may sit between two
+    halves of a table that continues on the next page)."""
+    f = Figures("PDF")
+    m = re.search(r"Projected monthly \(target\): \$([\d,.]+\d)", text)
+    f.add("cost:total", _usd(m.group(1)) if m else UNREADABLE, "Cost: Projected monthly")
+    start = text.find("Engine Role Est. monthly")
+    end = text.find("Recommended engines and roles", start)
+    if start != -1:
+        table = text[start : end if end != -1 else len(text)]
+        for name, cost in _PDF_COST_ROW.findall(table):
+            eng = engine_id(name)
+            f.name(eng, "Cost table")
+            f.add(f"cost:{eng}", _usd(cost), "Cost table")
+        t = re.search(r"Total \$([\d,]+\.\d\d)", table)
+        f.add("cost:total", _usd(t.group(1)) if t else UNREADABLE, "Cost table Total")
+    m = re.search(r"Total [\d.]+% ([\d,]+) tables? migrates?", text)
+    f.add("tables_migrate", _int(m.group(1)) if m else UNREADABLE, "Engines table Total")
+    m = re.search(r"Open risks: ([\d,]+) \(([^)]*)\)", text)
+    if m:
+        f.add("risks:total", _int(m.group(1)), "Risks: Open risks")
+        sev = {s.split()[1].upper(): _int(s.split()[0]) for s in m.group(2).split(", ")}
+        for s in SEVERITIES:
+            f.add(f"risks:{s}", sev.get(s, 0), "Risks: Open risks")
+    elif "No open migration risks" in text or "No risks were identified" in text:
+        f.add("risks:total", 0, "Risks")
+    f.add("removal_savings", removal_savings(text), "Migration trade-offs")
+    removed = _other_targets(text)
+    r = re.search(r"Retired by this plan: (.+?), running today", text)
+    if r:
+        removed |= {engine_id(x) for x in re.findall(r"/mo \(([^)]+)\)", r.group(1))}
+    f.add("removed", frozenset(removed), "summary and Retired line")
+    m = re.search(r"Unresolved engine ties \(([\d,]+) quer(?:y|ies)\)", text)
+    f.add("tied", _int(m.group(1)) if m else 0, "Unresolved engine ties heading")
+    _close_calls(f, text if "Close calls (" in text else None, "Close calls heading")
+    _fallback_queries(
+        f, text if "Queries on a fallback engine (" in text else None, "fallback heading"
+    )
+    return f

@@ -57,11 +57,11 @@ def test_relative_import_resolver_flags_an_atx_escape() -> None:
 
     This does not write a file into ``src/`` -- it unit-tests the resolver directly
     against a synthetic source string, parsed as if it lived at
-    ``src/report/analysis_report.py``.
+    ``src/report/pdf_report.py``.
     """
     source = "from ..atx_orchestrator import tools\n"
     node = next(n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.ImportFrom))
-    synthetic_file = REPORT / "analysis_report.py"
+    synthetic_file = REPORT / "pdf_report.py"
 
     resolved = _resolve_relative_module(synthetic_file, node.level, node.module)
 

@@ -129,9 +129,6 @@ _TRACE_RENDERERS = {
     # #729: a query on a fallback engine, with its deciding step's sentence.
     "src/report/unservable.py",
     "src/ui/src/components/UnservableQueriesCallout.js",
-    # ... and the interactive report's fallback section (its source and generated script).
-    "src/ui/src/utils/ExportReport.js",
-    "src/report/templates/analysis_report.js",
 }
 
 
@@ -141,7 +138,6 @@ def test_no_renderer_reads_the_explanation():
     customer_text_guard.ID_FIELD_PATHS has to be revisited."""
     sources = [
         *REPO.glob("src/report/**/*.py"),
-        *REPO.glob("src/report/templates/*"),
         *(
             p
             for p in REPO.glob("src/ui/src/**/*.js")

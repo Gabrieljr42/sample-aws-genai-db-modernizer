@@ -24,7 +24,7 @@ FORBIDDEN = ("undefined", "NaN", "[object Object]", "{{", "None%")
 
 
 def _reader(run: PipelineResult) -> PdfReader:
-    return PdfReader(str(run.deliverable("summary-executive-report.pdf")))
+    return PdfReader(str(run.deliverable("assessment.pdf")))
 
 
 def _normalize(text: str) -> str:
@@ -49,7 +49,7 @@ def _text(run: PipelineResult) -> str:
 
 
 def _report(run: PipelineResult) -> dict:
-    report: dict = json.loads((run.deliverable(".md").parent / "report.json").read_text())
+    report: dict = json.loads(run.report_json().read_text())
     return report
 
 
@@ -286,12 +286,35 @@ def test_the_summary_points_at_files_in_the_deliverables_folder(run: PipelineRes
     # It closes the executive summary, before the Cost section.
     assert text.index(note) < text.index("Current monthly (source)")
     folder = run.job_dir() / "deliverables"
-    for name in ("decision-report.html", "engineering-report.md"):
+    for name in re.findall(r"[\w-]+\.(?:md|pdf|json)\b", pdf_report.SEE_ALSO_NOTE):
         assert (folder / name).is_file(), name
 
 
+def test_the_pdf_says_no_language_model_decides_an_assignment(run: PipelineResult) -> None:
+    """#987: the retired decision report's closing statement is in the PDF report."""
+    assert _normalize(pdf_report.NO_MODEL_DECIDES_NOTE) in _text(run)
+
+
 def test_there_is_no_pptx_deliverable(run: PipelineResult) -> None:
-    paths = run.report.get("paths", [])
-    assert any(p.endswith("summary-executive-report.pdf") for p in paths)
+    paths = run.report.get("deliverables", [])
+    assert any(p.endswith("assessment.pdf") for p in paths)
     assert not [p for p in paths if p.lower().endswith(".pptx")]
     assert not list(run.job_dir().rglob("*.pptx"))
+
+
+def test_the_open_ties_and_the_moves_after_approval_are_stated(run: PipelineResult) -> None:
+    """#987 review: the decision makers who read the retired decision report saw the
+    unresolved engine ties and the queries moved after approval; the PDF states both,
+    with the engineering report's own sections, whenever the report has them."""
+    facts = _report(run).get("facts") or {}
+    text = _text(run)
+    tied = int(facts.get("tied_query_count") or 0)
+    moved = int(facts.get("post_schema_reroute_count") or 0)
+    if tied:
+        assert f"Unresolved engine ties ({tied} quer" in text
+    else:
+        assert "Unresolved engine ties" not in text
+    if moved:
+        assert f"Moved after approval ({moved} quer" in text
+    else:
+        assert "Moved after approval" not in text

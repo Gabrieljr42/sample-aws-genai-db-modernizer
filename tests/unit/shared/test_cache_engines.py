@@ -105,9 +105,9 @@ def test_redis_analysis_uses_the_shared_floor(monkeypatch: pytest.MonkeyPatch) -
 
 def test_memorydb_is_not_a_modernizer_engine() -> None:
     """MemoryDB was removed (#398): ElastiCache for Valkey 9.0 covers durability."""
-    from src.report import decision_report
+    from src.shared import catalog
     from src.shared.engine_names import ENGINE_DISPLAY_NAMES
 
     assert "memorydb" not in ENGINE_DISPLAY_NAMES
-    assert "memorydb" not in decision_report._ENGINE_BADGE
+    assert "memorydb" not in {e.id for e in catalog.engines()}
     assert "memorydb" not in engine_roles._CACHE_ENGINES

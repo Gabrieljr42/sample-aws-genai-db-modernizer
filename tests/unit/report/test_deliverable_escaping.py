@@ -1,7 +1,6 @@
 """Output-escaping tests for the customer-facing deliverables (threat model R3).
 
-R3 (``docs/security/atx-threat-model.md``): the HTML/SVG/Markdown deliverables
-interpolate customer- and LLM-derived strings — table and column names, raw SQL
+R3 (``docs/security/atx-threat-model.md``): the Markdown deliverable interpolates customer- and LLM-derived strings — table and column names, raw SQL
 ``query_text``, risk prose, trade-off text. Escaping had been applied ad hoc per
 field, so one missed interpolation point was an injection vector into a document a
 human downloads and opens.
@@ -11,23 +10,20 @@ These tests do two things the acceptance criteria call for:
 * Exercise the centralized escaping helpers (:mod:`escaping`) directly, one per
   rendering context, so the neutralization contract is pinned regardless of caller.
 * Inject markup and control characters into a **table name** and a **query text**
-  and assert they are neutralized in each deliverable — the Decision Report (HTML),
-  the Engineering Report (Markdown, including its Mermaid fences), and the
-  Interactive Analysis Report (HTML).
+  and assert they are neutralized in the Engineering Report (Markdown, including
+  its Mermaid fences).
 
-The PDF is intentionally not covered here: those renderers draw glyphs
-through reportlab and have no markup context to inject into (R3/E2
-scope the escaping concern to HTML/SVG/Markdown).
+The PDF is intentionally not covered here: it draws glyphs through reportlab and
+has no markup context to inject into (R3/E2 scope the escaping concern to
+Markdown).
 """
 
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
 
-from src.report import analysis_report as ar
 from src.report import escaping, renderers
 
 # A payload that is hostile in every context at once: HTML/SVG markup, a script
@@ -42,19 +38,6 @@ INJECT = 'x</td><script>alert(1)</script>`|["\r\ndrop'
 
 
 class TestEscapingHelpers:
-    def test_html_text_neutralizes_markup_but_keeps_quotes(self) -> None:
-        out = escaping.html_text('<b>&"x"')
-        assert "<b>" not in out
-        assert "&lt;b&gt;" in out
-        assert "&amp;" in out
-        # Quotes are not special in a text node, so they are left readable.
-        assert '"x"' in out
-
-    def test_html_attr_also_neutralizes_quotes(self) -> None:
-        out = escaping.html_attr('" onmouseover="alert(1)')
-        assert '"' not in out
-        assert "&quot;" in out
-
     def test_md_cell_escapes_pipe_and_collapses_newlines(self) -> None:
         out = escaping.md_cell("a|b\r\nc<d>")
         assert "\\|" in out
@@ -214,79 +197,9 @@ def _report_with_injection() -> dict:
     }
 
 
-class _FakeStore:
-    def __init__(self, objects: dict[str, dict]):
-        self.objects = objects
-
-    def read_json(self, path: str) -> dict:
-        result: dict = json.loads(json.dumps(self.objects[path]))
-        return result
-
-    def exists(self, path: str) -> bool:
-        return path in self.objects
-
-    def list_prefix(self, prefix: str) -> list[str]:
-        return [k for k in self.objects if k.startswith(prefix)]
-
-
-def _analysis_export() -> dict:
-    """An assembled analysis export whose query text and table name carry the payload."""
-    key = f"{DB}/{JOB}/synthesis/v1/report.json"
-    objects: dict[str, dict] = {
-        key: _report_with_injection(),
-        f"{DB}/{JOB}/collector/output.json": {
-            "database_name": DB,
-            "queries": {
-                "query_patterns": [
-                    {
-                        "query_id": "q1",
-                        "query_text": f"SELECT {INJECT}",
-                        "query_type": "SELECT",
-                        "tables_accessed": [f"tbl{INJECT}"],
-                        "calls_per_second": 5.0,
-                        "frequency_per_hour": 100,
-                    }
-                ]
-            },
-            "schema": {"tables": [{"table_name": f"tbl{INJECT}"}]},
-        },
-        f"{DB}/{JOB}/query-journeys/q1.json": {
-            "query_id": "q1",
-            "source": {
-                "query_text": f"SELECT {INJECT}",
-                "query_type": "SELECT",
-                "tables_accessed": [f"tbl{INJECT}"],
-            },
-            "assignment": {"assigned_engine": "dynamodb", "confidence": 90, "in_scope": True},
-            "design": {"engine": "dynamodb", "status": "designed"},
-        },
-    }
-    return ar.build_export_data(_FakeStore(objects), JOB, DB)
-
-
 # ---------------------------------------------------------------------------
 # Decision Report (HTML)
 # ---------------------------------------------------------------------------
-
-
-class TestDecisionReportEscaping:
-    def test_no_live_script_element_from_injected_fields(self) -> None:
-        html = renderers.render_decision_report_html(_report_with_injection())
-        # The only <script substring allowed is none: this deliverable ships no JS,
-        # and the injected </script>/<script> must have been neutralized to entities.
-        assert "<script>alert(1)" not in html
-        assert "</script>" not in html
-        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
-
-    def test_meta_attribute_cannot_be_broken_out_of(self) -> None:
-        prov = renderers.provenance(_report_with_injection(), "decision-report", "html", job_id=JOB)
-        html = renderers.render_decision_report_html(_report_with_injection(), prov=prov)
-        # The database name reaches a <meta content="..."> attribute via the filename;
-        # a raw double quote there would let it inject further attributes.
-        for line in html.splitlines():
-            if "x-dbmod-" in line:
-                # everything after content=" up to the closing "> is one value
-                assert line.count('"') % 2 == 0
 
 
 # ---------------------------------------------------------------------------
@@ -424,26 +337,6 @@ class TestEngineeringReportEscaping:
 # ---------------------------------------------------------------------------
 # Interactive Analysis Report (HTML)
 # ---------------------------------------------------------------------------
-
-
-class TestAnalysisReportEscaping:
-    def test_script_close_in_query_text_cannot_break_the_document(self) -> None:
-        html = ar.render_analysis_report_html(_analysis_export())
-        # The DATA payload embeds the query text; the "<" is escaped so a </script>
-        # in captured SQL cannot terminate the embedding <script> element early.
-        assert "</script><script>alert(1)" not in html
-        assert "\\u003c/script>" in html
-        # Only our own emission plus the Chart.js tag close a script element.
-        assert html.count("</script>") <= 2
-
-    def test_summary_and_meta_are_escaped(self) -> None:
-        html = ar.render_analysis_report_html(_analysis_export())
-        # The synthesis summary flows into a text node; its markup is neutralized.
-        assert "<script>alert(1)" not in html
-        # The database name reaches <meta content="...">; the quote is escaped.
-        for line in html.splitlines():
-            if "x-dbmod-" in line:
-                assert line.count('"') % 2 == 0
 
 
 if __name__ == "__main__":  # pragma: no cover

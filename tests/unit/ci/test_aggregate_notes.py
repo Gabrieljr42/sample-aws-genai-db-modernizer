@@ -58,10 +58,10 @@ def runs_dir(tmp_path: Path) -> Path:
 
 
 def test_split_sentences_keeps_decimals_and_identifiers():
-    text = "Cost is $582.76 total. See decision_report > Cost for facts.tco.cost. Next point."
+    text = "Cost is $582.76 total. See executive_pdf > Cost for facts.tco.cost. Next point."
     assert agg.split_sentences(text) == [
         "Cost is $582.76 total",
-        "See decision_report > Cost for facts.tco.cost",
+        "See executive_pdf > Cost for facts.tco.cost",
         "Next point.",
     ]
 

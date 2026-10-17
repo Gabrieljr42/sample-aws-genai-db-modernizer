@@ -1,4 +1,4 @@
-"""run_report writes the deliverables next to the local synthesis report."""
+"""run_report renders the deliverables into the job's deliverables folder."""
 
 from __future__ import annotations
 
@@ -13,59 +13,21 @@ FIXTURE = Path(__file__).resolve().parents[1] / "report" / "fixtures" / "e2e09_r
 DB, JOB = "discourse", "job-x"
 
 
-def test_writes_staged_deliverables_next_to_the_report(tmp_path: Path, monkeypatch) -> None:
+def test_writes_no_deliverable_copy_next_to_the_report(tmp_path: Path) -> None:
+    """#987: the versioned synthesis folder keeps only the pipeline's own files;
+    the deliverables live in ``deliverables/`` alone."""
     store = LocalArtifactStore(base_dir=str(tmp_path))
     store.write_json(f"{DB}/{JOB}/synthesis/v2/report.json", json.loads(FIXTURE.read_text()))
-    monkeypatch.setattr("src.report.analysis_report.default_graph_fetcher", lambda *_: False)
-
-    result = run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
-
-    # No graph and no legacy query-journeys artifacts -> 0 journeys embedded, which
-    # is a warning, not a silent "complete".
-    assert result["status"] == "partial", result
-    assert result["journeys"] == 0
-    assert any("0 query journeys" in w for w in result["warnings"])
-    base = tmp_path / DB / JOB / "synthesis" / "v2"
-    names = sorted(p.name for p in base.iterdir())
-    assert "summary-executive-report.pdf" in names
-    assert not [n for n in names if n.endswith(".pptx")]
-    assert any(n.startswith("discourse_decision-report_") and n.endswith(".html") for n in names)
-    assert any(n.startswith("discourse_analysis-report_") and n.endswith(".html") for n in names)
-    assert any(n.startswith("discourse_engineering-report_") and n.endswith(".md") for n in names)
-    assert set(result["files"]) == {
-        f"{DB}/{JOB}/synthesis/v2/{n}" for n in names if n != "report.json"
-    }
-    assert set(result["paths"]) == {str((tmp_path / f).resolve()) for f in result["files"]}
-
-
-def test_renders_complete_with_a_real_graph_rebuild(tmp_path: Path) -> None:
-    """No monkeypatching: the default fetcher rebuilds the graph from a minimal
-    collector artifact, so the analysis report embeds a real journey and the
-    overall status is "complete", not "partial"."""
-    store = LocalArtifactStore(base_dir=str(tmp_path))
-    store.write_json(f"{DB}/{JOB}/synthesis/v1/report.json", json.loads(FIXTURE.read_text()))
-    store.write_json(
-        f"{DB}/{JOB}/collector/output.json",
-        {
-            "queries": {
-                "query_patterns": [
-                    {
-                        "query_id": "q1",
-                        "query_text": "SELECT * FROM posts WHERE id = ?",
-                        "query_type": "SELECT",
-                        "tables_accessed": ["posts"],
-                        "calls_per_second": 12.0,
-                    }
-                ]
-            }
-        },
-    )
 
     result = run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
 
     assert result["status"] == "complete", result
-    assert result["journeys"] >= 1
-    assert result["warnings"] == []
+    assert result["errors"] == []
+    base = tmp_path / DB / JOB / "synthesis" / "v2"
+    assert sorted(p.name for p in base.iterdir()) == ["report.json"]
+    assert result["report"] == f"{DB}/{JOB}/synthesis/v2/report.json"
+    for gone in ("files", "paths", "journeys", "warnings"):
+        assert gone not in result, gone
 
 
 def test_missing_report_is_an_error_status(tmp_path: Path) -> None:
@@ -99,8 +61,6 @@ DOCUMENTED_FILES = {
     "assessment.pdf",
     "engineering-report.md",
     "assessment-data.json",
-    "decision-report.html",
-    "analysis-report.html",
     "index.md",
 }
 
@@ -113,14 +73,11 @@ def _seed(tmp_path: Path, version: int = 2) -> LocalArtifactStore:
     return store
 
 
-def test_writes_the_deliverables_folder_with_exactly_the_documented_set(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_writes_the_deliverables_folder_with_exactly_the_documented_set(tmp_path: Path) -> None:
     _seed(tmp_path)
     # Model I/O next to the report must never be copied into deliverables/.
     (tmp_path / DB / JOB / "synthesis" / "v2" / "llm_input.json").write_text("{}")
     (tmp_path / DB / JOB / "synthesis" / "v2" / "llm_response.json").write_text("{}")
-    monkeypatch.setattr("src.report.analysis_report.default_graph_fetcher", lambda *_: False)
 
     result = run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
 
@@ -128,18 +85,12 @@ def test_writes_the_deliverables_folder_with_exactly_the_documented_set(
     assert {p.name for p in folder.iterdir()} == DOCUMENTED_FILES
     assert result["deliverables_dir"] == str(folder.resolve())
     assert {Path(p).name for p in result["deliverables"]} == DOCUMENTED_FILES
-    # The same bytes as the versioned copy next to report.json.
-    v2 = tmp_path / DB / JOB / "synthesis" / "v2"
-    assert (folder / "assessment.pdf").read_bytes() == (
-        v2 / "summary-executive-report.pdf"
-    ).read_bytes()
     assert (folder / "assessment.pdf").read_bytes()[:5] == b"%PDF-"
 
 
-def test_assessment_data_is_the_report_json(tmp_path: Path, monkeypatch) -> None:
+def test_assessment_data_is_the_report_json(tmp_path: Path) -> None:
     """The "Assessment Data (JSON)" the reports point at is the report.json."""
     _seed(tmp_path)
-    monkeypatch.setattr("src.report.analysis_report.default_graph_fetcher", lambda *_: False)
 
     run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
 
@@ -149,11 +100,8 @@ def test_assessment_data_is_the_report_json(tmp_path: Path, monkeypatch) -> None
     assert data == json.loads(FIXTURE.read_text())
 
 
-def test_index_lists_each_file_its_audience_and_the_assignment_version(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_index_lists_each_file_its_audience_and_the_assignment_version(tmp_path: Path) -> None:
     _seed(tmp_path, version=3)
-    monkeypatch.setattr("src.report.analysis_report.default_graph_fetcher", lambda *_: False)
 
     run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
 
@@ -171,22 +119,57 @@ def test_index_lists_each_file_its_audience_and_the_assignment_version(
     assert not re.search(r"transform|\bATX\b", index, re.IGNORECASE)
 
 
-def test_an_older_version_leaves_the_deliverables_folder_alone(tmp_path: Path, monkeypatch) -> None:
-    """deliverables/ always holds the latest assignment version."""
+def test_an_older_version_is_refused_and_leaves_the_deliverables_folder_alone(
+    tmp_path: Path,
+) -> None:
+    """deliverables/ always holds the latest assignment version, and no copy is
+    written next to an older report any more (#987), so rendering an older
+    version has nowhere to go: it is refused, with the folder left as it was."""
     _seed(tmp_path, version=1)
     _seed(tmp_path, version=2)
-    monkeypatch.setattr("src.report.analysis_report.default_graph_fetcher", lambda *_: False)
     run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
     index = tmp_path / DB / JOB / "deliverables" / "index.md"
     before = index.read_text()
 
     result = run_report.run(JOB, DB, str(tmp_path), assignment_version=1)
 
-    assert result["status"] != "error", result
-    assert result["deliverables_dir"] is None
-    assert "v2" in result["deliverables_note"]
+    assert result["status"] == "error", result
+    assert "v2" in result["message"] and "v1" in result["message"]
     assert index.read_text() == before
     assert "Assignment version: v2" in before
+    assert sorted(p.name for p in (tmp_path / DB / JOB / "synthesis" / "v1").iterdir()) == [
+        "report.json"
+    ]
+
+
+def test_the_latest_version_named_explicitly_renders_the_folder(tmp_path: Path) -> None:
+    _seed(tmp_path, version=1)
+    _seed(tmp_path, version=2)
+
+    result = run_report.run(JOB, DB, str(tmp_path), assignment_version=2)
+
+    assert result["status"] == "complete", result
+    index = (tmp_path / DB / JOB / "deliverables" / "index.md").read_text()
+    assert "Assignment version: v2" in index
+
+
+def test_a_rerender_removes_the_retired_html_reports_an_older_round_wrote(
+    tmp_path: Path,
+) -> None:
+    """#987: a job rendered before the HTML reports were retired has them in its
+    folder; the next render removes them, so the folder matches its index."""
+    from src.report.deliverables import RETIRED_FOLDER_FILENAMES
+
+    _seed(tmp_path)
+    folder = tmp_path / DB / JOB / "deliverables"
+    folder.mkdir(parents=True)
+    for name in RETIRED_FOLDER_FILENAMES:
+        (folder / name).write_text("<html>old</html>")
+    (folder / "my-notes.txt").write_text("customer notes")
+
+    run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
+
+    assert {p.name for p in folder.iterdir()} == DOCUMENTED_FILES | {"my-notes.txt"}
 
 
 def test_a_rerender_drops_stale_documented_files_and_keeps_others(
@@ -195,7 +178,6 @@ def test_a_rerender_drops_stale_documented_files_and_keeps_others(
     """A file this round did not render must not survive from an older round,
     where the index would pass it off as current; files we never write stay."""
     _seed(tmp_path)
-    monkeypatch.setattr("src.report.analysis_report.default_graph_fetcher", lambda *_: False)
     run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
     folder = tmp_path / DB / JOB / "deliverables"
     (folder / "my-notes.txt").write_text("customer notes")
@@ -203,13 +185,13 @@ def test_a_rerender_drops_stale_documented_files_and_keeps_others(
     def boom(*_a, **_k):
         raise ValueError("boom")
 
-    monkeypatch.setattr("src.report.analysis_report.build_export_data", boom)
+    monkeypatch.setattr("src.report.pdf_report.render_executive_summary_pdf", boom)
     result = run_report.run(JOB, DB, str(tmp_path), assignment_version=None)
 
     assert result["status"] == "partial"
     names = {p.name for p in folder.iterdir()}
-    assert "analysis-report.html" not in names
+    assert "assessment.pdf" not in names
     assert "my-notes.txt" in names
     index = (folder / "index.md").read_text()
-    assert "`analysis-report.html`" not in index.split("Not rendered")[0]
-    assert "analysis-report.html" in index.split("Not rendered")[1]
+    assert "`assessment.pdf`" not in index.split("Not rendered")[0]
+    assert "assessment.pdf" in index.split("Not rendered")[1]

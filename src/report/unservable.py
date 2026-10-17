@@ -31,8 +31,7 @@ UNSERVABLE_INTRO = (
 
 # The existing re-run path: the assignment review (the customer gate). One
 # sentence for both reports, the PDF and the UI callout
-# (src/ui/src/locales/en.json, analysis-results.unservable.rerun); the
-# interactive report repeats it (src/ui/src/utils/ExportReport.js).
+# (src/ui/src/locales/en.json, analysis-results.unservable.rerun).
 UNSERVABLE_RERUN_TEXT = (
     "To re-run, open the assignment review: change a query's engine or take it out of scope, "
     "then approve; that writes a new assignment version and redesigns only the engines it "
@@ -65,43 +64,6 @@ def _keep_or_redesign(q: dict[str, Any]) -> str:
     """``Keep it on Aurora MySQL, or redesign it. For DynamoDB: ...``."""
     engine = display_engine(str(q.get("engine", "")))
     return f"Keep it on {engine}, or redesign it. {' '.join(q.get('redesign_hints') or [])}"
-
-
-def unservable_html(report: dict[str, Any]) -> list[str]:
-    """Decision Report "Queries on a fallback engine" section."""
-    facts = _facts(report)
-    if facts is None:
-        return []
-    esc = escaping.html_text
-    items = []
-    for q in facts.get("unservable_queries") or []:
-        gates = _gates(q)
-        ruled_out = f" Ruled out: {esc(gates)}." if gates else ""
-        items.append(
-            f'<li data-query="{escaping.html_attr(q.get("query_id", ""))}" '
-            f'data-kind="{escaping.html_attr(q.get("kind", ""))}">'
-            f"<code>{esc(q.get('query_id', '?'))}</code> landed on "
-            f"<b>{esc(display_engine(str(q.get('engine', ''))))}</b>: "
-            f"{esc(q.get('explanation', ''))}{ruled_out} {esc(_keep_or_redesign(q))}</li>"
-        )
-    more = facts.get("more_unservable_count") or 0
-    if more:
-        items.append(
-            f"<li>{more} more {esc(plural_noun(more, 'query', 'queries'))}: see the "
-            "Engineering Report.</li>"
-        )
-    return [
-        "<section data-figure=unservable-queries>",
-        f"<h2 class=section-title>{esc(unservable_title(facts.get('unservable_query_count', 0)))}</h2>",
-        "<div class=card><div class=card-b>",
-        f"<p>{esc(UNSERVABLE_INTRO)}</p>",
-        "<ul>",
-        *items,
-        "</ul>",
-        f"<p>{esc(UNSERVABLE_RERUN_TEXT)}</p>",
-        "</div></div>",
-        "</section>",
-    ]
 
 
 def unservable_md(report: dict[str, Any]) -> list[str]:

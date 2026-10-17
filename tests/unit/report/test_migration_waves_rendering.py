@@ -13,11 +13,8 @@ from __future__ import annotations
 from typing import Any
 
 from ci.llm import judge_facts
-from src.report.renderers import (
-    render_decision_report_html,
-    render_engineering_report_md,
-    resolve_migration_waves,
-)
+from src.report.renderers import render_engineering_report_md, resolve_migration_waves
+from tests.unit.report.pdf_text import pdf_text
 
 STORED_WAVES = [
     {
@@ -213,16 +210,16 @@ class TestResolveMigrationWaves:
         assert [w["wave"] for w in waves] == list(range(1, len(waves) + 1))
 
 
-class TestDecisionReportRoadmap:
+class TestPdfReportRoadmap:
     def test_shows_every_wave_with_its_rationale_and_gate(self):
-        html = render_decision_report_html(_report_with_waves())
-        assert "Migration roadmap" in html
-        assert "Wave 1: Cache hot reads with ElastiCache" in html
-        assert "Wave 2: Move key-value and point-lookup queries to DynamoDB" in html
-        assert "Wave 3: Keep the rest on Aurora MySQL" in html
-        assert "Gate: Cache hit rate and invalidation verified" in html
-        assert "91.6% of the workload" in html
-        assert "83.4% of calls" in html
+        text = pdf_text(_report_with_waves())
+        assert "Migration wave plan" in text
+        assert "Wave 1: Cache hot reads with ElastiCache" in text
+        assert "Wave 2: Move key-value and point-lookup queries to DynamoDB" in text
+        assert "Wave 3: Keep the rest on Aurora MySQL" in text
+        assert "Cache hit rate and invalidation verified" in text
+        assert "91.6% of the workload" in text
+        assert "83.4% of calls" in text
 
     def test_migrated_table_count_excludes_wave_1_aurora(self):
         # #324 review (finding 4): wave 1 (Aurora) carries the whole schema
@@ -232,17 +229,18 @@ class TestDecisionReportRoadmap:
         # (DynamoDB's own count), never 50 + 19 = 69 (double-counted) and
         # never 50 (which would wrongly call the whole-schema Aurora move a
         # "purpose-built engine" migration).
-        html = render_decision_report_html(_report_aurora_first_no_schema_design())
-        assert "<td data-figure=scope>19 tables migrate</td>" in html
-        assert "69 tables" not in html
-        assert "50 tables migrate" not in html
+        md = render_engineering_report_md(_report_aurora_first_no_schema_design())
+        assert "| 19 tables migrate |" in md
+        assert "69 tables" not in md
+        assert "50 tables migrate" not in md
 
     def test_no_section_without_any_wave(self):
         rep = _report_with_waves()
         rep["migration_waves"] = []
         rep["cache_overlay"] = None
         rep["ranking"] = []
-        assert "Migration roadmap" not in render_decision_report_html(rep)
+        assert "## Migration roadmap" not in render_engineering_report_md(rep)
+        assert "Wave 1:" not in pdf_text(rep)
 
 
 class TestEngineeringReportRoadmap:
@@ -331,22 +329,27 @@ class TestEngineeringReportRoadmap:
         assert "are not shown in any wave" not in md
 
 
+def _cache_section(md: str) -> str:
+    start = md.index("## Cache layer")
+    return md[start : md.index("\n## ", start + 1)]
+
+
 class TestReviewFindings324:
     """Fixes from the independent review of PR #321's merge."""
 
-    def test_decision_report_states_wave_1_share_as_the_end_state(self):
+    def test_pdf_states_wave_1_share_as_the_end_state(self):
         # Finding 2: wave 1's headline says the whole workload runs on
         # Aurora at cutover, and names the end-state remainder explicitly --
         # not just "5 queries (4.7%)", which reads as if only 5 queries ever
         # touch Aurora.
-        html = render_decision_report_html(_report_aurora_first_no_schema_design())
-        assert "all 107 queries at cutover" in html
-        assert "5 (4.7%) remain on Aurora MySQL at the end" in html
+        text = pdf_text(_report_aurora_first_no_schema_design())
+        assert "all 107 queries at cutover" in text
+        assert "5 (4.7%) remain on Aurora MySQL at the end" in text
 
-    def test_decision_report_says_tables_and_views_for_wave_1(self):
+    def test_pdf_says_tables_and_views_for_wave_1(self):
         # Finding 4: wave 1's table count includes views; say so.
-        html = render_decision_report_html(_report_aurora_first_no_schema_design())
-        assert "50 source tables and views" in html
+        text = pdf_text(_report_aurora_first_no_schema_design())
+        assert "50 source tables and views" in text
 
     def test_engineering_md_states_wave_1_share_as_the_end_state(self):
         md = render_engineering_report_md(_report_aurora_first_no_schema_design())
@@ -377,32 +380,30 @@ class TestReviewFindings324:
 
     def test_suggested_path_note_uses_an_em_dash_not_ascii_double_hyphen(self):
         # Finding 9.
-        html = render_decision_report_html(_report_aurora_first_no_schema_design())
+        text = pdf_text(_report_aurora_first_no_schema_design())
         md = render_engineering_report_md(_report_aurora_first_no_schema_design())
-        assert "One suggested adoption path, not the only one — to modernize" in html
+        assert "One suggested adoption path, not the only one — to modernize" in text
         assert "One suggested adoption path, not the only one — to modernize" in md
-        note_html = html.split("Migration roadmap</h2>")[1].split("</p>")[0]
         note_md = md.split("## Migration roadmap")[1].split("\n\n")[1]
-        assert "--" not in note_html
         assert "--" not in note_md
 
     def test_cache_note_fronts_the_resolved_cache_waves_engine(self):
-        # Finding 6: the "Recommended architecture" cache note must agree
+        # Finding 6: the engineering report's cache layer note must agree
         # with the roadmap's own cache wave, not re-derive the fronted
         # engine from architecture roles -- which disagreed with a 1.4-shaped
         # report (cache-first, stored waves predate #321 and still front the
         # legacy source, not Aurora). ``_report_with_waves()``'s stored cache
         # wave fronts "mysql" (the legacy source, per STORED_WAVES above).
-        html = render_decision_report_html(_report_with_waves())
-        assert "It fronts the source MySQL database" in html
-        assert "It fronts Aurora MySQL" not in html
+        md = _cache_section(render_engineering_report_md(_report_with_waves()))
+        assert "It fronts the source MySQL database" in md
+        assert "It fronts Aurora MySQL" not in md
 
     def test_cache_note_fronts_aurora_when_the_cache_wave_says_so(self):
         rep = _report_with_waves()
         rep["migration_waves"][0]["fronts"] = "aurora_mysql"
-        html = render_decision_report_html(rep)
-        assert "It fronts Aurora MySQL" in html
-        assert "It fronts the source MySQL database" not in html
+        md = _cache_section(render_engineering_report_md(rep))
+        assert "It fronts Aurora MySQL" in md
+        assert "It fronts the source MySQL database" not in md
 
 
 class TestDeckUsesStoredWaves:

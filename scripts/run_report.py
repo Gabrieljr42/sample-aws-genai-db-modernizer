@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """Render the customer deliverables for a completed local job.
 
-Writes, next to the job's synthesis ``report.json``: the decision report (HTML),
-the engineering report (Markdown), the interactive analysis report (HTML), and the
-executive summary (PDF). Deterministic, no LLM calls.
-
-When the rendered version is the job's latest, it also fills the customer folder
-``artifacts/<db>/<job>/deliverables/`` with stable names and an ``index.md``
-(``src.report.deliverables.FOLDER_ENTRIES``). Model I/O, traces and the versioned
-folders stay where they are.
+Writes the job's latest synthesis version into the customer folder
+``artifacts/<db>/<job>/deliverables/`` under stable names (the PDF report, the
+engineering report, the assessment data JSON) with an ``index.md``
+(``src.report.deliverables.FOLDER_ENTRIES``). Nothing is written next to the
+synthesis ``report.json``: model I/O, traces and the versioned folders stay as
+the pipeline left them. Deterministic, no LLM calls.
 
 Usage:
     uv run python scripts/run_report.py --job-id <id> --db <name>
-    uv run python scripts/run_report.py --job-id <id> --db <name> --assignment-version 2
 """
 
 import argparse
@@ -25,30 +22,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _write_deliverables_folder(job_dir, db: str, job_id: str, version: int, rendered):
-    """Copy the customer files into ``<job_dir>/deliverables/`` under their stable
+    """Write the customer files into ``<job_dir>/deliverables/`` under their stable
     names and write the index. A documented file this round did not render is
-    removed, so the folder never mixes rounds; any other file is left alone."""
+    removed, so the folder never mixes rounds, and so is a retired deliverable an
+    older round wrote; any other file is left alone."""
     from src.report.deliverables import (
         DELIVERABLES_DIR,
         FOLDER_ENTRIES,
         INDEX_FILENAME,
+        RETIRED_FOLDER_FILENAMES,
         render_folder_index,
     )
 
     folder = job_dir / DELIVERABLES_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    by_name = {d.name: d for d in rendered.items}
-    written = []
+    files = rendered.folder_files()
+    written = {entry.name for entry, _ in files}
     for entry in FOLDER_ENTRIES:
-        target = folder / entry.filename
-        item = by_name.get(entry.name)
-        if item is None:
-            target.unlink(missing_ok=True)
-            continue
-        target.write_bytes(item.content)
-        written.append(entry)
+        if entry.name not in written:
+            (folder / entry.filename).unlink(missing_ok=True)
+    for retired in RETIRED_FOLDER_FILENAMES:
+        (folder / retired).unlink(missing_ok=True)
+    for entry, item in files:
+        (folder / entry.filename).write_bytes(item.content)
     (folder / INDEX_FILENAME).write_text(
-        render_folder_index(db, job_id, version, written), encoding="utf-8"
+        render_folder_index(db, job_id, version, [entry for entry, _ in files]),
+        encoding="utf-8",
     )
     return folder
 
@@ -56,15 +55,13 @@ def _write_deliverables_folder(job_dir, db: str, job_id: str, version: int, rend
 def run(job_id: str, db: str, artifact_root: str, assignment_version: int | None) -> dict:
     from pathlib import Path
 
-    from src.report import analysis_report
-    from src.report.deliverables import FOLDER_FILENAMES
+    from src.report.deliverables import FOLDER_FILENAMES, synthesis_report_key
     from src.storage.local_store import LocalArtifactStore
 
     store = LocalArtifactStore(base_dir=artifact_root)
     try:
-        report_key = analysis_report.synthesis_report_key(
-            store, db, job_id, assignment_version or 0
-        )
+        report_key = synthesis_report_key(store, db, job_id, assignment_version or 0)
+        latest_key = synthesis_report_key(store, db, job_id, 0)
     except FileNotFoundError:
         return {
             "status": "error",
@@ -72,47 +69,35 @@ def run(job_id: str, db: str, artifact_root: str, assignment_version: int | None
         }
     m = re.search(r"/synthesis/v(\d+)/", report_key)
     version = int(m.group(1)) if m else 0
+    if report_key != latest_key:
+        # The folder holds the latest version only, and no copy is written next to an
+        # older report (#987), so an older version has nowhere to go.
+        m_latest = re.search(r"/synthesis/v(\d+)/", latest_key)
+        return {
+            "status": "error",
+            "message": (
+                f"deliverables/ holds the latest assignment version "
+                f"(v{m_latest.group(1) if m_latest else '?'}); v{version} is not rendered. "
+                "Its report.json stays in its synthesis folder."
+            ),
+        }
 
     try:
         from src.report.deliverables import render_deliverables
 
-        # No graph_fetcher: the default always rebuilds the context graph from the
-        # JSON contracts, which is right for a local store.
         rendered = render_deliverables(store, job_id, db, report_key, assignment_version=version)
-        base = report_key.rsplit("/", 1)[0]
-        files = []
-        for d in rendered.items:
-            if d.stage:
-                key = f"{base}/{d.filename}"
-                store.write_bytes(key, d.content)
-                files.append(key)
-        status = "partial" if (rendered.errors or rendered.warnings) else "complete"
-        result = {
-            "status": status,
+        folder = _write_deliverables_folder(
+            Path(artifact_root, db, job_id), db, job_id, version, rendered
+        )
+        return {
+            "status": "partial" if rendered.errors else "complete",
             "report": report_key,
-            "files": files,
-            "paths": [str(Path(artifact_root, k).resolve()) for k in files],
-            "errors": rendered.errors,
-            "warnings": rendered.warnings,
-            "journeys": rendered.journeys,
-        }
-        latest_key = analysis_report.synthesis_report_key(store, db, job_id, 0)
-        if latest_key == report_key:
-            folder = _write_deliverables_folder(
-                Path(artifact_root, db, job_id), db, job_id, version, rendered
-            )
-            result["deliverables_dir"] = str(folder.resolve())
-            result["deliverables"] = sorted(
+            "deliverables_dir": str(folder.resolve()),
+            "deliverables": sorted(
                 str(p.resolve()) for p in folder.iterdir() if p.name in FOLDER_FILENAMES
-            )
-        else:
-            m_latest = re.search(r"/synthesis/v(\d+)/", latest_key)
-            result["deliverables_dir"] = None
-            result["deliverables_note"] = (
-                f"deliverables/ left unchanged: it holds the latest version "
-                f"(v{m_latest.group(1) if m_latest else '?'}), not v{version}"
-            )
-        return result
+            ),
+            "errors": rendered.errors,
+        }
     except Exception as e:  # noqa: BLE001 - this script must always print JSON
         return {"status": "error", "message": f"{type(e).__name__}: {e}"}
 
@@ -125,7 +110,7 @@ def main() -> None:
         "--assignment-version",
         type=int,
         default=None,
-        help="Synthesis version to render (default: the highest present)",
+        help="Synthesis version to render; only the latest is rendered (default: the latest)",
     )
     parser.add_argument(
         "--artifact-root",

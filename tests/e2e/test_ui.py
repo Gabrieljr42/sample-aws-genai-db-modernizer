@@ -25,9 +25,9 @@ from playwright.sync_api import Page
 from src.report.deliverables import DELIVERABLES_DIR, FOLDER_FILENAMES
 from tests.e2e.pipeline import PipelineResult
 
-# The product UI is a developer helper; the customer deliverables are the HTML/PDF
-# reports (checked cross-browser in test_report_html.py). Restrict this file to
-# Chromium only. NOTE for ci/e2e.sh: pytest-playwright implements only_browser via a
+# The results page is a primary deliverable next to the PDF report (#987); its
+# browser checks (rendering, overflow, accessibility) live here. Restrict this file
+# to Chromium only. NOTE for ci/e2e.sh: pytest-playwright implements only_browser via a
 # runtime pytest.skip() in pytest_runtest_setup (not deselection), so if this suite
 # is ever run with `--browser chromium --browser webkit` under `--fail-on-skip`, the
 # webkit parametrizations of every test below will be skipped-then-failed. Run this
@@ -285,26 +285,35 @@ def test_a_querys_trace_opens_from_the_routing_table(
     assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
 
 
-def _decision_wave_stats(page: Page, r: PipelineResult) -> dict[str, str]:
-    """Each wave's headline as the decision report prints it, by wave number."""
-    page.goto(r.html("decision-report").resolve().as_uri())
-    return {
-        str(w.get_attribute("data-wave")): " ".join(
-            w.locator("[data-figure=wave-stats]").inner_text().split()
-        )
-        for w in page.locator("[data-wave]").all()
-    }
+def _report_wave_stats(r: PipelineResult) -> dict[str, tuple[str, str]]:
+    """Each wave's headline as the reports compute it (``roadmap._wave_headline_stats``)
+    and its count phrase as the engineering report prints it, by wave number."""
+    from src.report.escaping import md_text
+    from src.report.roadmap import _facts_by_wave, _wave_headline_stats, resolve_migration_waves
+
+    report = json.loads((r.artifact_root / r.report["report"]).read_text())
+    facts = _facts_by_wave(report)
+    out = {}
+    for w in resolve_migration_waves(report):
+        count_phrase, table_phrase = _wave_headline_stats(w, facts.get(int(w.get("wave") or 0)))
+        headline = " ".join(f"{count_phrase}{table_phrase}".split())
+        out[str(w.get("wave"))] = (headline, f"- {md_text(count_phrase)}")
+    return out
 
 
 def test_results_page_shows_the_reports_wave_plan(
     page: Page, ui: str, all_runs: list[PipelineResult]
 ) -> None:
     """#957: the results page's migration roadmap shows the same waves as the
-    decision report (and so the PDF and the engineering report), with the same
-    headline for each wave, read from report.json."""
+    PDF report and the engineering report, with the same headline for each wave,
+    read from report.json."""
     for r in all_runs:
-        expected = _decision_wave_stats(page, r)
-        assert expected, (r.db, "the decision report shows no waves")
+        stats = _report_wave_stats(r)
+        assert stats, (r.db, "the report has no waves")
+        md = r.deliverable("engineering-report.md").read_text(encoding="utf-8")
+        for _, md_line in stats.values():
+            assert md_line in md.splitlines(), (r.db, md_line)
+        expected = {n: headline for n, (headline, _) in stats.items()}
         report = json.loads((r.artifact_root / r.report["report"]).read_text())
         gates = {str(w["wave"]): w.get("gate") or "" for w in report["migration_waves"]}
         ev = _watch(page)
@@ -379,3 +388,127 @@ def test_ui_shows_only_the_product_name(
         assert not re.search(r"\bATX\b|AWS\s+Transform|transform", text, re.IGNORECASE), path
         assert "Database Modernizer Assessment Tool" in text, path
         assert page.title() == "Database Modernizer Assessment Tool", path
+
+
+# ---------------------------------------------------------------------------
+# The results page's browser checks (#987): the retired HTML reports were
+# rendered in a browser for leaked placeholders, the customer text guard,
+# horizontal overflow and accessibility. The results page is the deliverable
+# that replaces them, so it gets the same checks.
+# ---------------------------------------------------------------------------
+
+# "undefined"/"NaN"/"null" as whole words; "[object Object]" and "{{" anywhere.
+FORBIDDEN_WORDS = ("undefined", "NaN", "null")
+FORBIDDEN_SUBSTRINGS = ("[object Object]", "{{")
+
+# axe impacts that fail the scan; "minor" findings are printed for visibility only.
+BLOCKING_IMPACTS = ("critical", "serious", "moderate")
+
+
+def _leaked_forbidden_text(text: str) -> list[str]:
+    leaked = [w for w in FORBIDDEN_WORDS if re.search(rf"\b{re.escape(w)}\b", text)]
+    leaked += [s for s in FORBIDDEN_SUBSTRINGS if s in text]
+    return leaked
+
+
+def _open_results(page: Page, ui: str, r: PipelineResult) -> dict[str, list[str]]:
+    ev = _watch(page)
+    page.goto(f"{ui}/analysis/results/{r.job_id}")
+    page.wait_for_load_state("networkidle")
+    page.locator("#migration-roadmap-section").wait_for()
+    return ev
+
+
+def test_results_page_text_is_clean(page: Page, ui: str, all_runs: list[PipelineResult]) -> None:
+    from src.tools.validation.customer_text_guard import scan_text
+
+    for r in all_runs:
+        ev = _open_results(page, ui, r)
+        text = page.inner_text("body")
+        assert _leaked_forbidden_text(text) == [], r.db
+        findings = scan_text(text, f"results-page:{r.db}")
+        assert findings == [], (r.db, [(f.kind, f.text, f.excerpt) for f in findings])
+        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+
+
+@pytest.mark.parametrize("width", [1280, 1920])
+def test_results_page_has_no_horizontal_overflow(
+    page: Page, ui: str, all_runs: list[PipelineResult], width: int
+) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    for r in all_runs:
+        _open_results(page, ui, r)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), r.db
+
+
+def _expand_every_section(page: Page) -> None:
+    """Open every collapsed section of the page's content (the Aurora design's
+    tables and query groups, the explorer's groups, ...), so the scan sees what
+    a reader can open, not only what shows on load."""
+    main = page.locator("main")
+    for _ in range(4):  # nested sections open one level at a time
+        # Section headers only (they control their content); never a menu, a
+        # dropdown or a popover trigger.
+        closed = main.locator('[aria-expanded="false"][aria-controls]:not([aria-haspopup])')
+        n = closed.count()
+        if not n:
+            return
+        for i in range(n - 1, -1, -1):
+            item = closed.nth(i)
+            if item.is_visible():
+                item.click()
+        page.wait_for_timeout(200)
+
+
+def test_results_page_has_no_moderate_or_worse_accessibility_violations(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    from axe_playwright_python.sync_playwright import Axe
+
+    for r in all_runs:
+        _open_results(page, ui, r)
+        _expand_every_section(page)
+        violations = Axe().run(page).response["violations"]
+        blocking = [v["id"] for v in violations if v.get("impact") in BLOCKING_IMPACTS]
+        minor = [v["id"] for v in violations if v.get("impact") not in BLOCKING_IMPACTS]
+        if minor:
+            print(f"\naxe minor findings on the results page for {r.db}: {minor}")
+        # Name the elements, so a failure on a headless run's job says what to fix.
+        where = {
+            v["id"]: [n.get("target") for n in v.get("nodes", [])][:5]
+            for v in violations
+            if v.get("impact") in BLOCKING_IMPACTS
+        }
+        assert blocking == [], (r.job_id, r.db, blocking, where)
+
+
+def _designed_runs(all_runs: list[PipelineResult]) -> list[PipelineResult]:
+    """The jobs with at least one schema design: ``ui-desi`` in the deterministic
+    suite (``tests/e2e/designed_run.py``), the headless run's own job on e2e-llm."""
+    return [r for r in all_runs if list(r.job_dir().glob("schema-*/v*/schema_output.json"))]
+
+
+def test_the_designed_job_renders_the_schema_design_panels(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    """#987: the suite always has a job with schema designs, so the checks above
+    also cover the panels only a schema-designed run shows: the explorer with
+    its selection tables, the design trade-offs, the Aurora design when an
+    Aurora engine was designed, and the explorer's pager on the deterministic
+    fixture (which has more than one page). Fails when no such job renders them."""
+    designed = _designed_runs(all_runs)
+    assert designed, "no job with a schema design in this session"
+    if not any(r.external for r in all_runs):
+        assert [r.job_id for r in designed] == ["ui-desi"]
+    for r in designed:
+        ev = _open_results(page, ui, r)
+        text = page.inner_text("body")
+        headings = ["Access pattern explorer", "Trade-offs and design decisions"]
+        if list(r.job_dir().glob("schema-aurora_*/v*/schema_output.json")):
+            headings.append("Aurora design")
+        for heading in headings:
+            assert heading in text, (r.job_id, heading)
+        assert page.get_by_role("radio").count() > 0, r.job_id
+        if not r.external:
+            assert page.get_by_role("button", name="Next page").count() > 0, r.job_id
+        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.job_id, ev)

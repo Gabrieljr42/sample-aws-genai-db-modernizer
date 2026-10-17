@@ -80,15 +80,17 @@ directly.
 
 ## `pre_merge.sh`
 
-A cheap failsafe to run before pushing or asking for a merge: `./ci/pre_merge.sh` (add `--quick` to skip the test suite). In order, each step prints one status line: fetch the public repo's main (`upstream` or `origin`, whichever points at it, `origin` as the fallback); count how many commits the branch is behind main; check for merge conflicts with `git merge-tree --write-tree` (no change to the worktree, index or refs; older git falls back to listing files both sides changed); check that every changed `src/contracts/*.py` has a `contract_version` higher than main's (a version that only collides with one already on main says "take the next version"); warn when a generated file (routing snapshot, `tests/contract/schema_snapshot.json`, rendered catalog, report template) differs from main but its generator check fails; run `ci/lint.sh`; run `ci/test.sh -q`; print the `needs_llm_run.sh` verdict against main. It exits non-zero on a conflict, a lint or test failure, or a contract version problem, and ends with a summary. The parsing and verdict logic lives in `ci/pre_merge.py`, covered by `tests/unit/ci/test_pre_merge.py`. No env vars; needs network only for the fetch.
+A cheap failsafe to run before pushing or asking for a merge: `./ci/pre_merge.sh` (add `--quick` to skip the test suite). In order, each step prints one status line: fetch the public repo's main (`upstream` or `origin`, whichever points at it, `origin` as the fallback); count how many commits the branch is behind main; check for merge conflicts with `git merge-tree --write-tree` (no change to the worktree, index or refs; older git falls back to listing files both sides changed); check that every changed `src/contracts/*.py` has a `contract_version` higher than main's (a version that only collides with one already on main says "take the next version"); warn when a generated file (routing snapshot, `tests/contract/schema_snapshot.json`, rendered catalog) differs from main but its generator check fails; run `ci/lint.sh`; run `ci/test.sh -q`; print the `needs_llm_run.sh` verdict against main. It exits non-zero on a conflict, a lint or test failure, or a contract version problem, and ends with a summary. The parsing and verdict logic lives in `ci/pre_merge.py`, covered by `tests/unit/ci/test_pre_merge.py`. No env vars; needs network only for the fetch.
 
 ## `e2e.sh`
 
 The deterministic end-to-end suite (`tests/e2e/`): runs the full pipeline
 (collect → triage → analysis per engine → assignment → reality check →
-synthesis → report) with no LLM and no AWS credentials, then checks the HTML
-reports in real browsers (Chromium + WebKit), the PDF content, a local-UI
-smoke test, and the built help site, against the produced artifacts.
+synthesis → report) with no LLM and no AWS credentials, then checks the
+deliverables folder (the PDF content, the engineering report and the figures
+they share), the local UI in a real browser (the results page's rendering,
+overflow and accessibility included), and the built help site (its rendering of
+the sample engineering report included), against the produced artifacts.
 
 Prerequisites: `uv` (with the `docs` extra installed, for the `mkdocs build`
 this script runs itself), Node 22, and Playwright's browser binaries (the
@@ -142,10 +144,13 @@ Env vars read:
 - `E2E_OUTPUT` — root directory for everything this script produces. Defaults
   to `test-results/`. Under it:
   - `e2e-reports-junit.xml`, `e2e-ui-junit.xml` — one junit file per invocation.
-  - `deliverables/<db>/` — a copy of each pipeline run's `synthesis/v*/` files
-    (the HTML reports and the PDF), written by a session-scoped autouse
-    finalizer in `tests/e2e/conftest.py`, so reviewers can download the
-    rendered output straight from a CI artifact without re-running anything.
+  - `deliverables/<db>/` — a copy of each pipeline run's `deliverables/`
+    folder (the PDF report, the engineering report, the assessment data and
+    the index), with the latest synthesis version's own files (`report.json`,
+    and in an LLM run the model input and response) under `synthesis/`,
+    written by a session-scoped autouse finalizer in `tests/e2e/conftest.py`,
+    so reviewers can download the rendered output straight from a CI artifact
+    without re-running anything.
   - `pw-reports/`, `pw-ui/` — Playwright's own `--output` directories
     (screenshots on failure, traces on failure), one per invocation. They are
     *not* both named `$E2E_OUTPUT` directly: pytest-playwright's
@@ -187,7 +192,8 @@ a Bedrock smoke run need the internal validation pipeline.
 Headless `/modernize` run on model access (Bedrock or the Anthropic API):
 `claude -p "/modernize ... --auto --mode <chat|ui|both>" --permission-mode
 dontAsk --output-format stream-json` against one of the two sample fixtures,
-then the same deliverable checks `e2e.sh` runs (contracts, HTML, PDF, and --
+then the same deliverable checks `e2e.sh` runs (contracts, the engineering
+report, PDF, and --
 for `ui`/`both` -- the UI smoke test) pointed at the job the headless run
 produced, plus a rubric-based quality judge (`ci/llm/judge.py` /
 `ci/llm/rubric.md`) grading the rendered deliverables. Everything is merged
@@ -235,12 +241,14 @@ deterministic job.
   failing never stops the script early. Preflight failures before the run
   (missing credentials, the CLI install, `claude --version`, unzipping the
   fixture, a rejected `E2E_LLM_ARTIFACT_ROOT`) exit early, and the EXIT trap
-  then writes a minimal `{"schema_version": 1, "pass": false, "error": "<step>
+  then writes a minimal `{"schema_version": 2, "pass": false, "error": "<step>
   failed before the run"}` -- so `results.json` always exists.
 - `results.json` -- the one merged row (`schema_version`, `timestamp`,
   `git_sha`, `mode`, `fixture`, `model`, `job_id`, `db`, `cost_usd`,
   `num_turns`, `tokens_in`/`tokens_out`, `duration_s`, `checks: {transcript,
-  contracts, html, pdf, ui, judge}` (`ui` is `null` for `chat`),
+  contracts, engineering, pdf, ui, judge}` (`ui` is `null` for `chat`; schema
+  version 2 renamed the `html` check to `engineering` when the HTML reports
+  were retired, #987),
   `transcript_error` (`null` unless check-transcript failed; cost, turns and
   tokens are reported either way), `judge: {mean, scores}`, `pass`). Plan 3b uploads this to the results store, so it's
   kept flat and JSON-shaped on purpose.

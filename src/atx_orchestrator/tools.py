@@ -589,9 +589,7 @@ def present_assignment_review(job_id: str, database_name: str) -> str:
     job_id = _platform_job_id(job_id)
     from src.agents.referee.assignment_review import render_assignment_summary
     from src.contracts.assignment_models import Assignment
-    from src.storage.assignment_versioning import (
-        resolve_effective_assignment_version,
-    )
+    from src.storage.assignment_versioning import resolve_effective_assignment_version
 
     store = _make_store()
     version = resolve_effective_assignment_version(store, database_name, job_id)
@@ -672,9 +670,7 @@ def open_detailed_routing_review(job_id: str, database_name: str) -> str:
     job_id = _platform_job_id(job_id)
     from src.agents.referee.assignment_review import build_review_table, render_assignment_review
     from src.contracts.assignment_models import Assignment
-    from src.storage.assignment_versioning import (
-        resolve_effective_assignment_version,
-    )
+    from src.storage.assignment_versioning import resolve_effective_assignment_version
 
     store = _make_store()
     version = resolve_effective_assignment_version(store, database_name, job_id)
@@ -1363,13 +1359,16 @@ def _publish_synthesis_deliverables(job_id: str, database_name: str, payload: di
     publish them as CUSTOMER_OUTPUT.
 
     The orchestrator owns this, not the subagent, because it owns the synthesis
-    plan step. Five artifacts reach the WebApp Artifacts panel: Decision Report
-    (executive HTML), Engineering Report (build-team Markdown), Assessment Data
-    (the raw report JSON), Interactive Analysis Report (HTML) and Executive
-    Summary Report (PDF). Each rendered deliverable is also written to our own
-    S3 bucket, which is the system of record and survives the customer stopping
-    the job; report.json is already there (the subagent wrote it). The executive
-    summary PDF is the delivery.
+    plan step. Three artifacts reach the WebApp Artifacts panel: the Executive
+    Summary Report (PDF), the Engineering Report (build-team Markdown) and the
+    Assessment Data (the raw report JSON). Each one is also written to our own S3
+    bucket as the job's deliverables folder (``<db>/<job>/deliverables/``, the
+    stable names of ``src.report.deliverables.FOLDER_ENTRIES``, the folder a local
+    run writes, without its ``index.md``), which is the system of record and
+    survives the customer stopping the job; report.json is already there (the
+    subagent wrote it). Each round overwrites the previous round's copies there;
+    every round's report.json stays in its own ``synthesis/v<N>/``. The PDF
+    report is the delivery.
 
     Every item carries an explicit download filename (the 5th tuple element) so
     the artifact publishes EXTERNAL and saves under a human-readable name rather
@@ -1399,12 +1398,10 @@ def _publish_synthesis_deliverables(job_id: str, database_name: str, payload: di
         return
     try:
         from src.atx_orchestrator.runtime import artifacts as _artifacts
-        from src.atx_orchestrator.runtime import graph_transport
-        from src.report.deliverables import render_deliverables
+        from src.report.deliverables import folder_key, render_deliverables
         from src.storage.assignment_versioning import resolve_downstream_assignment_version
 
         store = _make_store()
-        base = report_key.rsplit("/", 1)[0]
         rendered = render_deliverables(
             store,
             job_id,
@@ -1416,8 +1413,6 @@ def _publish_synthesis_deliverables(job_id: str, database_name: str, payload: di
                 inner.get("assignment_version")
                 or resolve_downstream_assignment_version(store, database_name, job_id)
             ),
-            # The ATX store is JSON-only; the graph travels as a published artifact.
-            graph_fetcher=graph_transport.download_graph,
         )
         if rendered.errors:
             # render_deliverables already logged each failure's own detail
@@ -1427,14 +1422,13 @@ def _publish_synthesis_deliverables(job_id: str, database_name: str, payload: di
             # renderer's own logs (#146).
             failed = [err.split(":", 1)[0] for err in rendered.errors]
             logger.warning("ATX synthesis deliverables failed to render: %s", ", ".join(failed))
-        for d in rendered.items:
-            if d.stage:
-                binary = d.file_type == "PDF"
-                _stage_durable_copy(
-                    store,
-                    f"{base}/{d.filename}",
-                    d.content if binary else d.content.decode("utf-8"),
-                )
+        for entry, d in rendered.folder_files():
+            binary = d.file_type == "PDF"
+            _stage_durable_copy(
+                store,
+                folder_key(database_name, job_id, entry.filename),
+                d.content if binary else d.content.decode("utf-8"),
+            )
         # Register in the WebApp panel. CUSTOMER_OUTPUT is accepted from the agent
         # side (constraint C2, verified 2026-08-24).
         _artifacts.publish(

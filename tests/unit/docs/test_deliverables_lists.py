@@ -26,8 +26,6 @@ DOCUMENTED_FILES = {
     "assessment.pdf",
     "engineering-report.md",
     "assessment-data.json",
-    "decision-report.html",
-    "analysis-report.html",
     "index.md",
 }
 
@@ -103,6 +101,6 @@ def test_the_assessment_data_title_matches_what_the_reports_call_it() -> None:
     that name for assessment-data.json, so the pointer resolves."""
     entry = next(e for e in deliverables.FOLDER_ENTRIES if e.filename == "assessment-data.json")
     assert entry.title == "Assessment Data (JSON)"
-    for module in ("decision_report", "engineering_report", "close_calls", "unservable"):
+    for module in ("engineering_report", "close_calls", "unservable"):
         src = (REPO / "src" / "report" / f"{module}.py").read_text(encoding="utf-8")
         assert "Assessment Data (JSON)" in src, module

@@ -10,7 +10,7 @@ in `report.json`. The real ids would trip the secret scanners.
 |---|---|
 | `report.json` | The run's synthesis `report.json`, with ids aliased. |
 | `llm_input.json` | The run's synthesis `llm_input.json`, trimmed to `effective_architecture` minus `recommended_engine_by_table`. The judge doesn't use that field, and detect-secrets flags `wp_woocommerce_api_keys` in it. |
-| `*_decision-report_*.html`, `*_engineering-report_*.md` | The run's rendered deliverables, unchanged apart from the id aliases. |
+| `engineering-report.md` | The run's rendered engineering report, unchanged apart from the id aliases (the tests stage it in the job's `deliverables/` folder). |
 | `pdf-pages.json` | `judge.extract_pdf_pages` output (title and raw text per page) for the run's `summary-executive-report.pdf`. The 1.2 MB PDF itself isn't checked in. |
 | `assignment.json` | Reconstructed, because the headless run didn't keep its `assignment/v2/assignment.json`. See below. |
 

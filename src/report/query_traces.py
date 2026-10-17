@@ -1,7 +1,7 @@
-"""Per-query routing decisions (#339): the engineering report's appendix and
-the decision report's one-line pointer to it.
+"""Per-query routing decisions (#339): the appendix of the engineering report
+and the PDF report.
 
-Both format ``report.json``'s ``query_traces`` (the full trace of every query
+It formats ``report.json``'s ``query_traces`` (the full trace of every query
 whose routing has a story, from ``src.shared.query_trace``) and its figures,
 ``facts.query_trace`` (ADR-032): which queries are listed and why, how many
 were moved, tied or overridden, and how many stayed where their first
@@ -236,19 +236,3 @@ def query_traces_md(report: dict[str, Any]) -> list[str]:
         if row.get("in_full") and trace is not None:
             out += _trace_md(trace, row)
     return out
-
-
-def query_traces_pointer_html(report: dict[str, Any]) -> list[str]:
-    """Decision Report: one line pointing at the engineering report's appendix (#339)."""
-    facts = _trace_facts(report)
-    if facts is None or not facts.get("listed_query_count"):
-        return []
-    listed = int(facts.get("listed_query_count") or 0)
-    total = int(facts.get("traced_query_count") or 0)
-    return [
-        f"<p class=note data-figure=query-traces>{listed} of the {total} "
-        f"{escaping.html_text(plural_noun(total, 'query', 'queries'))} changed engine after "
-        "their first assignment, were tied at some step, or were placed by an override or a "
-        "listed rule; the Engineering Report's appendix gives every step and the reason for "
-        "each one.</p>"
-    ]

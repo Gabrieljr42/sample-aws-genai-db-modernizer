@@ -2,8 +2,7 @@
  * Renderers only format, JavaScript side (#748, ADR-032).
  *
  * Synthesis computes every customer-facing figure once into report.json's
- * `facts`; the UI and the interactive report read it (reportFacts.js) and
- * format it. This is the JavaScript twin of
+ * `facts`; the UI reads it (reportFacts.js) and formats it. This is the JavaScript twin of
  * tests/unit/report/test_renderers_only_format.py and follows the same rule:
  * no UI code counts, totals or does arithmetic on a figure the facts layer
  * owns.
@@ -50,10 +49,7 @@
  * Known limits, deliberately not traced: `%`, aliasing through a function
  * argument (a fact list handed to `count = xs => xs.length`, or any value that
  * crosses a function boundary under another name), a fact object held under a
- * name nothing taints (`Object.keys(fact).length`), and the strings of
- * ExportReport.js (the client script it embeds is guarded in its generated
- * form, src/report/templates/analysis_report.js, which
- * scripts/sync_report_template.py --check keeps equal to the source).
+ * name nothing taints (`Object.keys(fact).length`).
  */
 
 const fs = require('fs');
@@ -64,7 +60,6 @@ const t = require('@babel/types');
 const REPO = path.resolve(__dirname, '../../../../..');
 const UI_SRC = path.join(REPO, 'src', 'ui', 'src');
 const SNAPSHOT = path.join(REPO, 'tests', 'contract', 'schema_snapshot.json');
-const TEMPLATE_JS = path.join(REPO, 'src', 'report', 'templates', 'analysis_report.js');
 
 // report.json fields the facts are computed from: reading one is fine,
 // computing on it is the facts layer's job (same list as the Python guard).
@@ -95,12 +90,11 @@ const PRAGMA = /\/\/\s*facts:\s*presentation\b(?:\s*\(([^)]*)\))?/;
 const PINNED_EXEMPTIONS = new Set([]);
 
 // The files the guard covers: every non-test UI source file that renders or
-// reads report.json, plus the interactive report's generated client script.
+// reads report.json.
 // Files not listed here must not read an owned key (checked below).
 const GUARDED_UI_FILES = [
   'pages/AnalysisResults.js',
   'pages/JobMonitoringSummary.js',
-  'utils/ExportReport.js',
   'utils/reportFacts.js',
   'utils/riskAssessment.js',
   'utils/tcoAnalysis.js',
@@ -233,8 +227,8 @@ function calleeName(call) {
 }
 
 const STRING_CALLS = new Set([
-  'escapeHtml', 'String', 'join', 'toFixed', 'toLocaleString', 'toUpperCase', 'toLowerCase', 'slice',
-  'substring', 'charAt', 'trim', 'replace', 'jsArg', 'html', 't', 'jsonForScript',
+  'String', 'join', 'toFixed', 'toLocaleString', 'toUpperCase', 'toLowerCase', 'slice',
+  'substring', 'charAt', 'trim', 'replace', 't',
 ]);
 
 // A string, template, join or concatenation holding one: `+` on it formats.
@@ -513,9 +507,7 @@ function violationsIn(code, label) {
 }
 
 function guardedSources() {
-  const files = GUARDED_UI_FILES.map(f => [`src/ui/src/${f}`, `${UI_SRC}/${f}`]);
-  files.push(['src/report/templates/analysis_report.js', TEMPLATE_JS]);
-  return files;
+  return GUARDED_UI_FILES.map(f => [`src/ui/src/${f}`, `${UI_SRC}/${f}`]);
 }
 
 describe('renderers only format (#748, ADR-032)', () => {
@@ -570,10 +562,9 @@ describe('renderers only format (#748, ADR-032)', () => {
   });
 
   test('the wave-headline rule is not in any UI code: waves read facts.waves only', () => {
-    // #581 came back for old reports because ExportReport.js and the static
-    // HTML export (since removed) each subtracted table_owners from table_count. The
-    // inputs of that rule are read nowhere on the UI side now; the phrasing
-    // (waveTableStats) is reportFacts.js's, mirrored as text by the exporter.
+    // #581 came back for old reports because the HTML exports (since removed)
+    // each subtracted table_owners from table_count. The inputs of that rule are
+    // read nowhere on the UI side now.
     const withRule = guardedSources().filter(([, file]) => /table_owners|owned_counts_by_engine/.test(fs.readFileSync(file, 'utf8')));
     expect(withRule.map(([label]) => label)).toEqual([]);
   });
@@ -685,8 +676,6 @@ function render(synthesis, facts) {
     test.each([
       ['src/ui/src/pages/AnalysisResults.js', 'count: severityCount }', 'count: risksAtSeverity.length }'],
       ['src/ui/src/pages/AnalysisResults.js', 'count: resolvedRiskCountOf(synthesis, resolvedRisksList)', 'count: resolvedRisksList.length'],
-      ['src/report/templates/analysis_report.js', "' (' + openRiskCountAt(sev, risks) + ')", "' (' + risks.length + ')"],
-      ['src/report/templates/analysis_report.js', "resolvedRiskCount(resolvedRisks) + ' resolved", "resolvedRisks.length + ' resolved"],
       ['src/ui/src/utils/cacheLayer.js', 'finite(facts?.projected_monthly_cost_usd);', 'finite(facts?.projected_monthly_cost_usd) ?? items.reduce((s, cb) => s + cb.monthly_cost_usd, 0);'],
     ])('%s: %s is caught when it is a recomputation', (file, fact, recomputed) => {
       const real = fs.readFileSync(`${REPO}/${file}`, 'utf8');

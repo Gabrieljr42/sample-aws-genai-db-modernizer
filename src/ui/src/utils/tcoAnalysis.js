@@ -8,10 +8,9 @@
  *
  * Since #380, `tco_analysis.current_cost_known` says which case it is.
  * `isCostBaselineUnknown` matches `src/report/formatting.py::_cost_baseline_text`
- * exactly (#334 review) -- the one rule every deliverable (the decision and
- * engineering reports there; this UI, its HTML export, and
- * `analysis_report.py::_interactive_cost_baseline_stats` here) shares, so
- * none of them can disagree on the same report: unknown when
+ * exactly (#334 review) -- the one rule every deliverable (the engineering
+ * and PDF reports there, this UI here) shares, so none of them can disagree
+ * on the same report: unknown when
  * `current_cost_known` is `false`, or it is missing/`null` and
  * `current_monthly_cost` is falsy (covers a report written before
  * `current_cost_known` existed whose `current_monthly_cost` is still a
@@ -44,9 +43,7 @@ export function formatCurrentCostStat(value) {
 /**
  * `{ known, currentCostStat, savingsStat }` for `tco_analysis`: the formatted
  * current-cost/savings text when there is a real baseline, or `null`s (so the
- * caller supplies its own "unknown" wording -- translated in the React page,
- * a fixed English string in the i18n-exempt standalone HTML export) when
- * there is not.
+ * caller supplies its own translated "unknown" wording) when there is not.
  */
 export function costBaselineStats(tco) {
   const known = !isCostBaselineUnknown(tco);

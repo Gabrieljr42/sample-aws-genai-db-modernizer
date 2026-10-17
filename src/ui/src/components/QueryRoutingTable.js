@@ -164,6 +164,7 @@ const QueryRoutingTable = memo(({ rows, loading, error, hasLedger, truncated, on
                   nextPageLabel: t('analysis-results.query-routing.next-page'),
                   previousPageLabel: t('analysis-results.query-routing.previous-page'),
                   pageLabel: n => t('analysis-results.query-routing.page', { page: n }),
+                  paginationLabel: t('analysis-results.query-routing.pagination'),
                 }}
                 currentPageIndex={currentPage}
                 pagesCount={pagesCount}

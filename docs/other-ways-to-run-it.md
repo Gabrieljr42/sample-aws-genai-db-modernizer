@@ -74,7 +74,7 @@ Claude Code is the main way to run the tool, but the pipeline itself is a set of
 `run_assessment.py --all` (in `--llm-mode none` and `bedrock` alike) ends with the same render step `/modernize` runs, `scripts/run_report.py`. It writes the deliverables into one folder, under the same names every time:
 
 <!-- deliverables-list -->
-`artifacts/<db>/<job>/deliverables/` holds `assessment.pdf` (executive summary), `engineering-report.md` (engineering report), `assessment-data.json` (Assessment Data, JSON), `decision-report.html` (decision report), `analysis-report.html` (interactive analysis report), and `index.md`, which lists who each file is for and the assignment version.
+`artifacts/<db>/<job>/deliverables/` holds `assessment.pdf` (executive summary), `engineering-report.md` (engineering report), `assessment-data.json` (Assessment Data, JSON), and `index.md`, which lists who each file is for and the assignment version.
 <!-- /deliverables-list -->
 
 To render them again for a finished job, for example after an edit made a new assignment version:
@@ -83,7 +83,7 @@ To render them again for a finished job, for example after an edit made a new as
 uv run python scripts/run_report.py --job-id <job_id> --db <db_name>
 ```
 
-The folder always holds the latest assignment version. `--assignment-version N` renders an older version next to its own report and leaves the folder as it is. See [Understand the results](understand-the-results.md) for what each file shows.
+The folder always holds the latest assignment version; an older version's `report.json` stays in its own synthesis folder, and `run_report.py` renders only the latest. See [Understand the results](understand-the-results.md) for what each file shows.
 
 ## Analyzing your own database
 

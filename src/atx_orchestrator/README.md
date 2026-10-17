@@ -42,7 +42,8 @@ orchestrator (AGENT_TYPE=orchestrator)
      ├─► schema            (AGENT_TYPE=schema): one agent, invoked once per target
      │        engine IN PARALLEL → schema-<engine>/v{N}/schema_output.json
      │
-     └─► referee-synthesis → synthesis/v{N}/report.json (+ Decision & Engineering reports)
+     └─► referee-synthesis → synthesis/v{N}/report.json; the PDF, Engineering report and
+              assessment data → deliverables/ (latest version)
 
 Re-entry (ADR-029, after a report exists): reopen_assignment_review → finalize the
 edit → redispatch_after_reroute re-runs ONLY the engines whose routing changed
@@ -92,9 +93,9 @@ The current shape of this integration is recorded in `docs/architecture/decision
 | `runtime/hitl.py` | Human-in-the-loop transport for the detailed routing-review table |
 | `runtime/artifacts.py` | Artifacts-panel publishing |
 | `src/report/deliverables.py` | Shared entry point: renders every customer deliverable from one synthesis report |
-| `src/report/analysis_report.py`, `pdf_report.py` | Report renderers (analysis HTML, executive PDF) |
+| `src/report/engineering_report.py`, `pdf_report.py` | Report renderers (engineering Markdown, PDF report) |
 | `runtime/store.py` | Transform storage subclasses (adds `write_text`) |
-| `src/report/assets/`, `src/report/templates/` | Report template + static assets |
+| `src/report/assets/` | PDF report fonts |
 | `requirements.txt` | Container Python deps (SDK + project runtime deps) |
 
 ## Environment variables

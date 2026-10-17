@@ -20,7 +20,7 @@ Single source of truth for both halves of that fix:
   prints once, at the figure's first appearance.
 
 Mirrored by hand in ``src/ui/src/utils/workloadFitLabels.js`` (imported by
-``ExportReport.js``'s standalone export and the live React results page) the same
+the live React results page) the same
 way ``src/shared/engine_names.py`` is mirrored by ``engineNames.js`` --
 ``tests/unit/report/test_workload_fit_labels_js_sync.py`` parses that file and
 fails if the two drift.

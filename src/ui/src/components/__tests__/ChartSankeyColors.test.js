@@ -13,8 +13,7 @@ const DEFAULT_NODE_COLOR = '#0972D3';
 
 // The colour AssignmentGate.js already uses for both Aurora engines
 // (ENGINE_COLORS aurora_mysql / aurora_postgresql bg). This is the palette the
-// issue thread settled on: the export's indigo shades belong to its single-colour
-// report design, while the live pages share #9c5700.
+// issue thread settled on: the live pages share #9c5700.
 const LIVE_UI_AURORA = '#9c5700';
 
 let container, root;

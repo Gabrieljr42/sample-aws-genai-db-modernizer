@@ -61,9 +61,7 @@ export function ownerDistribution(distribution, hasOverlay) {
  * Only filters when `hasOverlay` is true (#405), mirroring `ownerDistribution`:
  * a legacy report has no `cache_overlay` at all, so ElastiCache is still a real
  * owner there and its schema design's access patterns are owned workload, not a
- * cache layer's. Without this guard, a legacy report would disagree with
- * src/report/analysis_report.py, which only strips a design when
- * `cache_overlay.engine` names it.
+ * cache layer's. A design is only stripped when `cache_overlay.engine` names it.
  */
 export function ownerSchemaDesigns(designs, hasOverlay) {
   const list = designs || [];
@@ -134,11 +132,8 @@ export function targetEngineEntries(afterDist, cacheOverlay) {
 /**
  * Whether a `tco_analysis.cost_breakdown` entry's database should keep a cost
  * card: it's either a workload owner (present in `afterDist`) or the
- * cache_overlay's engine. Pulled out of `resolveCostBreakdown` (#358) so the
- * standalone "Export to HTML" script -- which has no bundler at run time and
- * so can't import this module -- can mirror the exact same expression inline
- * (see `src/ui/src/utils/ExportReport.js`'s `KEEP_COST_CARD_EXPR`) and a test
- * can assert the two agree.
+ * cache_overlay's engine. Pulled out of `resolveCostBreakdown` (#358) so a
+ * test can pin it.
  */
 export function isKeptCostEngine(database, afterDist, cacheEngine) {
   return afterDist?.[database] != null || database === cacheEngine;
@@ -155,7 +150,7 @@ export function isKeptCostEngine(database, afterDist, cacheEngine) {
  * This keeps a cost card for every owner plus the cache_overlay engine (if
  * any), and always reports the artifact's own `projected_monthly_cost` as the
  * total -- never a sum recomputed from a filtered subset -- so the figure
- * matches the decision report and chat (one source of truth in report.json).
+ * matches the PDF report and chat (one source of truth in report.json).
  * Falls back to `facts.projected_monthly_cost_usd` when
  * `projected_monthly_cost` is missing (older artifacts predating that field):
  * the facts layer sums the same kept engines once (ADR-032, #748), so this

@@ -12,6 +12,6 @@ from src.report import pdf_report
 
 def pdf_text(report: dict[str, Any], **kwargs: Any) -> str:
     """Render ``report`` to the PDF and return its text with whitespace collapsed."""
-    data = pdf_report.render_executive_summary_pdf(report, None, **kwargs)
+    data = pdf_report.render_executive_summary_pdf(report, **kwargs)
     reader = PdfReader(io.BytesIO(data))
     return " ".join(" ".join((p.extract_text() or "").split()) for p in reader.pages)

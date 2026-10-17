@@ -109,43 +109,6 @@ _SUGGESTED_PATH_NOTE = (
 )
 
 
-def _roadmap_html(report: dict[str, Any]) -> list[str]:
-    """Decision Report "Migration roadmap" section (#225): one short card per wave.
-
-    #321: the roadmap is one suggested adoption path, not the only one -- the
-    section says so, and points at the direct, single-step alternative (the
-    target architecture already shown above).
-    """
-    esc = escaping.html_text
-    waves = resolve_migration_waves(report)
-    if not waves:
-        return []
-    pointer = "the target architecture in Recommended architecture above"
-    out = [
-        "<h2 class=section-title>Migration roadmap</h2>",
-        f"<p class=note>{_SUGGESTED_PATH_NOTE.format(pointer=pointer)}</p>",
-        "<div class=card><div class=card-b>",
-    ]
-    facts = _facts_by_wave(report)
-    for w in waves:
-        names = ", ".join(esc(display_engine(e)) for e in w.get("engines") or [])
-        count_phrase, table_bit = _wave_headline_stats(w, facts.get(int(w.get("wave") or 0)))
-        # `names` is already escaped; escaping it again (via `esc(title or names)`) would
-        # double-escape it when the title is missing (#225).
-        title_html = esc(w["title"]) if w.get("title") else names
-        wave_no = esc(str(w.get("wave") or ""))
-        out.append(
-            f'<p data-wave="{escaping.html_attr(str(w.get("wave") or ""))}">'
-            f"<b>Wave {wave_no}: {title_html}</b> — "
-            f"<span data-figure=wave-stats>{esc(count_phrase)}{esc(table_bit)}</span>. "
-            f"{esc(w.get('rationale') or '')}</p>"
-        )
-        if w.get("gate"):
-            out.append(f"<p class=note>Gate: {esc(w['gate'])}</p>")
-    out.append("</div></div>")
-    return out
-
-
 # Readable labels for a TableGroup's "kind" (#225): the raw contract value is
 # snake_case for machine consumers, never shown verbatim to a reader.
 _GROUP_KIND_LABELS = {"co_dependency": "co-dependency", "independent": "independent"}

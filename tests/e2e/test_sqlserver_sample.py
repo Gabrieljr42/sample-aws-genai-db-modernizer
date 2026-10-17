@@ -170,13 +170,11 @@ def test_every_deliverable_source_carries_the_same_choice(trailgear_run: Pipelin
         "in total adjusted query fit; tipped by JSON usage, MERGE statements, multiple "
         "schemas, sequences"
     ).format(**report["assignment_summary"]["aurora_engine_choice"]["totals"])
-    decision = trailgear_run.html("decision-report").read_text()
-    engineering = next(
-        Path(p)
-        for p in trailgear_run.report["paths"]
-        if "_engineering-report_" in p and p.endswith(".md")
-    ).read_text()
-    assert sentence in decision
+    from tests.e2e.deliverable_figures import pdf_page_texts
+
+    pdf = " ".join(pdf_page_texts(str(trailgear_run.deliverable("assessment.pdf"))))
+    engineering = trailgear_run.deliverable("engineering-report.md").read_text()
+    assert " ".join(sentence.split()) in pdf
     assert sentence in engineering
 
 
@@ -324,7 +322,13 @@ def test_the_reality_check_resolves_the_documentdb_ties(trailgear_run: PipelineR
     assert {t["query_id"] for t in report["tied_queries"]} == {
         _qid(trailgear_run, text) for text in final_ties
     }
-    assert "Pending engine choices" in trailgear_run.html("decision-report").read_text()
+    # #987: the open ties are stated in the engineering report and the PDF report.
+    from tests.e2e.deliverable_figures import pdf_page_texts
+
+    n = len(final_ties)
+    heading = f"Unresolved engine ties ({n} {'query' if n == 1 else 'queries'})"
+    assert heading in trailgear_run.deliverable("engineering-report.md").read_text()
+    assert heading in " ".join(pdf_page_texts(str(trailgear_run.deliverable("assessment.pdf"))))
 
 
 # ---------------------------------------------------------------------------

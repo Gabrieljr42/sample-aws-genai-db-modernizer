@@ -28,6 +28,8 @@ function AppHeader() {
           type: 'button',
           iconName: isDark ? 'star' : 'star-filled',
           title: isDark ? 'Switch to light theme' : 'Switch to dark theme',
+          // An icon-only utility: the accessible name is the same text (axe: aria-command-name).
+          ariaLabel: isDark ? 'Switch to light theme' : 'Switch to dark theme',
           onClick: toggleTheme,
         },
       ]}

@@ -48,7 +48,7 @@ def _role(name: str, run: PipelineResult) -> str:
 def _views(run: PipelineResult) -> dict[str, list[tuple[str, str]]]:
     """role -> comparable (part name, masked text) pairs for every deliverable."""
     out: dict[str, list[tuple[str, str]]] = {}
-    paths = [Path(p) for p in run.report.get("paths", [])]
+    paths = [Path(p) for p in run.report.get("deliverables", [])]
     assert paths, "the report step produced no deliverables"
     for p in paths:
         data = p.read_bytes()

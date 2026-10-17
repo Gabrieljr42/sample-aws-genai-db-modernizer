@@ -70,7 +70,7 @@ def picked(run: PipelineResult, tmp_path_factory: pytest.TempPathFactory) -> dic
         "picks": picks,
         "customer_version": result.assignment.version,
         "report": json.loads((root / report_step["report"]).read_text()),
-        "paths": report_step.get("paths", []),
+        "deliverables": report_step.get("deliverables", []),
     }
 
 
@@ -78,7 +78,7 @@ def picked(run: PipelineResult, tmp_path_factory: pytest.TempPathFactory) -> dic
 def test_synthesis_and_reports_finish_after_a_customer_pick(picked: dict) -> None:
     report = picked["report"]
     assert report["assignment_summary"]["version"] >= picked["customer_version"]
-    assert any(p.endswith(".html") for p in picked["paths"])
+    assert any(p.endswith("/assessment.pdf") for p in picked["deliverables"])
     # Every pinned engine stays in the plan: a pin is the customer's choice.
     owners = {r["target"] for r in report["ranking"] if r.get("role") != "cache_layer"}
     assert set(picked["picks"]) <= owners
