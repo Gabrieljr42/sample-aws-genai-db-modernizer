@@ -46,7 +46,13 @@ from functools import cached_property, lru_cache
 from src.shared.sql_comments import strip_leading_comments
 from src.shared.unsupported_pattern import is_dedup_only_group_by, strip_comments_and_literals
 from src.tools.sql.facade import AccessFacts, SqlFacts, query_readings
-from src.tools.sql.regex_facts import WildcardLike, regex_range_predicate, scan_sql
+from src.tools.sql.regex_facts import (
+    SELECT_WORD_RE,
+    WildcardLike,
+    has_match_against,
+    regex_range_predicate,
+    scan_sql,
+)
 
 __all__ = ["QueryFacts", "WildcardLike", "query_facts", "scan_sql", "source_engine_of"]
 
@@ -162,9 +168,11 @@ _COMPUTED_EXPR_IN_CONDITION_RE = re.compile(
 # Writes
 # ---------------------------------------------------------------------------
 
-_WRITE_WITH_SUBQUERY_RE = re.compile(
-    r"\b(INSERT|UPDATE|DELETE)\b.*\bSELECT\b", re.IGNORECASE | re.DOTALL
-)
+# ``INSERT``/``UPDATE``/``DELETE`` followed later by ``SELECT`` (``SELECT_WORD_RE``):
+# two scans, the second from where the first write word ends. One regex
+# (``\b(INSERT|UPDATE|DELETE)\b.*\bSELECT\b``, DOTALL) answered the same but retried
+# the rest of the text from every write word, quadratic on many of them (#902).
+_WRITE_WORD_RE = re.compile(r"\b(?:INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -272,9 +280,24 @@ _ON_CONFLICT_OR_RETURNING_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 _NEGATION_WORD_RE = re.compile(r"\b(not\s+in|not\s+exists|<>|!=)\b", re.I)
-_CORRELATED_SUBQUERY_SHAPE_RE = re.compile(
-    r"\(\s*select\b.*?\bwhere\b.*?\b\w+\.\w+\s*=\s*\w+\.\w+", re.I | re.S
-)
+# ``( SELECT``, then a later ``WHERE``, then a later ``a.b = c.d``: three scans, each
+# from where the one before ended (:func:`_has_correlated_subquery_shape`). One regex
+# with two lazy gaps (``re.S``) answered the same but was roughly cubic on many
+# uncorrelated subqueries (#902).
+_SUBQUERY_SELECT_RE = re.compile(r"\(\s*select\b", re.I)
+_SUBQUERY_WHERE_RE = re.compile(r"\bwhere\b", re.I)
+_QUALIFIED_EQUALITY_RE = re.compile(r"\b\w+\.\w+\s*=\s*\w+\.\w+", re.I)
+
+
+def _has_correlated_subquery_shape(text: str) -> bool:
+    """``( SELECT ... WHERE ... a.b = c.d`` in linear time: the earliest ``( SELECT``
+    and the earliest ``WHERE`` after it leave the most text for the next scan, so
+    they decide."""
+    select = _SUBQUERY_SELECT_RE.search(text)
+    if select is None:
+        return False
+    where = _SUBQUERY_WHERE_RE.search(text, select.end())
+    return where is not None and _QUALIFIED_EQUALITY_RE.search(text, where.end()) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -430,8 +453,10 @@ _STRING_LITERAL_RE = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
 # not just an ordinary equality/range WHERE clause. Required before ranking,
 # fuzzy matching or facets are even considered -- a bare GROUP BY, or a
 # to_tsvector() call with no @@ match, is not a search at all (see below).
+# A MySQL ``MATCH (...) AGAINST (`` is a search predicate too
+# (``regex_facts.has_match_against``, a linear scan, #902).
 _SEARCH_PREDICATE_RE = re.compile(
-    r"\b(like|ilike)\b|match\s*\(.+?\)\s*against\s*\(|to_tsquery\s*\(|"
+    r"\b(like|ilike)\b|to_tsquery\s*\(|"
     r"plainto_tsquery\s*\(|@@|similarity\s*\(|word_similarity\s*\(",
     re.IGNORECASE,
 )
@@ -439,10 +464,10 @@ _SEARCH_PREDICATE_RE = re.compile(
 # Relevance ranking: an actual full-text match operation. to_tsvector() alone
 # (document construction, e.g. CREATE EXTENSION's companion index build, or a
 # plain SELECT to_tsvector(...) with no @@) does not count -- only a real
-# match (the @@ operator, or constructing the query side with to_tsquery/
-# plainto_tsquery) does.
+# match (the @@ operator, constructing the query side with to_tsquery/
+# plainto_tsquery, or a MySQL ``MATCH (...) AGAINST (``) does.
 _RELEVANCE_RANKING_RE = re.compile(
-    r"match\s*\(.+?\)\s*against\s*\(|to_tsquery\s*\(|plainto_tsquery\s*\(|@@",
+    r"to_tsquery\s*\(|plainto_tsquery\s*\(|@@",
     re.IGNORECASE,
 )
 
@@ -479,9 +504,9 @@ def _has_search_depth(query_text: str, group_by: bool) -> bool:
     # Each regex below needs a literal word or symbol; a substring test on the lower-cased
     # text (C speed) skips the regex on the long queries that have none of them.
     lower = text.lower()
-    if any(word in lower for word in ("against", "tsquery", "@@")) and _RELEVANCE_RANKING_RE.search(
-        text
-    ):
+    if any(word in lower for word in ("tsquery", "@@")) and _RELEVANCE_RANKING_RE.search(text):
+        return True
+    if "against" in lower and has_match_against(text):
         return True
     if ("similarity" in lower or "%" in lower) and _FUZZY_MATCH_RE.search(text):
         return True
@@ -797,7 +822,8 @@ class QueryFacts:
     @cached_property
     def write_with_subquery(self) -> bool:
         """``INSERT``/``UPDATE``/``DELETE`` followed later by ``SELECT``."""
-        return bool(_WRITE_WITH_SUBQUERY_RE.search(self._text))
+        write = _WRITE_WORD_RE.search(self._text)
+        return write is not None and SELECT_WORD_RE.search(self._text, write.end()) is not None
 
     @cached_property
     def exists_or_in_subquery(self) -> bool:
@@ -860,7 +886,7 @@ class QueryFacts:
     @cached_property
     def correlated_subquery_shape(self) -> bool:
         """``( SELECT ... WHERE ... a.b = c.d``."""
-        return bool(_CORRELATED_SUBQUERY_SHAPE_RE.search(self._text))
+        return _has_correlated_subquery_shape(self._text)
 
     @cached_property
     def comma_count(self) -> int:

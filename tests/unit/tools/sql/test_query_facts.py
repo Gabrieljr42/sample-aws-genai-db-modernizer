@@ -443,11 +443,10 @@ _DOCUMENTDB_ONLY_FACTS = frozenset(
 
 
 def test_a_fact_is_computed_only_when_read(monkeypatch):
-    class _NeverSearched:
-        def search(self, _text):
-            raise AssertionError("the correlated-subquery shape was computed")
+    def _never_scanned(_text):
+        raise AssertionError("the correlated-subquery shape was computed")
 
-    monkeypatch.setattr(query_facts_module, "_CORRELATED_SUBQUERY_SHAPE_RE", _NeverSearched())
+    monkeypatch.setattr(query_facts_module, "_has_correlated_subquery_shape", _never_scanned)
     text = _uncorrelated_subqueries(2_000) + " -- lazy"
     _read_non_documentdb_facts(text)
     with pytest.raises(AssertionError, match="correlated-subquery shape"):
