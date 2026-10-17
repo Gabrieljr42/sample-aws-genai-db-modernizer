@@ -1203,8 +1203,9 @@ class TestTextSearchCapabilityScopedPenalty:
         assert q1.assigned_engine == "documentdb"
         # unpenalized -- documentdb is exempt from wildcard-search: its base score, 65.
         # #494: the cost dimension is the query's own, DocumentDB's $200 standing cost
-        # carried by the workload's one query: 100 * 100 / (100 + 200) = 33.
-        assert q1.confidence == int(0.45 * 45 + 0.25 * 100 + 0.15 * 100 + 0.15 * 33)
+        # carried by the workload's one query: 100 * 100 / (100 + 200) = 33. DocumentDB's
+        # weights are 48/26/16/10 since #1002 (ADR-031 Decision 5 Amendment 8).
+        assert q1.confidence == int(0.48 * 45 + 0.26 * 100 + 0.16 * 100 + 0.10 * 33)
         assert "documentdb lacks required capability" not in q1.assignment_reason
         # #493: the reason is the substring-match pattern's, the more specific one for a
         # literal leading wildcard -- here a word search, so not penalised, with the redesign.
@@ -1249,7 +1250,7 @@ class TestTextSearchCapabilityScopedPenalty:
         q1 = next(qa for qa in result.query_assignments if qa.query_id == "q1")
         assert q1.assigned_engine == "documentdb"
         # unpenalized; #494: the query's own cost on DocumentDB, as above (33).
-        assert q1.confidence == int(0.45 * 75 + 0.25 * 100 + 0.15 * 100 + 0.15 * 33)
+        assert q1.confidence == int(0.48 * 75 + 0.26 * 100 + 0.16 * 100 + 0.10 * 33)
         assert "runs this search pattern natively" in q1.assignment_reason
 
 

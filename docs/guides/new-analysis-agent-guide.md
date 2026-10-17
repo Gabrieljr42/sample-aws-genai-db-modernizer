@@ -113,16 +113,11 @@ Anti-patterns are concerns, not blockers. Each has a severity and guidance:
 
 ### Score weights (per-target configurable)
 
-Each catalog defines its own score dimension weights. Defaults:
+Each engine's score dimension weights are catalog data: its engine file's `[score_weights.<profile>]` tables (`src/catalog/engines/<engine>.toml`), the first profile the engine's default. An engine with none uses the 40/30/20/10 default. The current values are in the generated [rule catalog](../architecture/rule-catalog.md#score-weights).
 
-| Dimension | Default | DynamoDB | Redis |
-|-----------|---------|----------|-------|
-| pattern_match_score | 40% | 50% | 40% |
-| complexity_score | 30% | 25% | 20% |
-| performance_score | 20% | 15% | 30% |
-| cost_score | 10% | 10% | 10% |
+Every engine gives cost the same weight, 10% (ADR-031 Decision 5, #1002); the catalog loader rejects a file that differs. A new engine may balance the other three dimensions its own way, as long as the four sum to 1.
 
-Weights are defined in the catalog module and passed to the scoring layer. They are not hardcoded in `scoring.py`.
+The analysis module reads its weights from the catalog (`src.shared.catalog.score_weights("<engine>")`) and passes them to the scoring layer. They are not hardcoded in `scoring.py`.
 
 ---
 
@@ -501,7 +496,7 @@ After your agent is working:
 
 - [ ] Define pattern catalog with specialist-assigned base scores
 - [ ] Define anti-pattern catalog with severity and guidance
-- [ ] Define target-specific score weights
+- [ ] Add the engine's `[score_weights]` to its engine file (cost at the common 10%)
 - [ ] Implement per-query pattern detection (`analyze_<target>_use_cases()`)
 - [ ] Implement scoring adjustments (`_apply_<target>_adjustments()`)
 - [ ] Implement cost estimation (`estimate_<target>_costs()`)
@@ -525,7 +520,7 @@ Decisions made for the analysis agent framework (March 2026):
 |----------|--------|-----------|
 | Workload segment definition | Per-pattern grouping | Simple, deterministic. One pattern = one segment. Can add human-defined templates later. |
 | Table grouping (aggregates) | Implemented in Phase 1 | `identify_aggregates()` in `scoring.py` is engine-agnostic (FK + co-access). Optional per agent — skip for targets where tables migrate independently. |
-| Score weights | Per-target configurable | Each catalog defines its own weights. DynamoDB: 50/25/15/10. Redis: 40/20/30/10. |
+| Score weights | Per-target configurable | Superseded: the weights are catalog data in each engine file, with cost at 10% for every engine (#1002); current values in the [rule catalog](../architecture/rule-catalog.md#score-weights). |
 | Fixture reuse | Vertical fixtures shared, per-pattern fixtures agent-specific | Reduces duplication. Synthetic generator for initial development. |
 | LLM detection | Phase 1 (in progress) | Deterministic first. LLM advisor as optional second pass via Strands SDK. DynamoDB is the first target; pattern is reusable. |
 | Decision trace | Required for all agents | Separate S3 artifact, not part of agent contract. Target-specific detection internals recorded here. |

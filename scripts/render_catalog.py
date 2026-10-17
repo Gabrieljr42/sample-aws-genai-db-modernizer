@@ -28,7 +28,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.report.escaping import md_cell, md_text  # noqa: E402
-from src.shared.catalog import ACTIVE, CatalogError, EngineEntry, engine_ids, engines  # noqa: E402
+from src.shared.catalog import (  # noqa: E402
+    ACTIVE,
+    SCORE_DIMENSIONS,
+    CatalogError,
+    EngineEntry,
+    default_score_weights,
+    engine_ids,
+    engines,
+)
 from src.shared.catalog.patterns import (  # noqa: E402
     PENALTY_POINTS,
     EngineSupport,
@@ -139,6 +147,22 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
             f"| {md_cell(e.display_name)} | `{e.id}` | {status} | {e.role} | "
             f"{'yes' if e.system_of_record else 'no'} |"
         )
+    out += [
+        "",
+        "## Score weights",
+        "",
+        "How each engine weighs a query's four score dimensions (ADR-031 Decision 5), from "
+        "its `[score_weights.<profile>]` tables; the first profile is the engine's default, "
+        "and an engine with none uses the default split. Every engine gives cost the same "
+        "weight (#1002).",
+        "",
+        "| Engine | Profile | Pattern match | Complexity | Performance | Cost |",
+        "|---|---|---|---|---|---|",
+    ]
+    weighted = [(e.display_name, name, w) for e in entries for name, w in e.score_weights.items()]
+    for label, name, w in [*weighted, ("Any other engine", "default", default_score_weights())]:
+        shares = " | ".join(f"{round(w[d] * 100)}%" for d in SCORE_DIMENSIONS)
+        out.append(f"| {md_cell(label)} | {name} | {shares} |")
     out += [
         "",
         "## Pattern x engine matrix",

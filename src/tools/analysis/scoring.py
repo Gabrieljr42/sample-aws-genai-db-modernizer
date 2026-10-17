@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from itertools import combinations
 
 from src.contracts.analysis_output import MigrationComplexity, ScoreBreakdown, WorkloadAnalysis
+from src.shared.catalog import default_score_weights
 
 
 @dataclass
@@ -306,13 +307,9 @@ def _cost(p: TableProfile) -> int:
     return max(0, min(score, 100))
 
 
-# Default score weights (used by Redis and as fallback)
-DEFAULT_WEIGHTS: dict[str, float] = {
-    "pattern_match": 0.4,
-    "complexity": 0.3,
-    "performance": 0.2,
-    "cost": 0.1,
-}
+# Default score weights (used by Redis and as fallback): the catalog's default split
+# (ADR-031 Decision 5).
+DEFAULT_WEIGHTS: dict[str, float] = default_score_weights()
 
 
 def compute_confidence(scores: ScoreBreakdown, weights: dict[str, float] | None = None) -> int:

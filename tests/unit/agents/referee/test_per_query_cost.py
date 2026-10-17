@@ -312,6 +312,95 @@ class TestTheQuerysOwnTrafficDrivesItsVariableCost:
 # ---------------------------------------------------------------------------
 
 
+class TestAnEqualCostEarnsEqualCostPoints:
+    """ADR-031 Decision 5 (#1002): every engine weights cost the same, so two engines
+    whose cost score for a query is equal get the same points for it from the scorer."""
+
+    @pytest.mark.parametrize("cost", [0, 50, 96, 100])
+    def test_two_engines_with_the_same_cost_get_the_same_cost_points(self, cost, monkeypatch):
+        from src.agents.referee import query_scoring
+
+        ctx = _ctx(SOR_ENGINES, LOOKUP)
+        monkeypatch.setattr(ScoringContext, "cost_score", lambda self, query, engine: cost)
+        points: dict[str, set[float]] = {}
+        real = query_scoring.compute_confidence
+
+        def spy(scores, weights=None):
+            points.setdefault(current, set()).add(scores.cost_score * weights["cost"])
+            return real(scores, weights)
+
+        monkeypatch.setattr(query_scoring, "compute_confidence", spy)
+        for current in SOR_ENGINES:
+            score_query_for_engine(LOOKUP, current, ctx)
+        assert set(points) == set(SOR_ENGINES)
+        assert len(set().union(*points.values())) == 1, points
+
+    def test_the_engines_weight_sets_still_differ_on_the_other_dimensions(self):
+        """The guard above is not vacuous: the engines' own weight sets still differ on the
+        other three dimensions."""
+        assert len({tuple(sorted(weight_profiles(e)[0].items())) for e in SOR_ENGINES}) > 1
+
+
+# DynamoDB's and DocumentDB's weights before #1002, as a saved job's analysis used them.
+PRE_1002_WEIGHTS = {
+    "dynamodb": {"pattern_match": 0.60, "complexity": 0.20, "performance": 0.05, "cost": 0.15},
+    "documentdb": {"pattern_match": 0.45, "complexity": 0.25, "performance": 0.15, "cost": 0.15},
+}
+
+
+class TestASavedPre1002AnalysisStillRoutes:
+    """An ``analysis.json`` written before #1002 stored confidences computed with the old
+    weights. It still loads and routes; routing applies the catalog's current weights to
+    its stored dimensions, not the weights its stored confidence used."""
+
+    @staticmethod
+    def _saved(engine):
+        breakdown = {
+            "pattern_match_score": 80,
+            "complexity_score": 80,
+            "performance_score": 60,
+            "cost_score": 70,
+        }
+        old = compute_confidence(ScoreBreakdown(**breakdown), PRE_1002_WEIGHTS[engine])
+        recs = [
+            {"table_id": t, "confidence_score": old, "score_breakdown": dict(breakdown)}
+            for t in ("d.topics", "d.categories")
+        ]
+        return {
+            "table_recommendations": recs,
+            "workload_analysis": {"patterns_detected": [], "anti_patterns_detected": []},
+        }
+
+    @pytest.mark.parametrize("engine", sorted(PRE_1002_WEIGHTS))
+    def test_it_is_scored_with_the_catalogs_current_weights(self, engine):
+        ctx = ScoringContext.from_pipeline({engine: self._saved(engine)}, None, _collector(LOOKUP))
+        assert ctx.pattern_model.weights[(engine, "d.topics")] == catalog.score_weights(engine)
+        dims = {
+            "pattern_match_score": ctx.pattern_model.pattern_score(LOOKUP, engine),
+            "complexity_score": 80,
+            "performance_score": 60,
+            "cost_score": ctx.cost_score(LOOKUP, engine),
+        }
+        now = compute_confidence(ScoreBreakdown(**dims), catalog.score_weights(engine))
+        then = compute_confidence(ScoreBreakdown(**dims), PRE_1002_WEIGHTS[engine])
+        assert now != then, "the fixture must tell the two weight sets apart"
+        assert score_query_for_engine(LOOKUP, engine, ctx).score == now
+
+    def test_the_resolver_routes_it(self):
+        analysis = {e: self._saved(e) for e in sorted(PRE_1002_WEIGHTS)}
+        ctx = ScoringContext.from_pipeline(analysis, None, _collector(LOOKUP))
+        best = max(
+            sorted(PRE_1002_WEIGHTS), key=lambda e: score_query_for_engine(LOOKUP, e, ctx).score
+        )
+        triage = {
+            "selected_agents": [{"agent_type": e} for e in sorted(PRE_1002_WEIGHTS)],
+            "signals": [],
+        }
+        result = AssignmentResolver().resolve(triage, analysis, _collector(LOOKUP))
+        (qa,) = result.query_assignments
+        assert qa.assigned_engine == best
+
+
 class TestTheScorerUsesTheQuerysCost:
     @pytest.mark.parametrize("engine", SOR_ENGINES)
     def test_the_cost_dimension_replaces_the_tables_cost_and_keeps_the_weights(self, engine):

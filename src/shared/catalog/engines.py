@@ -43,12 +43,21 @@ Fields:
   the engine's buffer cache is not billed. The per-query cost dimension
   (``src.agents.referee.query_cost``, #494) and the cost estimates read them. An engine
   with no ``pricing`` table gets the ``EnginePricing`` defaults.
+- ``score_weights`` (optional, #1002): the engine's score-dimension weights (ADR-031
+  Decision 5), one ``[score_weights.<profile>]`` table per weight profile, each giving
+  ``pattern_match``, ``complexity``, ``performance`` and ``cost`` and summing to 1. The
+  first profile is the engine's default; OpenSearch has a second one for time-series
+  tables. An engine with no ``score_weights`` uses ``DEFAULT_SCORE_WEIGHTS``. Every
+  profile of every engine, and the default, gives cost the same weight (maintainer
+  decision, #1002): the cost dimension is per query and engine-aware, so a per-engine
+  cost weight would only add a flat bonus. The loader rejects a catalog where they differ.
 """
 
 from __future__ import annotations
 
+import math
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from functools import cache
 from pathlib import Path
 from typing import Literal
@@ -64,6 +73,15 @@ EngineRole = Literal[
 # The colour names the UI's badge component accepts.
 BadgeColor = Literal["blue", "grey", "green", "red"]
 _HEX = r"^#[0-9A-Fa-f]{6}$"
+# The four score dimensions a weight profile weighs (ADR-031 Decision 5).
+SCORE_DIMENSIONS = ("pattern_match", "complexity", "performance", "cost")
+# The split an engine with no ``score_weights`` uses (ADR-031 Decision 5's default).
+DEFAULT_SCORE_WEIGHTS: Mapping[str, float] = {
+    "pattern_match": 0.40,
+    "complexity": 0.30,
+    "performance": 0.20,
+    "cost": 0.10,
+}
 
 
 class EngineColors(BaseModel):
@@ -114,12 +132,34 @@ class EngineEntry(BaseModel):
     system_of_record: bool
     colors: EngineColors
     pricing: EnginePricing | None = None
+    score_weights: dict[str, dict[str, float]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _roles_that_never_own(self) -> EngineEntry:
         if self.role in ("cache", "search") and self.system_of_record:
             raise ValueError(f"{self.id}: a {self.role} engine is never a system of record")
         return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def _score_weights_are_whole_profiles(cls, data: object) -> object:
+        if not isinstance(data, Mapping) or "score_weights" not in data:
+            return data
+        profiles = data["score_weights"]
+        if not isinstance(profiles, Mapping) or not profiles:
+            raise ValueError("score_weights needs at least one [score_weights.<profile>] table")
+        for name, weights in profiles.items():
+            if not isinstance(weights, Mapping) or set(weights) != set(SCORE_DIMENSIONS):
+                raise ValueError(
+                    f"score_weights.{name} must give exactly {', '.join(SCORE_DIMENSIONS)}"
+                )
+            if any(isinstance(w, bool) or not isinstance(w, int | float) for w in weights.values()):
+                raise ValueError(f"score_weights.{name}: every weight is a number")
+            if any(not 0 <= w <= 1 for w in weights.values()):
+                raise ValueError(f"score_weights.{name}: every weight is between 0 and 1")
+            if not math.isclose(sum(weights.values()), 1.0, abs_tol=1e-9):
+                raise ValueError(f"score_weights.{name}: the weights must sum to 1")
+        return data
 
 
 class CatalogError(ValueError):
@@ -151,7 +191,21 @@ def load_engine_catalog(directory: Path = CATALOG_DIR) -> tuple[EngineEntry, ...
         orders = [getattr(e, field) for e in entries]
         if len(set(orders)) != len(orders):
             raise CatalogError(f"{field} values repeat: {sorted(orders)}")
+    _one_cost_weight(entries)
     return tuple(sorted(entries, key=lambda e: e.display_order))
+
+
+def _one_cost_weight(entries: Iterable[EngineEntry]) -> None:
+    """Every engine weights cost the same (ADR-031 Decision 5, #1002), the default too:
+    an engine with no ``score_weights`` scores with ``DEFAULT_SCORE_WEIGHTS``."""
+    costs = {"<default>": DEFAULT_SCORE_WEIGHTS["cost"]}
+    for e in entries:
+        for name, weights in e.score_weights.items():
+            costs[f"{e.id}.{name}"] = weights["cost"]
+    if len(set(costs.values())) > 1:
+        raise CatalogError(
+            f"the cost weight must be the same for every engine (ADR-031 Decision 5): {costs}"
+        )
 
 
 @cache
@@ -184,6 +238,33 @@ def pricing(engine: str) -> EnginePricing:
         if e.id == engine and e.pricing is not None:
             return e.pricing
     return EnginePricing()
+
+
+def default_score_weights() -> dict[str, float]:
+    """The score-dimension weights an engine with no ``score_weights`` uses."""
+    return dict(DEFAULT_SCORE_WEIGHTS)
+
+
+def score_weight_profiles(engine: str) -> tuple[dict[str, float], ...]:
+    """``engine``'s score-weight profiles in file order (its default first), or the
+    default weights alone for an engine with none or an id the catalog does not know."""
+    for e in engines():
+        if e.id == engine and e.score_weights:
+            return tuple(dict(w) for w in e.score_weights.values())
+    return (default_score_weights(),)
+
+
+def score_weights(engine: str, profile: str | None = None) -> dict[str, float]:
+    """One of ``engine``'s score-weight profiles: ``profile`` by name, else its default.
+
+    Raises ``KeyError`` for a profile the engine's file does not define.
+    """
+    if profile is None:
+        return score_weight_profiles(engine)[0]
+    for e in engines():
+        if e.id == engine and profile in e.score_weights:
+            return dict(e.score_weights[profile])
+    raise KeyError(f"{engine} has no score_weights.{profile}")
 
 
 # Engines routing can target today: every routing-facing role set is restricted to these.

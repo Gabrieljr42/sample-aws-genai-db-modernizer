@@ -17,6 +17,7 @@ The entries live in ``src/catalog/patterns/<pattern_type>.toml`` (ADR-031 Decisi
 under the names the analysis tools import. Edit the TOML file, not this module.
 """
 
+from src.shared.catalog import score_weights
 from src.tools.analysis.pattern_catalog_base import (
     CatalogAntiPattern,
     CatalogPattern,
@@ -47,14 +48,8 @@ ANTI_PATTERN_BY_ID: dict[str, CatalogAntiPattern] = {
 }
 
 
-# DynamoDB-specific score weights
-# Pattern match weighted highest because catalog scores are specialist-curated
-# and pattern fit is the strongest signal for DynamoDB suitability.
-# Performance weighted low because DynamoDB value is maintaining performance
-# at scale, not necessarily improving already-fast queries.
-DYNAMODB_SCORE_WEIGHTS: dict[str, float] = {
-    "pattern_match": 0.60,
-    "complexity": 0.20,
-    "performance": 0.05,
-    "cost": 0.15,
-}
+# DynamoDB's score weights: its engine file's [score_weights] (ADR-031 Decision 5, #1002).
+# Pattern match weighted highest because catalog scores are specialist-curated and pattern
+# fit is the strongest signal for DynamoDB suitability; performance low because DynamoDB's
+# value is keeping performance at scale, not improving already-fast queries.
+DYNAMODB_SCORE_WEIGHTS: dict[str, float] = score_weights("dynamodb")

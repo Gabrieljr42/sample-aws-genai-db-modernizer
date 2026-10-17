@@ -185,10 +185,13 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     # slice 2 (70 of 107): each query's cost dimension is its own, so two wp_terms
     # joins lose DynamoDB's old small-table cost credit, are first-assigned to
     # DocumentDB, and the reality check moves them to Aurora MySQL (a join leaving
-    # DocumentDB never lands on DynamoDB).
+    # DocumentDB never lands on DynamoDB). 68% after #1002 (73 of 107): every engine
+    # weights cost the same 10%, so DynamoDB loses its 5-point cost bonus and three
+    # key-scoped reads (``68b75de2`` and the ``wp_terms`` joins ``4f9d2751`` and
+    # ``966f5a33``) end on Aurora MySQL instead of DynamoDB.
     assert arch["rationale"] == (
         "Hybrid architecture: Aurora MySQL retained as the relational core "
-        "(65% of queries); DynamoDB for key-value access; ElastiCache for "
+        "(68% of queries); DynamoDB for key-value access; ElastiCache for "
         "caching hot data. Schema design was not run, so no tables are "
         "allocated yet."
     )
