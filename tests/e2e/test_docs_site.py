@@ -23,6 +23,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
+from tests.placeholders import placeholder_leaks
+
 REPO = Path(__file__).resolve().parents[2]
 SITE_DIR = REPO / "site"
 
@@ -189,7 +191,7 @@ def test_sample_engineering_report_renders_cleanly_offline(page: Page, docs_site
     text = page.inner_text("body")
     for heading in ("Engineering Report", "Target engines", "Migration roadmap"):
         assert heading in text, heading
-    leaked = [w for w in ("undefined", "NaN", "null") if re.search(rf"\b{w}\b", text)]
+    leaked = placeholder_leaks(text, ("undefined", "NaN", "null"))
     leaked += [s for s in ("[object Object]", "{{") if s in text]
     assert leaked == []
     findings = scan_text(text, "sample-engineering-report:body")

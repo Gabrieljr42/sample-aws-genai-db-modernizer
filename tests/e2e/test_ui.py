@@ -24,6 +24,7 @@ from playwright.sync_api import Page
 
 from src.report.deliverables import DELIVERABLES_DIR, FOLDER_FILENAMES
 from tests.e2e.pipeline import PipelineResult
+from tests.placeholders import placeholder_leaks
 
 # The results page is a primary deliverable next to the PDF report (#987); its
 # browser checks (rendering, overflow, accessibility) live here. Restrict this file
@@ -397,7 +398,8 @@ def test_ui_shows_only_the_product_name(
 # that replaces them, so it gets the same checks.
 # ---------------------------------------------------------------------------
 
-# "undefined"/"NaN"/"null" as whole words; "[object Object]" and "{{" anywhere.
+# Placeholder values ("null" as a cell, not in a sentence) are checked by tests/placeholders.py;
+# "[object Object]" and "{{" are leaks anywhere.
 FORBIDDEN_WORDS = ("undefined", "NaN", "null")
 FORBIDDEN_SUBSTRINGS = ("[object Object]", "{{")
 
@@ -406,7 +408,7 @@ BLOCKING_IMPACTS = ("critical", "serious", "moderate")
 
 
 def _leaked_forbidden_text(text: str) -> list[str]:
-    leaked = [w for w in FORBIDDEN_WORDS if re.search(rf"\b{re.escape(w)}\b", text)]
+    leaked = placeholder_leaks(text, FORBIDDEN_WORDS)
     leaked += [s for s in FORBIDDEN_SUBSTRINGS if s in text]
     return leaked
 
