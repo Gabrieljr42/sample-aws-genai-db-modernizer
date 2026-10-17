@@ -137,3 +137,116 @@ test('report text is rendered as text, never as markup', () => {
   expect(container.querySelector('script')).toBeNull();
   expect(container.textContent).toContain(hostile);
 });
+
+// #1028: a gate's long lists collapse to an inline "(…)" that expands in
+// place. The lists come from report.json's gate_parts (the producer splits
+// them out); the UI never parses the gate's prose.
+const GATE = 'Dual-write validated. 3 tables (wp.options, wp.termmeta, wp.keys) stay dual-read by Aurora MySQL queries. '
+  + '2 queries read 2 tables (wp.posts, wp.users) Aurora MySQL owns (wave 1) and keeps owning.';
+const GATE_PARTS = [
+  { text: 'Dual-write validated. 3 tables', items: ['wp.options', 'wp.termmeta', 'wp.keys'] },
+  { text: ' stay dual-read by Aurora MySQL queries. 2 queries read 2 tables', items: ['wp.posts', 'wp.users'] },
+  { text: ' Aurora MySQL owns (wave 1) and keeps owning.', items: [] },
+];
+const listWave = {
+  wave: 3, title: 'Move to DynamoDB', engines: ['dynamodb'], query_count: 37, workload_share_percent: 34.6,
+  table_count: 2, tables: ['wp.posts', 'wp.users'], rationale: 'Key-value reads.', gate: GATE, gate_parts: GATE_PARTS,
+};
+
+test('a gate shows each list as an inline (…) by default, the count and noun kept', () => {
+  render({ migration_waves: [listWave], facts: { waves: [], migration_wave_count: 1 } });
+  const gate = container.querySelector('[data-figure="wave-gate"]');
+  expect(gate.textContent).toBe(
+    'Gate before the next wave: Dual-write validated. 3 tables (…) stay dual-read by Aurora MySQL queries. '
+    + '2 queries read 2 tables (…) Aurora MySQL owns (wave 1) and keeps owning.',
+  );
+  const toggles = [...gate.querySelectorAll('button[aria-expanded]')];
+  expect(toggles.map(b => b.getAttribute('aria-expanded'))).toEqual(['false', 'false']);
+  expect(toggles.map(b => b.getAttribute('aria-label'))).toEqual(['Show the 3 names', 'Show the 2 names']);
+});
+
+// The gate as a reader sees it, without the small "hide" controls.
+const readGate = (el) => {
+  const copy = el.cloneNode(true);
+  copy.querySelectorAll('[data-gate-hide]').forEach(n => n.remove());
+  return copy.textContent;
+};
+
+test('clicking a (…) expands that list in place; expanded, the gate reads as report.json\'s gate', () => {
+  render({ migration_waves: [listWave], facts: { waves: [], migration_wave_count: 1 } });
+  const gate = container.querySelector('[data-figure="wave-gate"]');
+  act(() => gate.querySelectorAll('button[aria-expanded="false"]')[0].click());
+  expect(gate.querySelector('[data-figure="gate-list"]').textContent).toBe('(wp.options, wp.termmeta, wp.keys)');
+  expect(gate.querySelectorAll('button[aria-expanded="false"]')).toHaveLength(1);
+  act(() => gate.querySelector('button[aria-expanded="false"]').click());
+  expect(readGate(gate)).toBe(`Gate before the next wave: ${GATE}`);
+  const hide = gate.querySelectorAll('[data-gate-hide]')[0];
+  act(() => hide.click());
+  expect(gate.querySelectorAll('[data-figure="gate-list"]')).toHaveLength(1);
+  expect(gate.textContent).toContain('3 tables (…)');
+});
+
+test('an open list is text outside its control, so a screen reader reads the names', () => {
+  render({ migration_waves: [listWave], facts: { waves: [], migration_wave_count: 1 } });
+  const gate = container.querySelector('[data-figure="wave-gate"]');
+  act(() => gate.querySelector('button[aria-expanded="false"]').click());
+  const list = gate.querySelector('[data-figure="gate-list"]');
+  expect(list.closest('button')).toBeNull();
+  expect(list.hasAttribute('aria-hidden')).toBe(false);
+  const hide = gate.querySelector('[data-gate-hide]');
+  expect(hide.tagName).toBe('BUTTON');
+  expect(hide.getAttribute('aria-expanded')).toBe('true');
+  expect(hide.getAttribute('aria-controls')).toBe(list.id);
+  expect(hide.getAttribute('aria-label')).toBe('Hide the 3 names');
+});
+
+test('focus moves to the control that is shown: hide once open, show once closed', () => {
+  render({ migration_waves: [listWave], facts: { waves: [], migration_wave_count: 1 } });
+  const gate = container.querySelector('[data-figure="wave-gate"]');
+  const show = gate.querySelector('button[aria-expanded="false"]');
+  show.focus();
+  act(() => show.click());
+  expect(document.activeElement).toBe(gate.querySelector('[data-gate-hide]'));
+  act(() => document.activeElement.click());
+  expect(document.activeElement.getAttribute('aria-label')).toBe('Show the 3 names');
+  expect(document.activeElement.getAttribute('aria-expanded')).toBe('false');
+});
+
+test('a report written before gate_parts shows its gate string as it is', () => {
+  const legacy = { ...listWave, gate_parts: undefined };
+  render({ migration_waves: [legacy], facts: { waves: [], migration_wave_count: 1 } });
+  const gate = container.querySelector('[data-figure="wave-gate"]');
+  expect(gate.textContent).toBe(`Gate before the next wave: ${GATE}`);
+  expect(gate.querySelector('button')).toBeNull();
+});
+
+test('the Tables expander stays at the end of the card', () => {
+  render({ migration_waves: [listWave], facts: { waves: [], migration_wave_count: 1 } });
+  const card = container.querySelector('[data-wave="3"]');
+  const gate = card.querySelector('[data-figure="wave-gate"]');
+  const tables = card.querySelector('details');
+  expect(gate.compareDocumentPosition(tables) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(tables.querySelector('summary').textContent).toBe('Tables');
+});
+
+test('a hostile list item is text, never markup', () => {
+  const hostile = '<img src=x onerror=alert(1)>';
+  const wave = { ...listWave, gate: `1 table (${hostile})`, gate_parts: [{ text: '1 table', items: [hostile] }] };
+  render({ migration_waves: [wave], facts: { waves: [], migration_wave_count: 1 } });
+  act(() => container.querySelector('[data-figure="wave-gate"] button').click());
+  expect(container.querySelector('[data-figure="gate-list"]').textContent).toBe(`(${hostile})`);
+  expect(container.querySelector('img')).toBeNull();
+  expect(container.textContent).toContain(hostile);
+});
+
+test('a saved report written before gate_parts (the shared fixture) renders every gate unchanged', () => {
+  const waves = fixture.synthesis.migration_waves;
+  expect(waves.some(w => w.gate)).toBe(true);
+  expect(waves.every(w => w.gate_parts === undefined)).toBe(true);
+  render(fixture.synthesis);
+  waves.filter(w => w.gate).forEach((w) => {
+    const gate = container.querySelector(`[data-wave="${w.wave}"] [data-figure="wave-gate"]`);
+    expect(gate.textContent).toBe(`Gate before the next wave: ${w.gate}`);
+    expect(gate.querySelector('button')).toBeNull();
+  });
+});

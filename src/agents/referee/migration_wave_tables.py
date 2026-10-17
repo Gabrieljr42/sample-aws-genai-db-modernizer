@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.contracts.synthesis_output import join_gate_parts
 from src.shared.engine_names import display_engine
 from src.shared.migration_wave_engines import (
     KV_ENGINES,
@@ -18,6 +19,34 @@ def _plural(n: int, noun: str) -> str:
 
 def _query_noun(n: int) -> str:
     return _plural(n, "query").replace("querys", "queries")
+
+
+# A wave gate's structured parts (#1028): each part is a run of text followed
+# by an optional item list (table names). The results page collapses each list
+# to an inline "(…)"; joined back, the parts are exactly the wave's ``gate``.
+GatePart = dict[str, Any]
+
+
+def gate_parts_text(parts: list[GatePart]) -> str:
+    """The gate string the parts stand for: each part's text, then
+    " (a, b, c)" when it has items (the contract's ``join_gate_parts``)."""
+    return join_gate_parts(parts)
+
+
+def add_gate_text(parts: list[GatePart], text: str) -> None:
+    """Append ``text``, merged into the last part when that part has no list."""
+    if parts and not parts[-1]["items"]:
+        parts[-1]["text"] += text
+    else:
+        parts.append({"text": text, "items": []})
+
+
+def add_gate_items(parts: list[GatePart], items: list[str]) -> None:
+    """Close the last text run with an item list."""
+    if parts and not parts[-1]["items"]:
+        parts[-1]["items"] = list(items)
+    else:
+        parts.append({"text": "", "items": list(items)})
 
 
 def _table_ids(rows: list[dict[str, Any]]) -> list[str]:
@@ -251,6 +280,27 @@ def _table_group_coverage_note(
     engine_wave_number: dict[str, int],
     current_wave_no: int,
 ) -> str:
+    """The gate addendum as one string (``_table_group_coverage_parts`` joined)."""
+    return gate_parts_text(
+        _table_group_coverage_parts(
+            engine_tables,
+            synced_tables,
+            query_assignments,
+            engine,
+            engine_wave_number,
+            current_wave_no,
+        )
+    )
+
+
+def _table_group_coverage_parts(
+    engine_tables: set[str],
+    synced_tables: list[dict[str, Any]],
+    query_assignments: list[dict[str, Any]],
+    engine: str,
+    engine_wave_number: dict[str, int],
+    current_wave_no: int,
+) -> list[GatePart]:
     """Gate addendum for both directions of cross-wave co-dependency, plus the
     count of ``engine``-assigned queries whose table groups don't cover them.
 
@@ -338,7 +388,7 @@ def _table_group_coverage_note(
             continue  # an owned table, already counted in a table group
         no_owned_table += 1
 
-    clauses: list[str] = []
+    clauses: list[list[GatePart]] = []
     if forward:
         # #324 review (finding 1): group by whether the other engine's own
         # wave is still ahead of this one (temporary -- resolves once it
@@ -369,10 +419,16 @@ def _table_group_coverage_note(
             # reverse.
             other_names = ", ".join(display_engine(o) for o in others)
             clauses.append(
-                f"{n} {_plural(n, 'table')} ({', '.join(sorted(all_tables))}) stay dual-read by "
-                + ", ".join(parts)
-                + f"; {display_engine(engine)} owns them, so keep the {other_names} copy in "
-                f"sync from {display_engine(engine)} via CDC until then."
+                [
+                    {"text": f"{n} {_plural(n, 'table')}", "items": sorted(all_tables)},
+                    {
+                        "text": " stay dual-read by "
+                        + ", ".join(parts)
+                        + f"; {display_engine(engine)} owns them, so keep the {other_names} "
+                        f"copy in sync from {display_engine(engine)} via CDC until then.",
+                        "items": [],
+                    },
+                ]
             )
         if permanent:
             all_tables = set()
@@ -388,10 +444,16 @@ def _table_group_coverage_note(
             n = len(all_tables)
             other_names = ", ".join(display_engine(o) for o in others)
             clauses.append(
-                f"{n} {_plural(n, 'table')} ({', '.join(sorted(all_tables))}) stay dual-read by "
-                + ", ".join(parts)
-                + f"; {display_engine(engine)} owns them, so keep the {other_names} copy in "
-                f"sync from {display_engine(engine)} via CDC."
+                [
+                    {"text": f"{n} {_plural(n, 'table')}", "items": sorted(all_tables)},
+                    {
+                        "text": " stay dual-read by "
+                        + ", ".join(parts)
+                        + f"; {display_engine(engine)} owns them, so keep the {other_names} "
+                        f"copy in sync from {display_engine(engine)} via CDC.",
+                        "items": [],
+                    },
+                ]
             )
     if reverse_tables:
         for other in sorted(reverse_tables, key=lambda e: (engine_wave_number.get(e) or 999, e)):
@@ -401,18 +463,37 @@ def _table_group_coverage_note(
             wave_no = engine_wave_number.get(other)
             wave_text = f"wave {wave_no}" if wave_no else "a later wave"
             clauses.append(
-                f"{n_q} {_query_noun(n_q)} read {n_t} "
-                f"{_plural(n_t, 'table')} ({', '.join(owned_table_list)}) {display_engine(other)} "
-                f"owns ({wave_text}) and keeps owning; keep a {display_engine(engine)} copy of "
-                f"them in sync via CDC."
+                [
+                    {
+                        "text": f"{n_q} {_query_noun(n_q)} read {n_t} {_plural(n_t, 'table')}",
+                        "items": owned_table_list,
+                    },
+                    {
+                        "text": f" {display_engine(other)} owns ({wave_text}) and keeps owning; "
+                        f"keep a {display_engine(engine)} copy of them in sync via CDC.",
+                        "items": [],
+                    },
+                ]
             )
     if no_owned_table:
         clauses.append(
-            f"{no_owned_table} {_query_noun(no_owned_table)} "
-            "could not be resolved to a table in either wave and are not counted in any "
-            "table group."
+            [
+                {
+                    "text": f"{no_owned_table} {_query_noun(no_owned_table)} "
+                    "could not be resolved to a table in either wave and are not counted in "
+                    "any table group.",
+                    "items": [],
+                }
+            ]
         )
-    return (" " + " ".join(clauses)) if clauses else ""
+    out: list[GatePart] = []
+    for clause in clauses:
+        add_gate_text(out, " ")
+        for part in clause:
+            add_gate_text(out, part["text"])
+            if part["items"]:
+                add_gate_items(out, part["items"])
+    return out
 
 
 def _cache_overlap_note(cache_overlay: dict[str, Any], engine_wave_number: dict[str, int]) -> str:

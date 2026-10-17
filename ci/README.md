@@ -163,6 +163,7 @@ Env vars read:
     artifact, without the second run clobbering the first.
 - `E2E_REPORT_ARGS`, `E2E_UI_ARGS` — extra pytest args appended to only the
   first (report checks) or second (UI smoke) invocation, respectively.
+- `E2E_API_PORT`, `E2E_UI_PORT` — the ports the UI smoke starts its API and UI on (default 8000 and 3000). The UI build bakes in the API port, so set both before the build to run the smoke while another local API/UI holds the defaults.
 - `E2E_SHARD` — one shard name (`wordpress`, `discourse`, `trailgear`,
   `hashseed`, `determinism`, `cross`, `ui`) to run instead of everything; see Sharding above.
 

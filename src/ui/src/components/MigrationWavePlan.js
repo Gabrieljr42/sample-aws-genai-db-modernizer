@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useId, useRef, useState } from 'react';
 import Container from "@cloudscape-design/components/container";
 import Header from "@cloudscape-design/components/header";
 import Box from "@cloudscape-design/components/box";
@@ -18,9 +18,95 @@ import { migrationWaves, waveCount, waveHeadline, waveTitle } from "../utils/mig
  * `data-wave` and `data-figure` are stable hooks for the e2e check that this
  * page's waves read the same as the engineering report's (tests/e2e/test_ui.py).
  *
+ * The gate shows each of its long lists (table names) as an inline "(…)" that
+ * expands in place (#1028). The lists come from the wave's `gate_parts`, which
+ * the producer splits out of the gate; a report written before them shows the
+ * gate string as it is. Nothing here parses the gate's prose.
+ *
  * Callers pass `t` (the page's own `useTranslation` function), like
  * QueryRoutingTable.
  */
+
+const INLINE_TOGGLE_STYLE = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  margin: 0,
+  font: 'inherit',
+  color: 'inherit',
+  cursor: 'pointer',
+  textDecoration: 'underline dotted',
+};
+
+const HIDE_TOGGLE_STYLE = { ...INLINE_TOGGLE_STYLE, textDecoration: 'none', marginLeft: '0.2em' };
+
+// One list of a gate, collapsed to "(…)" until it is clicked. Open, the list is
+// plain text outside the button, so a screen reader reads it, and a small
+// "hide" control follows it; focus moves to whichever control is shown.
+function InlineList({ items, t }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const showRef = useRef(null);
+  const hideRef = useRef(null);
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    const target = open ? hideRef.current : showRef.current;
+    if (target) target.focus();
+  }, [open]);
+  const toggle = (next) => { toggled.current = true; setOpen(next); };
+  if (!open) {
+    return (
+      <button
+        ref={showRef}
+        type="button"
+        style={INLINE_TOGGLE_STYLE}
+        aria-expanded={false}
+        aria-label={t('analysis-results.waves.list-show', { count: items.length })}
+        onClick={() => toggle(true)}
+      >
+        (…)
+      </button>
+    );
+  }
+  return (
+    <>
+      <span id={listId} data-figure="gate-list">{`(${items.join(', ')})`}</span>
+      <button
+        ref={hideRef}
+        type="button"
+        data-gate-hide=""
+        style={HIDE_TOGGLE_STYLE}
+        aria-expanded
+        aria-controls={listId}
+        aria-label={t('analysis-results.waves.list-hide', { count: items.length })}
+        onClick={() => toggle(false)}
+      >
+        ×
+      </button>
+    </>
+  );
+}
+
+function GateText({ wave, t }) {
+  const parts = Array.isArray(wave.gate_parts) ? wave.gate_parts : null;
+  if (!parts || parts.length === 0) {
+    return t('analysis-results.waves.gate', { gate: wave.gate });
+  }
+  return (
+    <>
+      {t('analysis-results.waves.gate', { gate: '' })}
+      {/* Parts have no id; their order is fixed by the report. */}
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part.text}
+          {(part.items || []).length > 0 && <>{' '}<InlineList items={part.items} t={t} /></>}
+        </span>
+      ))}
+    </>
+  );
+}
+
 const MigrationWavePlan = memo(({ synthesis, t }) => {
   const waves = migrationWaves(synthesis);
   if (waves.length === 0) return null;
@@ -55,7 +141,7 @@ const MigrationWavePlan = memo(({ synthesis, t }) => {
                 <div data-figure="wave-stats">{waveHeadline(t, synthesis, wave)}</div>
                 {wave.rationale && <Box color="text-body-secondary">{wave.rationale}</Box>}
                 {wave.gate && (
-                  <div data-figure="wave-gate">{t('analysis-results.waves.gate', { gate: wave.gate })}</div>
+                  <div data-figure="wave-gate"><GateText wave={wave} t={t} /></div>
                 )}
                 {(wave.tables || []).length > 0 && (
                   <ExpandableSection headerText={t('analysis-results.waves.tables')} variant="footer">

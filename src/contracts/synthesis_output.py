@@ -314,12 +314,20 @@ Version History:
   filter counts stay presentation. Backward
   compatible: ``None`` for a report with no ``query_groups`` and for a facts
   block written before 1.26 (the results API recomputes it from ``query_groups``).
+- 1.27 (2026-10-17, #1028): ``migration_waves[].gate_parts`` (``GatePart``): the
+  wave's ``gate`` as text runs, each followed by an optional item list (table
+  names), so the results page collapses each list to an inline "(…)" without
+  parsing the gate's prose. Joined back (``join_gate_parts``: each text, then
+  " (a, b, c)" when it has items) the parts equal ``gate``; ``MigrationWave``
+  rejects parts that do not. ``gate`` itself is unchanged, and the Markdown and
+  PDF reports keep printing it. Backward compatible: ``None`` for a wave written
+  before 1.27, which shows its gate string as it is.
 """
 
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.contracts.assignment_models import (  # re-exported, see docstring below
     AuroraEngineChoice,
@@ -578,6 +586,34 @@ class TableOwner(BaseModel):
     )
 
 
+def join_gate_parts(parts: list[Any]) -> str:
+    """The gate string a wave's ``gate_parts`` stand for (#1028): each part's
+    text, then " (a, b, c)" when it has items. Takes ``GatePart`` models or
+    their dicts."""
+    out: list[str] = []
+    for p in parts:
+        text = p.get("text") if isinstance(p, dict) else p.text
+        items = (p.get("items") if isinstance(p, dict) else p.items) or []
+        out.append(str(text or ""))
+        if items:
+            out.append(f" ({', '.join(str(i) for i in items)})")
+    return "".join(out)
+
+
+class GatePart(BaseModel):
+    """One run of a wave gate's text, followed by an optional item list (#1028).
+
+    Joined back (``text``, then " (a, b, c)" when ``items`` is not empty), a
+    wave's ``gate_parts`` are exactly its ``gate``. The results page collapses
+    each list to an inline "(…)" without parsing the gate's prose.
+    """
+
+    text: str = Field(..., description="Text up to the list (or the rest of the gate)")
+    items: list[str] = Field(
+        default_factory=list, description="The list that follows the text, e.g. table names"
+    )
+
+
 class MigrationWave(BaseModel):
     """One step of the incremental migration roadmap (#225; relational-first
     reorder by #321).
@@ -716,8 +752,24 @@ class MigrationWave(BaseModel):
     )
     rationale: str = Field(..., description="Why this wave is sequenced where it is")
     gate: str = Field(..., description="What must be true before the next wave starts")
+    gate_parts: list[GatePart] | None = Field(
+        None,
+        description=(
+            "``gate`` as text runs and item lists (#1028), so a reader can collapse each "
+            "list; joined back they are exactly ``gate``. None for a wave written before "
+            "this field existed (the gate string alone)"
+        ),
+    )
 
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _gate_parts_join_back_to_gate(self) -> "MigrationWave":
+        # #1028: the parts are the gate, split; a reader collapsing the lists
+        # must never show a different gate than the reports print.
+        if self.gate_parts is not None and join_gate_parts(self.gate_parts) != self.gate:
+            raise ValueError("gate_parts must join back to gate exactly")
+        return self
 
 
 class EngineFacts(BaseModel):
@@ -1160,7 +1212,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.26",
+        default="1.27",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

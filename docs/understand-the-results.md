@@ -29,7 +29,7 @@ Every run puts its deliverables in one folder, `artifacts/<db>/<job>/deliverable
 `deliverables/` always holds the latest assignment version. The job's other folders hold the pipeline's working files (per-phase outputs, versioned assignments, model inputs and traces), which you don't need to read the assessment.
 <!-- /deliverables-list -->
 
-All of them are rendered from one `report.json` by `src/report`, so a changed fact changes in every deliverable at once. The local UI's results page reads the same `report.json`: it shows the assessment interactively, with each query's path and the reason for its engine, the migration wave plan, and a download panel for the files above.
+All of them are rendered from one `report.json` by `src/report`, so a changed fact changes in every deliverable at once. The local UI's results page reads the same `report.json`: it shows the assessment interactively, with each query's path and the reason for its engine and the migration wave plan, and it opens with three download buttons for the files above (Executive Summary, Engineering Report, Assessment Detail).
 
 ## How to read an assignment
 

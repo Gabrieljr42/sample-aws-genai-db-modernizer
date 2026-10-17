@@ -250,6 +250,9 @@ def test_a_querys_trace_opens_from_the_routing_table(
     page.goto(f"{ui}/analysis/results/{r.job_id}")
     page.wait_for_load_state("networkidle")
     section = page.locator("#query-routing-section")
+    # #1028: the section opens collapsed; its header expands it.
+    assert not section.get_by_role("table", name="Query routing").is_visible()
+    _expand_query_routing(page)
     section.get_by_role("table", name="Query routing").wait_for()
     if not r.external:  # wordpress lists 107 queries: more than one page of 25
         section.get_by_role("button", name="Next page").wait_for()
@@ -286,11 +289,22 @@ def test_a_querys_trace_opens_from_the_routing_table(
     assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
 
 
+def _expand_query_routing(page: Page) -> None:
+    """Open the query routing section, collapsed when the page opens (#1028)."""
+    header = page.locator('#query-routing-section [aria-expanded="false"]').first
+    header.click()
+    page.locator('#query-routing-section [aria-expanded="true"]').first.wait_for()
+
+
 def _report_wave_stats(r: PipelineResult) -> dict[str, tuple[str, str]]:
     """Each wave's headline as the reports compute it (``roadmap._wave_headline_stats``)
     and its count phrase as the engineering report prints it, by wave number."""
     from src.report.escaping import md_text
-    from src.report.roadmap import _facts_by_wave, _wave_headline_stats, resolve_migration_waves
+    from src.report.roadmap import (
+        _facts_by_wave,
+        _wave_headline_stats,
+        resolve_migration_waves,
+    )
 
     report = json.loads((r.artifact_root / r.report["report"]).read_text())
     facts = _facts_by_wave(report)
@@ -330,11 +344,30 @@ def test_results_page_shows_the_reports_wave_plan(
             for c in cards
         }
         assert shown == expected, r.db
+        lists = {
+            str(w["wave"]): [p["items"] for p in (w.get("gate_parts") or []) if p["items"]]
+            for w in report["migration_waves"]
+        }
         for c in cards:
             n = str(c.get_attribute("data-wave"))
             if gates[n]:
-                gate = c.locator("[data-figure=wave-gate]").inner_text()
-                assert gate == f"Gate before the next wave: {gates[n]}", (r.db, n)
+                gate = c.locator("[data-figure=wave-gate]")
+                # #1028: each list of the gate shows as an inline "(…)" until
+                # clicked; opened, the gate reads exactly as report.json's.
+                closed = gate.locator('button[aria-expanded="false"]')
+                assert closed.count() == len(lists[n]), (r.db, n)
+                for items in lists[n]:
+                    assert ", ".join(items) not in gate.inner_text(), (r.db, n)
+                while closed.count():
+                    closed.first.click()
+                # Read as shown, without the small "hide" control after each list.
+                shown_gate = gate.evaluate(
+                    "el => { const c = el.cloneNode(true);"
+                    " c.querySelectorAll('[data-gate-hide]').forEach(n => n.remove());"
+                    " return c.textContent; }"
+                )
+                assert shown_gate == f"Gate before the next wave: {gates[n]}", (r.db, n)
+                assert gate.locator("[data-gate-hide]").count() == len(lists[n]), (r.db, n)
         count = report["facts"]["migration_wave_count"]
         assert f"Migration roadmap ({count} waves)" in section.inner_text(), r.db
         assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
@@ -343,13 +376,19 @@ def test_results_page_shows_the_reports_wave_plan(
 def test_results_page_downloads_the_deliverables_folder(
     page: Page, ui: str, all_runs: list[PipelineResult]
 ) -> None:
-    """#957: the results page's download panel lists the job's deliverables/
-    folder in the folder definition's order and downloads each file as it is on
-    disk."""
+    """#957, #1028: the results page opens with three deliverable buttons,
+    Executive Summary, Engineering Report and Assessment Detail, each the
+    download of one file of the job's deliverables/ folder, as it is on disk."""
+    buttons = {
+        "assessment.pdf": "Executive Summary",
+        "engineering-report.md": "Engineering Report",
+        "assessment-data.json": "Assessment Detail",
+    }
+    assert set(buttons) <= set(FOLDER_FILENAMES)
     for r in all_runs:
         folder = r.job_dir() / DELIVERABLES_DIR
-        expected = [name for name in FOLDER_FILENAMES if (folder / name).is_file()]
-        assert "assessment.pdf" in expected and "index.md" in expected, (r.db, expected)
+        expected = [name for name in buttons if (folder / name).is_file()]
+        assert expected == list(buttons), (r.db, expected)
         ev = _watch(page)
         page.goto(f"{ui}/analysis/results/{r.job_id}")
         page.wait_for_load_state("networkidle")
@@ -357,7 +396,8 @@ def test_results_page_downloads_the_deliverables_folder(
         rows = section.locator("[data-deliverable]")
         rows.first.wait_for()
         assert [x.get_attribute("data-deliverable") for x in rows.all()] == expected, r.db
-        for name in ("assessment.pdf", "engineering-report.md", "index.md"):
+        assert [x.inner_text().strip() for x in rows.all()] == list(buttons.values()), r.db
+        for name in expected:
             with page.expect_download() as info:
                 section.get_by_role("link", name=f"Download {name}").click()
             download = info.value
@@ -367,6 +407,67 @@ def test_results_page_downloads_the_deliverables_folder(
         # request for exactly that file; anything else failing is a real error.
         downloads = {f"{r.job_id}/deliverables/{n}" for n in expected}
         ev["failed"] = [u for u in ev["failed"] if u.split("/assessments/", 1)[-1] not in downloads]
+        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+
+
+# #1028: the section order, from the top; the rest of the page follows.
+SECTION_ORDER = [
+    "deliverables-section",
+    "executive-summary-section",
+    "query-flow-section",
+    "cost-breakdown-section",
+    "migration-roadmap-section",
+    "unservable-section",
+    "close-calls-section",
+    "query-routing-section",
+]
+# Banners a report without fallback-engine queries or close calls leaves out.
+OPTIONAL_SECTIONS = {"unservable-section", "close-calls-section"}
+
+
+def test_results_page_shows_the_headline_first(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    """#1028: the results page opens with the deliverable buttons, the executive
+    summary, the query flow, the cost breakdown and the migration roadmap, in
+    that order, then the fallback-engine warning and close-call banners (when
+    the report has them), then query routing, collapsed. The close-call banner names its
+    first 3 queries by a 5-character id, then "+N more"."""
+    for r in all_runs:
+        ev = _watch(page)
+        page.goto(f"{ui}/analysis/results/{r.job_id}")
+        page.wait_for_load_state("networkidle")
+        page.locator("#migration-roadmap-section").wait_for()
+        present = page.evaluate(
+            "ids => ids.filter(id => document.getElementById(id))", SECTION_ORDER
+        )
+        assert set(SECTION_ORDER) - set(present) <= OPTIONAL_SECTIONS, (r.db, present)
+        if not r.external and r.db == "wordpress":
+            assert "close-calls-section" in present, (r.db, "the wordpress sample has close calls")
+        in_order = page.evaluate(
+            "ids => ids.map(id => document.getElementById(id))"
+            "  .every((el, i, all) => i === 0 ||"
+            "    (all[i - 1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))",
+            present,
+        )
+        assert in_order, (r.db, present)
+        routing = page.locator("#query-routing-section")
+        assert routing.locator('[aria-expanded="false"]').count() >= 1, r.db
+        assert not routing.get_by_role("table", name="Query routing").is_visible(), r.db
+        report = json.loads((r.artifact_root / r.report["report"]).read_text())
+        close_calls = (report.get("facts") or {}).get("close_calls") or {}
+        pairs = close_calls.get("engine_pairs") or []
+        if pairs and close_calls.get("close_call_query_count"):
+            first = pairs[0]["query_ids"]
+            banner = page.locator("#close-calls-section")
+            opener = banner.get_by_role(
+                "button", name=f"Open the decision trace for query {first[0]}"
+            )
+            assert opener.inner_text().strip() == first[0][:5], r.db
+            shown = banner.get_by_role(
+                "button", name=re.compile("^Open the decision trace for query ")
+            )
+            assert shown.count() == sum(min(3, len(p["query_ids"])) for p in pairs), r.db
         assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
 
 

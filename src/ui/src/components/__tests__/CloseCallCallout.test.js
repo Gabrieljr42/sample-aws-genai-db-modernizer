@@ -153,3 +153,75 @@ test('a pair with only settled ties says so', () => {
   expect(container.textContent).toContain('Close calls: 0 queries, plus 1 exact tie a rule settled');
   expect(container.textContent).toContain('1 exact tie between Aurora MySQL and DocumentDB went to Aurora MySQL by a routing rule. DocumentDB can serve it.');
 });
+
+// #1028: a short banner. Each pair names its first 3 closest queries, then a
+// "+N more" control (N: the rest of the pair's listed ids) that expands to the
+// rest; each link shows the first 5 characters of the id, the full id in its
+// tooltip, label and link target.
+const LONG_IDS = ['first-query', 'second-query', 'third-query', 'fourth-query', 'fifth-query'];
+const longPair = { ...facts.engine_pairs[0], query_ids: LONG_IDS, more_query_count: 13 };
+const longSynthesis = { facts: { close_calls: { ...facts, engine_pairs: [longPair] } } };
+
+const shownIds = () => [...container.querySelectorAll('[role="button"][aria-label^="Open the decision trace"]')]
+  .map(a => a.textContent);
+
+test('shows the first 3 closest queries, then +N more', () => {
+  render({ synthesis: longSynthesis });
+  expect(shownIds()).toEqual(['first', 'secon', 'third']);
+  const more = container.querySelector('button[aria-expanded]');
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+  expect(more.textContent).toBe('+2 more');
+  // The queries the facts do not name are only mentioned once the list is open.
+  expect(container.textContent).not.toContain('and 13 more');
+});
+
+test('+N more expands to the rest of the listed queries, and Show fewer folds them back', () => {
+  render({ synthesis: longSynthesis });
+  const toggle = container.querySelector('button[aria-expanded]');
+  act(() => toggle.click());
+  expect(shownIds()).toEqual(['first', 'secon', 'third', 'fourt', 'fifth']);
+  expect(container.textContent).toContain('and 13 more');
+  // The same control, now saying it folds the list back, with its state.
+  expect(container.querySelector('button[aria-expanded]')).toBe(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(toggle.textContent).toBe('Show fewer');
+  expect(toggle.hasAttribute('aria-label')).toBe(false);
+  act(() => toggle.click());
+  expect(shownIds()).toEqual(['first', 'secon', 'third']);
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(container.textContent).not.toContain('and 13 more');
+});
+
+test('focus stays on the +N more control when it is used', () => {
+  render({ synthesis: longSynthesis });
+  const toggle = container.querySelector('button[aria-expanded]');
+  toggle.focus();
+  act(() => toggle.click());
+  expect(document.activeElement).toBe(toggle);
+  act(() => toggle.click());
+  expect(document.activeElement).toBe(toggle);
+});
+
+test('the +N more label starts with its visible text', () => {
+  render({ synthesis: longSynthesis });
+  const toggle = container.querySelector('button[aria-expanded]');
+  expect(toggle.getAttribute('aria-label')).toBe('+2 more: show 2 more close calls');
+  expect(toggle.getAttribute('aria-label').startsWith(toggle.textContent)).toBe(true);
+});
+
+test('a short id keeps the full id in its tooltip, label and link target', () => {
+  const opened = [];
+  render({ synthesis: longSynthesis, onOpen: id => opened.push(id) });
+  const link = container.querySelector('[role="button"][aria-label="Open the decision trace for query second-query"]');
+  expect(link.textContent).toBe('secon');
+  expect(link.querySelector('[title]').getAttribute('title')).toBe('second-query');
+  act(() => link.click());
+  expect(opened).toEqual(['second-query']);
+});
+
+test('3 or fewer listed queries need no +N more; unnamed ones are still stated', () => {
+  render();
+  expect(container.querySelector('button[aria-expanded]')).toBeNull();
+  expect(shownIds()).toEqual(['q-01', 'q-02', 'q-03', 'q-<b>']);
+  expect(container.textContent).toContain('and 10 more');
+});

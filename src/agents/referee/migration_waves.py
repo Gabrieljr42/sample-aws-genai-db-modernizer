@@ -140,7 +140,10 @@ from src.agents.referee.migration_wave_builders import (
 from src.agents.referee.migration_wave_tables import (
     _cache_overlap_note,
     _durable_owner,
-    _table_group_coverage_note,
+    _table_group_coverage_parts,
+    add_gate_items,
+    add_gate_text,
+    gate_parts_text,
 )
 from src.agents.referee.table_resolution import (
     PSEUDO_TABLES,
@@ -160,6 +163,14 @@ from src.shared.migration_wave_engines import (
 
 # ``_durable_owner`` is imported from here by callers; it lives in migration_wave_tables.
 __all__ = ["_durable_owner", "build_migration_waves"]
+
+
+def _extend_gate_parts(parts: list[dict[str, Any]], more: list[dict[str, Any]]) -> None:
+    """Append ``more`` to ``parts``, merging text runs the way the gate string joins them."""
+    for part in more:
+        add_gate_text(parts, part["text"])
+        if part["items"]:
+            add_gate_items(parts, part["items"])
 
 
 def build_migration_waves(
@@ -385,7 +396,7 @@ def build_migration_waves(
             # other's gate text, and the served set would silence the
             # reverse clause entirely (every served-but-not-owned table is
             # already "in" the served set).
-            dynamo_note = _table_group_coverage_note(
+            dynamo_parts = _table_group_coverage_parts(
                 set(w["_dynamo_owned"]),
                 w.get("_dynamo_synced") or [],
                 query_assignments,
@@ -393,7 +404,7 @@ def build_migration_waves(
                 engine_wave_number,
                 w["wave"],
             )
-            doc_note = _table_group_coverage_note(
+            doc_parts = _table_group_coverage_parts(
                 set(w["_doc_owned"]),
                 w.get("_doc_synced") or [],
                 query_assignments,
@@ -401,14 +412,16 @@ def build_migration_waves(
                 engine_wave_number,
                 w["wave"],
             )
-            if dynamo_note:
-                w["_dynamo_gate"] = w["_dynamo_gate"] + dynamo_note
-            if doc_note:
-                w["_doc_gate"] = w["_doc_gate"] + doc_note
-            if dynamo_note or doc_note:
-                w["gate"] = (
-                    f"{w['_dynamo_label']}: {w['_dynamo_gate']} {w['_doc_label']}: {w['_doc_gate']}"
-                )
+            if dynamo_parts or doc_parts:
+                # #1028: the gate as parts (each table list its own items), and
+                # the gate string joined from them, so the two never disagree.
+                parts: list[dict[str, Any]] = []
+                add_gate_text(parts, f"{w['_dynamo_label']}: {w['_dynamo_gate']}")
+                _extend_gate_parts(parts, dynamo_parts)
+                add_gate_text(parts, f" {w['_doc_label']}: {w['_doc_gate']}")
+                _extend_gate_parts(parts, doc_parts)
+                w["gate_parts"] = parts
+                w["gate"] = gate_parts_text(parts)
         else:
             # #568 review, Critical 1: the OWNED subset only (``tables``
             # minus whatever ``table_owners`` already names as kept in
@@ -417,7 +430,7 @@ def build_migration_waves(
             # table is already "in" it).
             synced = w.get("table_owners") or []
             owned = set(w["tables"]) - {o["table"] for o in synced}
-            note = _table_group_coverage_note(
+            note_parts = _table_group_coverage_parts(
                 owned,
                 synced,
                 query_assignments,
@@ -425,8 +438,11 @@ def build_migration_waves(
                 engine_wave_number,
                 w["wave"],
             )
-            if note:
-                w["gate"] = w["gate"] + note
+            if note_parts:
+                parts = [{"text": w["gate"], "items": []}]
+                _extend_gate_parts(parts, note_parts)
+                w["gate_parts"] = parts
+                w["gate"] = gate_parts_text(parts)
 
     if cache_overlay:
         cache_w = next(
@@ -449,6 +465,10 @@ def build_migration_waves(
         )
 
     for w in waves:
+        # #1028: every wave carries its gate as parts; a gate with no table
+        # list is one text part.
+        if "gate_parts" not in w:
+            w["gate_parts"] = [{"text": w["gate"], "items": []}]
         w.pop("_dynamo_label", None)
         w.pop("_dynamo_gate", None)
         w.pop("_dynamo_owned", None)

@@ -1,14 +1,15 @@
 /**
- * #957: the results page's download panel lists the job's deliverables/ folder
- * (GET /assessments/{job_id}/deliverables) and downloads each file from the
- * API's download route. Cloudscape components are plain DOM stand-ins (see
+ * #957, #1028: the results page opens with three deliverable buttons,
+ * Executive Summary, Engineering Report and Assessment Detail, each the
+ * download of one file of the job's deliverables/ folder (GET
+ * /assessments/{job_id}/deliverables, the folder's FOLDER_ENTRIES). Cloudscape components are plain DOM stand-ins (see
  * QueryRoutingTable.test.js); the component and the English strings are real.
  */
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createInstance } from 'i18next';
 import en from '../../locales/en.json';
-import DeliverablesPanel, { formatBytes } from '../DeliverablesPanel';
+import DeliverablesPanel, { DELIVERABLE_BUTTONS, formatBytes } from '../DeliverablesPanel';
 
 jest.mock('@cloudscape-design/components/container', () => ({
   __esModule: true,
@@ -36,8 +37,8 @@ jest.mock('@cloudscape-design/components/status-indicator', () => ({
 }));
 jest.mock('@cloudscape-design/components/button', () => ({
   __esModule: true,
-  default: ({ children, href, download, ariaLabel }) => (
-    <a href={href} download={download} aria-label={ariaLabel}>{children}</a>
+  default: ({ children, href, download, ariaLabel, variant }) => (
+    <a href={href} download={download} aria-label={ariaLabel} data-variant={variant}>{children}</a>
   ),
 }));
 
@@ -83,24 +84,46 @@ function render(props) {
   });
 }
 
-test('lists every file the API returns, in its order, each with a download link', () => {
+test('three buttons, in order: Executive Summary, Engineering Report, Assessment Detail', () => {
   render({ files: FILES, loading: false, error: null });
-  const rows = [...container.querySelectorAll('[data-deliverable]')];
-  expect(rows.map(r => r.getAttribute('data-deliverable'))).toEqual(
-    ['assessment.pdf', 'engineering-report.md', 'assessment-data.json', 'index.md'],
+  const buttons = [...container.querySelectorAll('[data-deliverable]')];
+  expect(buttons.map(b => b.getAttribute('data-deliverable'))).toEqual(
+    ['assessment.pdf', 'engineering-report.md', 'assessment-data.json'],
   );
-  const pdf = rows[0];
-  expect(pdf.textContent).toContain('Executive summary (PDF)');
-  expect(pdf.textContent).toContain('Executives');
-  expect(pdf.textContent).toContain('1.2 MB');
+  expect(buttons.map(b => b.querySelector('a').textContent)).toEqual(
+    ['Executive Summary', 'Engineering Report', 'Assessment Detail'],
+  );
+  // index.md stays in the folder but is not one of the three buttons.
+  expect(container.textContent).not.toContain('Folder index');
+});
+
+test('each button downloads its file from the API, and says which file in its label and tooltip', () => {
+  render({ files: FILES, loading: false, error: null });
+  const pdf = container.querySelector('[data-deliverable="assessment.pdf"]');
   const link = pdf.querySelector('a');
   expect(link.getAttribute('href')).toBe('http://localhost:8000/api/v1/assessments/job-1/deliverables/assessment.pdf');
   expect(link.getAttribute('download')).toBe('assessment.pdf');
   expect(link.getAttribute('aria-label')).toBe('Download assessment.pdf');
+  expect(link.getAttribute('data-variant')).toBe('primary');
+  expect(pdf.getAttribute('title')).toBe('Executive summary (PDF) · assessment.pdf · 1.2 MB');
+  expect(container.querySelector('[data-deliverable="engineering-report.md"] a').getAttribute('data-variant')).toBe('normal');
+});
+
+test('the buttons map to FOLDER_ENTRIES filenames; a file the folder lacks has no button', () => {
+  expect(DELIVERABLE_BUTTONS.map(b => b.filename)).toEqual(
+    ['assessment.pdf', 'engineering-report.md', 'assessment-data.json'],
+  );
+  render({ files: FILES.filter(f => f.filename !== 'engineering-report.md'), loading: false, error: null });
+  expect([...container.querySelectorAll('[data-deliverable]')].map(b => b.getAttribute('data-deliverable'))).toEqual(
+    ['assessment.pdf', 'assessment-data.json'],
+  );
 });
 
 test('says so when the folder has no files yet', () => {
   render({ files: [], loading: false, error: null });
+  expect(container.querySelectorAll('[data-deliverable]').length).toBe(0);
+  expect(container.textContent).toContain('No deliverables yet');
+  render({ files: [FILES[3]], loading: false, error: null });
   expect(container.querySelectorAll('[data-deliverable]').length).toBe(0);
   expect(container.textContent).toContain('No deliverables yet');
 });
@@ -116,7 +139,7 @@ test('a hostile file title is rendered as text, never as markup', () => {
   const hostile = '<img src=x onerror=alert(1)>';
   render({ files: [{ ...FILES[0], title: hostile, audience: hostile }], loading: false, error: null });
   expect(container.querySelector('img')).toBeNull();
-  expect(container.textContent).toContain(hostile);
+  expect(container.querySelector('[data-deliverable]').getAttribute('title')).toContain(hostile);
 });
 
 test.each([
