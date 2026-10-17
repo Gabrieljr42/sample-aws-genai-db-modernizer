@@ -24,7 +24,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from src.contracts.aurora_design_delta import (
     AuroraDesignDeltaContract,
@@ -32,6 +32,8 @@ from src.contracts.aurora_design_delta import (
     TypeRule,
     validate_aurora_type,
 )
+from src.contracts.aurora_mysql_model_output import AuroraMySQLModelOutputContract
+from src.contracts.aurora_postgresql_model_output import AuroraPostgresqlModelOutputContract
 from src.contracts.schema_design_input import (
     AgentAnalysisInput,
     AgentCollectorInput,
@@ -63,6 +65,14 @@ from src.tools.schema.aurora_common.sql_safety import (
 
 _GENERATORS = {"aurora_postgresql": generate_pg_ddl, "aurora_mysql": generate_mysql_ddl}
 _DIALECTS = {"aurora_postgresql": POSTGRES, "aurora_mysql": MYSQL}
+
+
+# The contract each engine's merged output is validated against; its
+# ``contract_version`` default is the version the merge writes (#974).
+_OUTPUT_CONTRACTS: dict[str, type[BaseModel]] = {
+    "aurora_mysql": AuroraMySQLModelOutputContract,
+    "aurora_postgresql": AuroraPostgresqlModelOutputContract,
+}
 
 
 def _table_key(name: str) -> str:
@@ -596,7 +606,7 @@ def merge_design_delta(
     derived = derive_access_patterns(base.queries, base.tables, base.engine)
     warnings.extend(_access_pattern_residual_warnings(derived.residuals))
     output = {
-        "contract_version": "1.0",
+        "contract_version": _OUTPUT_CONTRACTS[base.engine].model_fields["contract_version"].default,
         "job_id": base.job_id,
         "source_database": base.source_database,
         "target_engine": base.engine,

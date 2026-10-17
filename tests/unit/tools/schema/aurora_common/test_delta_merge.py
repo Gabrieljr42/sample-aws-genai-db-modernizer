@@ -132,6 +132,21 @@ def test_empty_delta_reproduces_the_draft(engine):
     assert output["validation_passed"] is True
 
 
+@pytest.mark.parametrize("engine", sorted(_CONTRACTS))
+def test_the_output_version_is_the_engine_contract_default(engine):
+    """#974: the merged output takes ``contract_version`` from its engine's
+    contract, so a bump of that default is what the merge writes."""
+    field = _CONTRACTS[engine].model_fields["contract_version"]
+    original = field.default
+    field.default = "1.99"
+    try:
+        output = merge_design_delta(_base(engine), _delta()).output
+    finally:
+        field.default = original
+    assert output is not None
+    assert output["contract_version"] == "1.99"
+
+
 def test_delta_trade_offs_replace_the_default():
     output = _ok(_delta(trade_offs=[{"description": "Keep 1:1", "impact": "Low risk"}]))
     assert [t["description"] for t in output["trade_offs"]] == ["Keep 1:1"]

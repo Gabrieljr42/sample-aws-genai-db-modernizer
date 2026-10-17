@@ -44,7 +44,6 @@ def analyze_for_elasticache(
     duration = (datetime.now() - start_time).total_seconds()
 
     output = AnalysisOutputContract(
-        contract_version="2.1",
         agent_metadata=AgentMetadata(
             agent_name="elasticache-analysis-agent",
             agent_version="1.0.0",

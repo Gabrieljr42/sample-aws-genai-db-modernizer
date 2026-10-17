@@ -237,7 +237,6 @@ def run_analysis(
             except ValueError:
                 target_db = TargetDatabase.DYNAMODB
             result = AnalysisOutputContract(
-                contract_version="2.1",
                 agent_metadata=AgentMetadata(
                     agent_name=f"{agent_type}-analysis-agent",
                     agent_version="0.0.1",

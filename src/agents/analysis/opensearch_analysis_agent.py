@@ -63,7 +63,6 @@ def analyze_for_opensearch(
 
     # === 4. Output contract v2.1 ===
     output = AnalysisOutputContract(
-        contract_version="2.1",
         agent_metadata=AgentMetadata(
             agent_name="opensearch-analysis-agent",
             agent_version="1.0.0",
