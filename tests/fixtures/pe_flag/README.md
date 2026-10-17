@@ -20,7 +20,7 @@ On the deterministic wordpress run (`--llm-mode none` up to the approved assignm
 |---|---|
 | First assignment | Tied between DynamoDB and DocumentDB (78 each) |
 | Reality check (v2) | DocumentDB removed; the query stays on DynamoDB |
-| DynamoDB schema design on v2 | 34 queries, 3 groups; every group's review returns the recording, so `schema-dynamodb/v2/design_trace.json` carries the flag three times (once per group) |
+| DynamoDB schema design on v2 | 39 queries, 4 groups; every group's review returns the recording, so `schema-dynamodb/v2/design_trace.json` carries the flag four times (once per group) |
 | Post-schema router | Moves the query once, to Aurora MySQL, score 57 against 78 on DynamoDB, as one `post_schema_flag` Move (rule `flag.capability_gap`, actor `model_flag`); no terminal query |
 | Removed engine | DocumentDB scores 78 but stays out: a flag never brings back a removed engine |
 | v3 | Status `rerouted_after_approval`; only this query changed engine |

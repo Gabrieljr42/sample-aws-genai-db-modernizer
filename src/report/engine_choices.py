@@ -93,11 +93,23 @@ def reroute_summary(report: dict[str, Any]) -> str | None:
     n = _n_reroutes(report)
     approved = rows[0].get("approved_version")
     version = f" (version {approved})" if approved else ""
-    return (
-        f"After you approved the assignment{version}, schema design review found that "
-        f"{n} {plural_noun(n, 'query', 'queries')} cannot run on the "
-        f"approved engine, so each moved to the best-scoring engine you kept."
-    )
+    facts = report_facts(report)
+    sot = int(facts.get("source_of_truth_reroute_count") or 0)
+    design = int(facts.get("design_review_reroute_count") or 0) if sot else n
+    parts: list[str] = []
+    if design:
+        parts.append(
+            f"schema design review found that {design} "
+            f"{plural_noun(design, 'query', 'queries')} cannot run on the approved engine, "
+            "so each moved to the best-scoring engine you kept"
+        )
+    if sot:
+        # #992: a saved routing that split a table's writes, re-routed on resume.
+        parts.append(
+            f"{sot} {plural_noun(sot, 'write')} moved so that each table's writes land "
+            "on one engine, its source of truth"
+        )
+    return f"After you approved the assignment{version}, " + "; and ".join(parts) + "."
 
 
 def _reroutes_md(report: dict[str, Any]) -> list[str]:

@@ -9,6 +9,7 @@ that callers translate to their own protocol (HTTP status, chat message, ...).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -53,15 +54,21 @@ from src.agents.referee.query_pattern import write_access_patterns
 from src.agents.referee.query_scoring import GATE_KIND_WRITE
 from src.agents.referee.table_resolution import TableNameResolver
 from src.agents.referee.tie_break import settled_counts
+from src.agents.referee.write_groups import (
+    collector_write_groups,
+    placement_groups,
+    write_group_tables,
+)
 from src.contracts.assignment_models import (
     Assignment,
     AssignmentSource,
     AssignmentStatus,
     CacheOverlaySummary,
+    PostSchemaReroute,
     QueryAssignment,
     ValidationResult,
 )
-from src.contracts.move_ledger import MoveActor, MovePass, ReasonCode
+from src.contracts.move_ledger import MoveActor, MoveEvidence, MovePass, ReasonCode
 from src.shared.capability_labels import capability_gap_phrase
 from src.shared.contract_versioning import load_contract, stamp_artifact_version
 from src.shared.engine_names import SOURCE_ENGINE_DISPLAY_NAMES, display_engine
@@ -70,6 +77,8 @@ from src.storage.assignment_versioning import (
     resolve_effective_assignment_version,
 )
 from src.tools.sql.query_facts import remember_collected_facts
+
+logger = logging.getLogger(__name__)
 
 
 class _Store(Protocol):
@@ -248,16 +257,43 @@ def _direct_exclusion_message(
 
 
 def _group_exclusion_message(
-    anchor_query_id: str, blocking_query_id: str, engine: str, reason: str
+    anchor_query_id: str,
+    blocking_query_id: str,
+    engine: str,
+    reason: str,
+    table: str | None = None,
 ) -> str:
     """ "Can't move q1's group to DynamoDB: query q2 in that group ..." --
     names both the query the customer actually moved (``anchor_query_id``,
     round-3 review) and the group-mate the move would land on an engine that
     cannot run it (``blocking_query_id``), since that may not be the same
-    query."""
+    query. With ``table``, the group-mate is another write of that table
+    (#992): a table's writes stay on one engine."""
+    if table:
+        return (
+            f"Can't move {anchor_query_id} to {display_engine(engine)}: query "
+            f"{blocking_query_id} also writes table {table}, and a table's writes stay on "
+            f"one engine, its source of truth; query {blocking_query_id} {reason}."
+        )
     return (
         f"Can't move {anchor_query_id}'s group to {display_engine(engine)}: "
         f"query {blocking_query_id} in that group {reason}."
+    )
+
+
+# ``ExcludedOverride.gate_kind`` for two writes of one table picked onto
+# different engines in one edit (#992).
+GATE_KIND_WRITE_GROUP_SPLIT = "write_group_split"
+
+
+def _write_split_message(
+    table: str, first_qid: str, first_engine: str, qid: str, engine: str
+) -> str:
+    """Two writes of ``table`` picked onto different engines (#992)."""
+    return (
+        f"Can't put query {qid} on {display_engine(engine)} and query {first_qid} on "
+        f"{display_engine(first_engine)}: both write table {table}, and a table's writes "
+        "stay on one engine, its source of truth. Pick one engine for both."
     )
 
 
@@ -413,6 +449,7 @@ def _load_for_edit(
             retained_engine=retained_engine_for(
                 collector_output, qas, raw.get("aurora_engine_choice")
             ),
+            write_groups=collector_write_groups(collector_output),
         )
         raw["table_assignments"] = [ta.model_dump(mode="json") for ta in table_assignments]
         raw["unresolved_table_names"] = unresolved_table_names.model_dump(mode="json")
@@ -879,7 +916,8 @@ def _propagate_codependent_overrides(
     scores: Callable[[str, str, str], dict] | None = None,
     ctx: ScoringContext | None = None,
 ) -> tuple[list[str], list[ExcludedOverride]]:
-    """Move a customer-re-routed query's co-dependent group-mates with it.
+    """Move a customer-re-routed query's co-dependent group-mates, and the other
+    writes of the tables it writes, with it.
 
     When the customer changes a query's engine and that query shares a significant
     JOIN group with others (``co_dependency_groups``), the group's other IN-SCOPE
@@ -888,9 +926,20 @@ def _propagate_codependent_overrides(
     Amendment 3). Mutates ``qa_map`` in place; returns ``(propagated_query_ids,
     excluded)``.
 
-    Respects explicit customer picks: a group the customer explicitly split (two
-    members set to different engines in the same edit) is left as chosen — the
-    resulting split is surfaced by the feasibility reviewer, not overridden here.
+    A table's writes share one engine, its source of truth (ADR-031 Amendment 9,
+    #992): a pick on one write or locking read of a table pulls the table's
+    other in-scope writes with it and, when every pick in its placement unit
+    (``write_groups.placement_groups``) names one engine, the co-dependency groups
+    they belong to; in a unit the customer split, a pick pulls its tables' writes
+    only. The pick is
+    rejected instead, with the reason, when it would split a table's writes: two
+    writes of one table set to different engines in the same edit, or a write
+    that cannot make the move (the gate below).
+
+    Respects explicit customer picks otherwise: a JOIN group the customer
+    explicitly split (two members set to different engines in the same edit) is
+    left as chosen -- the resulting split is surfaced by the feasibility reviewer,
+    not overridden here -- and only the writes of a picked table follow the pick.
     A propagated query is tagged ``co_dependency_propagated`` (not
     ``customer_override``) so it is distinguishable from the customer's own picks.
 
@@ -907,9 +956,10 @@ def _propagate_codependent_overrides(
     Best-effort: any error building the groups leaves the explicit overrides intact
     and propagates nothing — propagation is an enhancement, never a blocker.
 
-    Each move is a Move on ``ledger`` (#616: pass
-    ``customer_group_propagation``, rule ``group.customer_propagation``, actor ``customer``,
-    with the group's key), scored by ``scores(query_id, from, to)`` when given.
+    Each move is a Move on ``ledger`` (#616: pass ``customer_group_propagation``,
+    actor ``customer``, with the group's key): rule ``group.write_customer_propagation``
+    for a write of a picked table, ``group.customer_propagation`` for a JOIN
+    group-mate, scored by ``scores(query_id, from, to)`` when given.
     """
     explicit: dict[str, str] = {
         ov.query_id: ov.assigned_engine for ov in overrides if ov.assigned_engine is not None
@@ -917,60 +967,107 @@ def _propagate_codependent_overrides(
     if not explicit:
         return [], []
     try:
-        groups = build_co_dependency_groups(
-            collector_output.get("queries", {}).get("query_patterns", []),
-            collector_output.get("database_schema", {}).get("tables", []),
+        queries = collector_output.get("queries", {}).get("query_patterns", [])
+        co_groups = build_co_dependency_groups(
+            queries, collector_output.get("database_schema", {}).get("tables", [])
         )
+        write_groups = collector_write_groups(collector_output)
+        groups = placement_groups(co_groups, write_groups)
     except Exception:  # noqa: BLE001 - never block a customer edit on a grouping error
         return [], []
+    tables_written_by = write_group_tables(write_groups)
 
     propagated: list[str] = []
     excluded: list[ExcludedOverride] = []
+
+    # A table's writes have one engine: two of them picked onto different
+    # engines in one edit is rejected, whatever else the edit does.
+    for table, members in write_groups.items():
+        picked = {qid: explicit[qid] for qid in members if qid in explicit}
+        if len(set(picked.values())) > 1:
+            first = sorted(picked)[0]
+            for qid in sorted(picked)[1:]:
+                if picked[qid] != picked[first]:
+                    excluded.append(
+                        ExcludedOverride(
+                            query_id=qid,
+                            engine=picked[qid],
+                            message=_write_split_message(
+                                table, first, picked[first], qid, picked[qid]
+                            ),
+                            gate_kind=GATE_KIND_WRITE_GROUP_SPLIT,
+                        )
+                    )
+
+    def _move(qid: str, target: str, anchor: str, group: list[str], table: str | None) -> None:
+        qa = qa_map.get(qid)
+        if qa is None or not qa.in_scope or qid in explicit:
+            return
+        gated = _gate_failure(qid, query_by_id.get(qid), target, ctx)
+        if gated:
+            excluded.append(
+                ExcludedOverride(
+                    query_id=qid,
+                    engine=target,
+                    message=_group_exclusion_message(anchor, qid, target, gated[1], table),
+                    gate_kind=gated[0],
+                )
+            )
+            return
+        if qa.assigned_engine == target or qid in propagated:
+            return
+        # #503: a propagated move is a real decision too, so it clears a tie.
+        apply_to_assignment(
+            ledger,
+            qa,
+            target,
+            pass_=MovePass.CUSTOMER_GROUP_PROPAGATION,
+            reason_code=(
+                ReasonCode.WRITE_GROUP_CUSTOMER_PROPAGATION
+                if table
+                else ReasonCode.GROUP_CUSTOMER_PROPAGATION
+            ),
+            group_key=group_key(group),
+            tied_engines=[],
+            actor=MoveActor.CUSTOMER,
+            **(scores(qid, qa.assigned_engine, target) if scores else {}),
+        )
+        qa.co_dependency_propagated = True
+        qa.assignment_reason = (
+            f"Moved with the other writes of table {table} when the customer re-routed {anchor}: "
+            "a table's writes stay on one engine, its source of truth."
+            if table
+            else f"Co-located with co-dependent query group of {anchor} (shared JOIN) "
+            f"after a customer routing change."
+        )
+        propagated.append(qid)
+
     for group in groups:
         touched = set(group) & set(explicit)
         if not touched:
             continue  # customer did not touch this group
         chosen = {explicit[q] for q in touched}
-        if len(chosen) != 1:
-            continue  # explicitly split across engines -> respect; feasibility flags it
-        target = next(iter(chosen))
-        anchor = sorted(touched)[0]
-        for qid in group:
-            if qid in explicit:
-                continue  # the customer's own pick is authoritative
-            qa = qa_map.get(qid)
-            if qa is None or not qa.in_scope:
-                continue
-            gated = _gate_failure(qid, query_by_id.get(qid), target, ctx)
-            if gated:
-                excluded.append(
-                    ExcludedOverride(
-                        query_id=qid,
-                        engine=target,
-                        message=_group_exclusion_message(anchor, qid, target, gated[1]),
-                        gate_kind=gated[0],
-                    )
-                )
-                continue
-            if qa.assigned_engine != target:
-                # #503: a propagated move is a real decision too, so it clears a tie.
-                apply_to_assignment(
-                    ledger,
-                    qa,
-                    target,
-                    pass_=MovePass.CUSTOMER_GROUP_PROPAGATION,
-                    reason_code=ReasonCode.GROUP_CUSTOMER_PROPAGATION,
-                    group_key=group_key(group),
-                    tied_engines=[],
-                    actor=MoveActor.CUSTOMER,
-                    **(scores(qid, qa.assigned_engine, target) if scores else {}),
-                )
-                qa.co_dependency_propagated = True
-                qa.assignment_reason = (
-                    f"Co-located with co-dependent query group of {anchor} (shared JOIN) "
-                    f"after a customer routing change."
-                )
-                propagated.append(qid)
+        if len(chosen) == 1:
+            # The whole unit follows the one engine picked for it.
+            target = next(iter(chosen))
+            anchor = sorted(touched)[0]
+            anchor_tables = set(tables_written_by.get(anchor, []))
+            for qid in group:
+                # Each member says why it moves: a write of a table moves with the
+                # table's other writes (whoever the anchor is), any other member with
+                # its JOIN group.
+                own = tables_written_by.get(qid, [])
+                shared = sorted(anchor_tables & set(own)) or sorted(own)
+                _move(qid, target, anchor, group, shared[0] if shared else None)
+            continue
+        # Explicitly split across engines: the JOIN split is respected (the
+        # feasibility reviewer flags it), but each picked write still pulls
+        # the other writes of its tables.
+        for anchor in sorted(touched):
+            for table in tables_written_by.get(anchor, []):
+                members = write_groups.get(table, [])
+                for qid in members:
+                    _move(qid, explicit[anchor], anchor, list(members), table)
     return sorted(propagated), excluded
 
 
@@ -981,13 +1078,16 @@ def _recompute_derived_views(assignment: Assignment, collector_output: dict) -> 
     Both are derived views that must reflect the routing rather than be carried
     forward from a previous version (ADR-029 Layer B).
     """
+    write_groups = collector_write_groups(collector_output)
     table_assignments, unresolved_table_names = derive_table_assignments(
         assignment.query_assignments,
         known_tables=TableNameResolver.from_collector(collector_output),
         retained_engine=retained_engine_for(
             collector_output, assignment.query_assignments, assignment.aurora_engine_choice
         ),
+        write_groups=write_groups,
     )
+    assignment.write_groups = write_groups
     assignment.table_assignments = table_assignments
     assignment.unresolved_table_names = unresolved_table_names
     assignment.co_dependency_groups = build_co_dependency_groups(
@@ -1031,10 +1131,12 @@ def refresh_consolidated_assignment(
         for qa in qa_dicts
     ]
 
+    write_groups = collector_write_groups(collector_output)
     table_assignments, unresolved_table_names = derive_table_assignments(
         qas,
         known_tables=TableNameResolver.from_collector(collector_output),
         retained_engine=retained_engine_for(collector_output, qas, raw.get("aurora_engine_choice")),
+        write_groups=write_groups,
     )
     co_dependency_groups = build_co_dependency_groups(
         collector_output.get("queries", {}).get("query_patterns", []),
@@ -1056,6 +1158,7 @@ def refresh_consolidated_assignment(
     out = dict(raw)
     out["table_assignments"] = [ta.model_dump(mode="json") for ta in table_assignments]
     out["co_dependency_groups"] = co_dependency_groups
+    out["write_groups"] = write_groups
     out["validation_warnings"] = validation.warnings
     out["unresolved_table_names"] = unresolved_table_names.model_dump(mode="json")
     # Re-evaluate the cache overlay against the consolidated routing (#296): an
@@ -1076,3 +1179,289 @@ def refresh_consolidated_assignment(
             pruned.append(qa)
         out["query_assignments"] = pruned
     return out
+
+
+# ---------------------------------------------------------------------------
+# Saved assignments that split a table's writes (#992, ADR-031 Amendment 9)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SourceOfTruthReroute:
+    """A saved assignment re-routed so each table's writes land on one engine."""
+
+    assignment: Assignment
+    written_path: str
+    # The writes (and their placement units' other members) that moved.
+    moved_query_ids: list[str]
+    # The tables whose writes were split on the saved version.
+    split_tables: list[str]
+    # Every engine a moved query left or joined: their schema designs and the
+    # synthesis are stale against the new version and run again, as after a
+    # customer edit (``storage.assignment_versioning.stale_schema_versions``).
+    affected_engines: list[str]
+    # Customer pins the re-route overrode, each with the conflict in words.
+    pin_conflicts: list[str] = field(default_factory=list)
+
+
+# ``PostSchemaReroute.reason_category`` of a write re-routed to one source of truth
+# after approval (#992); the deliverables word it (``shared.flag_reasons``).
+SOURCE_OF_TRUTH_REROUTE_CATEGORY = "source_of_truth"
+
+
+def _split_write_tables(
+    write_groups: Mapping[str, list[str]], engine_of: Mapping[str, str]
+) -> list[str]:
+    return sorted(
+        table
+        for table, members in write_groups.items()
+        if len({engine_of[q] for q in members if q in engine_of}) > 1
+    )
+
+
+def reroute_split_writes(
+    store: _Store, database_name: str, job_id: str, *, after_approval: bool = False
+) -> SourceOfTruthReroute | None:
+    """Re-route a saved assignment whose writes split a table across engines.
+
+    An assignment saved before a table had one writer (ADR-031 Amendment 9) can
+    hold a table's writes on two engines. When such a version is loaded for
+    approval or resumed, each placement unit holding a split table's writes
+    (``write_groups.placement_groups``) goes to one engine: the engine the
+    approved version keeps with the best call-weighted mean over the unit's
+    in-scope members (``co_dependency.group_engine_scores`` with
+    ``write_groups.unit_call_weights``, the shared scorer, every member servable
+    and ownable), or the engine a customer pinned one of them to. An exact tie
+    goes through ``tie_break.break_tie``, stability first. Each moved query is a
+    Move (pass ``co_dependency``, rule ``group.write_reroute``) whose reason says
+    it was re-routed to one source of truth, and the result is a NEW version
+    (``source = source_of_truth_reroute``), never an overwrite. The changed
+    engines' designs and the synthesis are then stale against it and run
+    again, as after a customer edit.
+
+    A unit whose writes carry customer pins on two engines has no one engine the
+    customer chose: it is re-routed by score like an unpinned one, each pin the
+    move overrides is cleared (``customer_override`` off) and the conflict is
+    stated in the version's ``validation_warnings`` and ``pin_conflicts``.
+
+    ``after_approval`` (a resumed schema design, after the customer approved): the
+    version is marked ``rerouted_after_approval`` and each move is recorded in
+    ``post_schema_reroutes`` (reason category ``source_of_truth``), as the
+    post-schema router does, so every deliverable states what moved after
+    approval.
+
+    A run that finds the new version already written (another resumed run re-routed
+    the same saved version first) returns it and writes nothing. Two runs racing
+    past that check write the same moves and engines; only the timestamp differs.
+
+    Returns None when the effective version splits no table's writes (nothing
+    is written then), or no version exists.
+    """
+    from src.agents.referee.co_dependency import (
+        build_co_dependency_groups,
+        group_engine_scores,
+    )
+    from src.agents.referee.query_scoring import ScoringContext, score_query_for_engine
+    from src.agents.referee.tie_break import break_tie
+    from src.agents.referee.triage import SOURCE_ENGINE_TO_AURORA
+    from src.agents.referee.write_groups import unit_call_weights
+
+    version = resolve_effective_assignment_version(store, database_name, job_id)
+    if version == 0:
+        return None
+    raw = store.read_json(assignment_artifact_path(database_name, job_id, version))
+    collector_key = f"{database_name}/{job_id}/collector/output.json"
+    collector_output = store.read_json(collector_key) if store.exists(collector_key) else {}
+    write_groups = collector_write_groups(collector_output)
+    in_scope = {
+        qa["query_id"]: qa["assigned_engine"]
+        for qa in raw.get("query_assignments") or []
+        if qa.get("in_scope", True) and qa.get("assigned_engine")
+    }
+    split = _split_write_tables(write_groups, in_scope)
+    if not split:
+        return None
+
+    loaded = _load_for_edit(store, database_name, job_id, version, new_version=True)
+    ledger = loaded.ledger
+    if ledger is None:  # pragma: no cover - new_version=True always builds one
+        raise RuntimeError("source-of-truth reroute: no move ledger for the new version")
+    current = load_contract(
+        Assignment,
+        loaded.raw,
+        artifact=assignment_artifact_path(database_name, job_id, version),
+    )
+    queries = collector_output.get("queries", {}).get("query_patterns", [])
+    query_by_id = {q.get("query_id"): q for q in queries}
+    qa_map = {qa.query_id: qa for qa in current.query_assignments}
+    ctx = ScoringContext.from_pipeline(loaded.analysis_outputs, loaded.triage, collector_output)
+    units = placement_groups(
+        build_co_dependency_groups(
+            queries, collector_output.get("database_schema", {}).get("tables", [])
+        ),
+        write_groups,
+    )
+    weights = unit_call_weights(units, write_groups, query_by_id)
+    kept = sorted({qa.assigned_engine for qa in qa_map.values() if qa.in_scope})
+    source_compatible = SOURCE_ENGINE_TO_AURORA.get(source_database_engine(collector_output))
+    settled = settled_counts(current.query_assignments)
+    split_members = {q for t in split for q in write_groups[t]}
+
+    moved: list[str] = []
+    affected: set[str] = set()
+    pin_conflicts: list[str] = []
+    reroutes: list[dict] = []
+    for unit in units:
+        members = [q for q in unit if q in qa_map and qa_map[q].in_scope]
+        if not set(members) & split_members:
+            continue
+
+        def member_score(qid: str, engine: str) -> float | None:
+            query = query_by_id.get(qid) or {"query_id": qid}
+            if not can_own(engine, query):
+                return None
+            return score_query_for_engine(query, engine, ctx).score
+
+        pinned = {qa_map[q].assigned_engine for q in members if qa_map[q].customer_override}
+        candidates = sorted(pinned) if len(pinned) == 1 else kept
+        conflicting_pins = len(pinned) > 1
+        unit_weights = {q: weights[q] for q in members if q in weights}
+        scores = group_engine_scores(members, candidates, member_score, unit_weights)
+        if not scores:
+            logger.warning(
+                "source-of-truth reroute: no kept engine can take every query of a unit "
+                "writing %s; left as saved",
+                ", ".join(t for t in split if set(write_groups[t]) & set(members)),
+            )
+            continue
+        top = max(scores.values())
+        tied = sorted(e for e, v in scores.items() if v == top)
+        if len(tied) == 1:
+            (winner,) = tied
+        else:
+            winner, _ = break_tie(
+                tied,
+                {qa_map[q].assigned_engine for q in members},
+                source_compatible,
+                settled,
+                ",".join(sorted(members)),
+            )
+        tables = sorted(t for t in split if set(write_groups[t]) & set(members))
+        for qid in members:
+            qa = qa_map[qid]
+            if qa.assigned_engine == winner:
+                continue
+            previous = qa.assigned_engine
+            affected.update({previous, winner})
+            apply_to_assignment(
+                ledger,
+                qa,
+                winner,
+                pass_=MovePass.CO_DEPENDENCY,
+                reason_code=ReasonCode.WRITE_GROUP_REROUTE,
+                score_before=member_score(qid, qa.assigned_engine),
+                score_after=member_score(qid, winner),
+                evidence=MoveEvidence(group_scores=dict(scores)),
+                group_key=group_key(unit),
+                tied_engines=[],
+                actor=MoveActor.RULE,
+            )
+            qa.assignment_reason = (
+                f"Re-routed to one source of truth on {display_engine(winner)}: the saved "
+                f"routing split the writes of {', '.join(tables)} across engines, and a "
+                "table's writes stay on one engine (ADR-031 Amendment 9)."
+            )
+            if conflicting_pins and qa.customer_override:
+                # The customer pinned this table's writes to two engines; the one
+                # this move overrides is no longer their pin, and the conflict is said.
+                qa.customer_override = False
+                pin_conflicts.append(
+                    f"Query {qid} was pinned to {display_engine(previous)}, but other "
+                    f"writes of {', '.join(tables)} were pinned to "
+                    f"{', '.join(display_engine(e) for e in sorted(pinned - {previous}))}; "
+                    f"a table's writes stay on one engine, so it moved to "
+                    f"{display_engine(winner)} and is no longer pinned. Pin one engine "
+                    "for the table's writes in the assignment review to change it."
+                )
+            reroutes.append(
+                {
+                    "query_id": qid,
+                    "from_engine": previous,
+                    "to_engine": winner,
+                    "reason": qa.assignment_reason,
+                    "reason_category": SOURCE_OF_TRUTH_REROUTE_CATEGORY,
+                    "score_before": member_score(qid, previous),
+                    "score_after": member_score(qid, winner),
+                    "approved_version": version,
+                }
+            )
+            moved.append(qid)
+    if not moved:
+        return None
+
+    new_assignment = current.model_copy(
+        update={
+            "contract_version": Assignment.model_fields["contract_version"].default,
+            "version": version + 1,
+            "previous_version": version,
+            "status": AssignmentStatus.AUTO_GENERATED,
+            "source": AssignmentSource.SOURCE_OF_TRUTH_REROUTE,
+            "timestamp": datetime.now(UTC),
+            "query_assignments": list(qa_map.values()),
+            "moves": list(ledger.moves),
+        }
+    )
+    if after_approval:
+        # Like the post-schema router's reroute: the deliverables say what moved
+        # after the customer approved (``post_schema_reroutes``).
+        new_assignment = new_assignment.model_copy(
+            update={
+                "status": AssignmentStatus.REROUTED_AFTER_APPROVAL,
+                "post_schema_reroutes": [
+                    *current.post_schema_reroutes,
+                    *(PostSchemaReroute.model_validate(r) for r in reroutes),
+                ],
+            }
+        )
+    _recompute_derived_views(new_assignment, collector_output)
+    validation = AssignmentValidator().validate(
+        new_assignment, collector_output, loaded.analysis_outputs
+    )
+    if not validation.valid:
+        raise AssignmentValidationFailed(validation.errors, validation.warnings)
+    new_assignment.validation_warnings = [*validation.warnings, *pin_conflicts]
+    check_replay(
+        new_assignment.moves,
+        loaded.stored_state,
+        state_of(new_assignment.query_assignments),
+        "source-of-truth reroute",
+    )
+    path = assignment_artifact_path(database_name, job_id, version + 1)
+    if store.exists(path):
+        # Another run re-routed the same saved version first (two schema-design runs
+        # resumed at once): its version stands, and this call writes nothing.
+        existing = load_contract(Assignment, store.read_json(path), artifact=path)
+        return SourceOfTruthReroute(
+            assignment=existing,
+            written_path=path,
+            moved_query_ids=sorted(
+                {
+                    m.query_id
+                    for m in existing.moves
+                    if m.reason_code == ReasonCode.WRITE_GROUP_REROUTE
+                }
+            ),
+            split_tables=split,
+            affected_engines=sorted(affected),
+            pin_conflicts=[],
+        )
+    store.write_json(path, new_assignment.model_dump(mode="json"))
+    write_access_patterns(store, database_name, job_id, version + 1, collector_output)
+    return SourceOfTruthReroute(
+        assignment=new_assignment,
+        written_path=path,
+        moved_query_ids=sorted(moved),
+        split_tables=split,
+        affected_engines=sorted(affected),
+        pin_conflicts=pin_conflicts,
+    )

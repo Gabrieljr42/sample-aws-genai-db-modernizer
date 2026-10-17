@@ -593,6 +593,11 @@ def present_assignment_review(job_id: str, database_name: str) -> str:
     from src.storage.assignment_versioning import resolve_effective_assignment_version
 
     store = _make_store()
+    # A saved assignment that split a table's writes is re-routed to one source of
+    # truth before the customer is shown it (#992), so they review that version.
+    from src.agents.referee.assignment_overrides import reroute_split_writes
+
+    reroute_split_writes(store, database_name, job_id)
     version = resolve_effective_assignment_version(store, database_name, job_id)
     if version == 0:
         return json.dumps(
@@ -676,6 +681,11 @@ def open_detailed_routing_review(job_id: str, database_name: str) -> str:
     from src.storage.assignment_versioning import resolve_effective_assignment_version
 
     store = _make_store()
+    # A saved assignment that split a table's writes is re-routed to one source of
+    # truth before the customer is shown it (#992), so they review that version.
+    from src.agents.referee.assignment_overrides import reroute_split_writes
+
+    reroute_split_writes(store, database_name, job_id)
     version = resolve_effective_assignment_version(store, database_name, job_id)
     if version == 0:
         return json.dumps(
@@ -838,6 +848,7 @@ def finalize_assignment_review(
         diff_review_items,
         diff_review_rows,
         parse_assignment_review,
+        review_version,
     )
     from src.contracts.assignment_models import Assignment, AssignmentSource
     from src.storage.assignment_versioning import (
@@ -851,6 +862,39 @@ def finalize_assignment_review(
         return json.dumps(
             {"error": "No assignment found. Run the assessment core first.", "job_id": job_id}
         )
+    # The version the customer reviewed (#992): a submission is diffed against the
+    # table they saw, not a version written since, so an unchanged submission never
+    # becomes an override back onto what they were shown.
+    stripped = (edited_markdown or "").strip()
+    pending = _read_pending_hitl(store, database_name, job_id)
+    shown_version = version
+    if stripped and REVIEW_BEGIN_MARKER in stripped:
+        shown_version = review_version(stripped) or version
+    elif pending and pending.get("hitl_task_id") and pending.get("assignment_version"):
+        shown_version = int(pending["assignment_version"])
+    # A saved assignment that split a table's writes is re-routed to one source of
+    # truth, as a new version (#992, ADR-031 Amendment 9). The review tools do this
+    # before they show the routing; here it only catches a version the customer was
+    # shown before the rule (their submission is then rebased onto it).
+    from src.agents.referee.assignment_overrides import reroute_split_writes
+
+    rerouted = reroute_split_writes(store, database_name, job_id)
+    reroute_note: dict = {}
+    if rerouted is not None:
+        version = rerouted.assignment.version
+        reroute_note = {
+            "source_of_truth_reroute": {
+                "assignment_version": version,
+                "split_tables": rerouted.split_tables,
+                "moved_query_ids": rerouted.moved_query_ids,
+                "affected_engines": rerouted.affected_engines,
+                "message": (
+                    "The saved routing put some tables' writes on two engines. Each such "
+                    "table's writes now land on one engine, its source of truth, in "
+                    f"assignment v{version}; the affected engines are designed again."
+                ),
+            }
+        }
 
     current = load_contract(
         Assignment,
@@ -858,6 +902,15 @@ def finalize_assignment_review(
         load_assignment_for_edit(store, database_name, job_id, version)[0],
         artifact=f"{database_name}/{job_id}/assignment/v{version}/assignment.json",
     )
+    shown = current
+    if shown_version != version and store.exists(
+        assignment_artifact_path(database_name, job_id, shown_version)
+    ):
+        shown = load_contract(
+            Assignment,
+            load_assignment_for_edit(store, database_name, job_id, shown_version)[0],
+            artifact=f"{database_name}/{job_id}/assignment/v{shown_version}/assignment.json",
+        )
 
     # Resolve overrides from whichever transport the customer used. Precedence:
     #   1. explicit edited_markdown (chat fallback)
@@ -865,12 +918,10 @@ def finalize_assignment_review(
     #   3. nothing -> approve as-is (customer continued with the recommendation)
     overrides: list = []
     no_changes_submission = False
-    stripped = (edited_markdown or "").strip()
-    pending = _read_pending_hitl(store, database_name, job_id)
 
     try:
         if stripped and REVIEW_BEGIN_MARKER in stripped:
-            overrides = diff_review_rows(current, parse_assignment_review(stripped))
+            overrides = diff_review_rows(shown, parse_assignment_review(stripped))
         elif pending and pending.get("hitl_task_id"):
             from src.atx_orchestrator.runtime import hitl as _hitl
 
@@ -887,7 +938,7 @@ def finalize_assignment_review(
                     }
                 )
             if status == "submitted":
-                overrides = diff_review_items(current, edited_items or [])
+                overrides = diff_review_items(shown, edited_items or [])
             elif status == "submitted_empty":
                 # The customer opened the routing table, changed nothing, and
                 # submitted — a valid "keep the routing as-is" action. Treat it as
@@ -1002,6 +1053,7 @@ def finalize_assignment_review(
                 "assignment_version": effective_version,
                 "validation_warnings": warnings,
                 "feasibility_findings": findings_json,
+                **reroute_note,
                 "message": (
                     "The routing has blocking feasibility problems (see "
                     "feasibility_findings). Present them to the customer plainly: this "
@@ -1051,6 +1103,7 @@ def finalize_assignment_review(
         "assignment_version": effective_version,
         "validation_warnings": warnings,
         "feasibility_findings": findings_json,
+        **reroute_note,
     }
     if propagated:
         # Be transparent that co-dependent group-mates moved with the customer's

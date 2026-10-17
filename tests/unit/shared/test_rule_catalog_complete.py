@@ -434,6 +434,17 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
         _BUDGET,
     ),
     "src/shared/job_status.py": (frozenset({"_MAX_MESSAGE_LEN"}), _BUDGET),
+    "src/agents/referee/co_dependency.py": (
+        frozenset({"GROUP_SCORE_PLACES"}),
+        "the precision a group's mean is compared at (#992 round 4): float noise in a "
+        "weighted mean never decides between engines, an exact tie goes to tie_break",
+    ),
+    "src/agents/referee/write_groups.py": (
+        frozenset({"CALL_WEIGHT_FLOOR_SHARE"}),
+        "the floor weight of a write with no recorded calls in a call-weighted write group "
+        "(maintainer decision on #992, 2026-10-17): it keeps the write in the mean without "
+        "letting it outweigh real traffic; no engine reads it differently",
+    ),
     "src/shared/models.py": (
         frozenset({"ADAPTIVE_MAX_TOKENS_FLOOR", "LEGACY_MAX_TOKENS_FLOOR"}),
         _BUDGET,
@@ -441,7 +452,14 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
     "src/shared/query_trace.py": (frozenset({"_PLACES", "EXCERPT_CHARS"}), _BUDGET),
     "src/shared/report_facts.py": (
         frozenset(
-            {"TRACE_FULL_CAP", "CLOSE_CALL_IDS_SHOWN", "CLOSE_CALL_MARGIN", "UNSERVABLE_SHOWN"}
+            {
+                "TRACE_FULL_CAP",
+                "CLOSE_CALL_IDS_SHOWN",
+                "CLOSE_CALL_MARGIN",
+                "UNSERVABLE_SHOWN",
+                "REPLICA_READS_NAMED",
+                "TABLE_SOURCES_SHOWN",
+            }
         ),
         _BUDGET + "; CLOSE_CALL_MARGIN only decides which routed queries the report calls out",
     ),

@@ -14,6 +14,7 @@ from src.agents.referee.assignment_overrides import (
     NoAssignmentFound,
     QueryOverrideInput,
     apply_assignment_overrides,
+    reroute_split_writes,
 )
 from src.api.dependencies import database_name_param, job_id_param
 from src.contracts.assignment_models import Assignment, AssignmentSource, ValidationResult
@@ -71,6 +72,15 @@ class AssignmentOverrideRequest(BaseModel):
         None,
         description="Table-level scope narrowing (exclude entire tables)",
     )
+    base_version: int | None = Field(
+        None,
+        ge=1,
+        description=(
+            "The assignment version the edits were made on (#992). When the routing has "
+            "moved on since (a newer version), the edit is refused with HTTP 409 so the "
+            "customer reloads and re-applies it to the version they now see."
+        ),
+    )
 
 
 class AssignmentResponse(BaseModel):
@@ -116,6 +126,9 @@ async def get_assignments(
 ):
     """Read the current (latest version) assignment artifact."""
     store = _require_store()
+    # A saved assignment that split a table's writes is re-routed to one source of
+    # truth before it is shown (#992), so the customer reviews and edits that version.
+    reroute_split_writes(store, database_name, job_id)
     version = _latest_assignment_version(store, database_name, job_id)
     if version == 0:
         raise HTTPException(status_code=404, detail="No assignment artifact found")
@@ -155,7 +168,24 @@ async def put_assignments(
     ]
     exclude_tables = body.scope.exclude_tables if body.scope else None
 
+    # The edits were made on ``base_version``; a newer version since (another edit,
+    # or a source-of-truth re-route) means they were made on a routing that is no
+    # longer current, so they are refused rather than applied to it blindly (#992).
+    current_version = _latest_assignment_version(store, database_name, job_id)
+    if body.base_version is not None and current_version and body.base_version != current_version:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"The routing changed since you opened it (version {body.base_version}, now "
+                f"version {current_version}). Reload the assignment review and re-apply "
+                "your changes."
+            ),
+        )
+    rerouted = None
     try:
+        # A saved assignment that split a table's writes is re-routed to one source
+        # of truth first, as a new version the overrides then edit (#992).
+        rerouted = reroute_split_writes(store, database_name, job_id)
         result = apply_assignment_overrides(
             store,
             database_name,
@@ -183,7 +213,14 @@ async def put_assignments(
         # maps to the same 400 -- round 2 review: before this, only UnknownQuery
         # and ExcludedEngineOverride were caught by name here, so
         # LosingAuroraEngineOverride fell through to an unhandled 500.
-        raise HTTPException(status_code=400, detail=str(exc)) from None
+        detail = str(exc)
+        if rerouted is not None:
+            # The re-route version stands even though these edits were refused.
+            detail += (
+                f" (The saved routing was first re-routed so each table's writes land on "
+                f"one engine: assignment version {rerouted.assignment.version}.)"
+            )
+        raise HTTPException(status_code=400, detail=detail) from None
 
     return AssignmentResponse(
         assignment=result.assignment,

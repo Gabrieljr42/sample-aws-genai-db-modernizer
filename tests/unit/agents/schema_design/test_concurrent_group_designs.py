@@ -7,10 +7,10 @@ group in flight a designer read the input of whichever group set them last
 (on wordpress at concurrency 3, two of the three DynamoDB drafts held another
 group's queries and none of their own).
 
-This runs the real grouped DynamoDB path on the deterministic wordpress run (34
-DynamoDB queries, 3 groups) at concurrency 3 with the model calls replayed. The
+This runs the real grouped DynamoDB path on the deterministic wordpress run (39
+DynamoDB queries, 4 groups) at concurrency 4 with the model calls replayed. The
 stand-in designer calls the input tool it was given, as a model does, after a
-barrier that holds every group's designer until all three are in flight, then
+barrier that holds every group's designer until all four are in flight, then
 designs one access pattern per query the tool returned. Each group's draft must
 hold exactly its own group's queries. No test calls a model.
 """
@@ -36,7 +36,10 @@ from tests.e2e.pipeline import REPO, run_pipeline
 from tests.shared_runs import cached_run, copy_run
 
 DB, JOB = "wordpress", "job-concurrent-groups"
-GROUPS = 3
+# 4 since #992: a table's writes land on one engine, so wp_postmeta's three UPDATEs
+# and wp_woocommerce_order_itemmeta's UPDATE join their tables' other writes on
+# DynamoDB (35 -> 39 queries), and the splitter makes a fourth group.
+GROUPS = 4
 TEMPLATE = json.loads(
     (
         REPO / "docs/examples/wordpress/load-test-results/schema-dynamodb/v2/schema_output.json"
@@ -143,7 +146,7 @@ def drafts(tmp_path_factory) -> dict[int, tuple[set[str], set[str]]]:
     return out
 
 
-def test_the_design_ran_three_distinct_groups_at_once(drafts) -> None:
+def test_the_design_ran_every_group_at_once(drafts) -> None:
     assert len(drafts) == GROUPS
     owns = [own for own, _ in drafts.values()]
     assert all(owns) and not set.intersection(*owns)

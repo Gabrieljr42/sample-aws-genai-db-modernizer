@@ -158,6 +158,7 @@ def flagged(tmp_path_factory) -> dict:
     ):
         design(JOB, DB, "dynamodb", store, 2)
         trace_v2 = store.read_json(f"{prefix}/schema-dynamodb/v2/design_trace.json")
+        manifest_v2 = store.read_json(f"{prefix}/schema-dynamodb/v2/groups_manifest.json")
         with patch("src.agents.schema_design.handler.run_schema_design_auto", side_effect=design):
             LocalOrchestrator(store, llm_mode="bedrock")._run_post_schema_routing(JOB, DB)
     result = PipelineResult(db=DB, job_id=JOB, artifact_root=root)
@@ -174,6 +175,7 @@ def flagged(tmp_path_factory) -> dict:
         "id": full_id,
         "design_calls": calls,
         "trace_v2": trace_v2,
+        "manifest_v2": manifest_v2,
         "router": store.read_json(f"{prefix}/post-schema-router/router_output.json"),
         "v2": v2,
         "v3": store.read_json(f"{prefix}/assignment/v3/assignment.json"),
@@ -207,12 +209,15 @@ class TestTheReviewFlagsTheQuery:
         assert _engine_of(flagged["v2"])[flagged["id"]] == "dynamodb"
 
     def test_every_groups_review_carries_the_flag_into_the_trace(self, flagged) -> None:
-        """Each group's review flags the query, the two that did not design it
-        too: the trace keeps what each review returned."""
+        """Each group's review flags the query, the groups that did not design it
+        too: the trace keeps what each review returned. The group count is the
+        run's own (its groups manifest): 4 since #992, whose write groups put 39
+        wordpress queries on DynamoDB."""
         from src.agents.referee.post_schema_router import routing_flags_from_trace
 
         groups = flagged["trace_v2"].get("groups") or []
-        assert len(groups) == 3  # wordpress has more DynamoDB queries than one group holds
+        # wordpress has more DynamoDB queries than one group holds.
+        assert len(groups) == len(flagged["manifest_v2"]["groups"]) > 1
         flags = routing_flags_from_trace(flagged["trace_v2"])
         assert [(f["query_ids"], f["reason_category"]) for f in flags] == [
             ([flagged["id"]], "full_scan")

@@ -48,6 +48,7 @@ from .risks import (
     resolved_risks,
 )
 from .roadmap import _roadmap_md
+from .sources_of_truth import sources_of_truth_md
 from .unreviewed import unreviewed_moves_md
 from .unservable import unservable_md
 
@@ -732,6 +733,7 @@ def render_engineering_report_md(
     out += _reroutes_md(report)
     out += _cache_layer_md(report)
     out += _roadmap_md(report)
+    out += sources_of_truth_md(report)
 
     designs = _completed_designs(report)
     if designs:

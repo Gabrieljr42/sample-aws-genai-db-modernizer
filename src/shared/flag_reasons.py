@@ -12,6 +12,9 @@ FLAG_REASON_TEXT: dict[str, str] = {
     "client_side_join": "it would need a client-side join",
     "missing_feature": "it needs a feature the engine lacks",
     "other": "a capability gap",
+    # Not a model flag: a write re-routed after approval so its table's writes land
+    # on one engine (#992, ``assignment_overrides.SOURCE_OF_TRUTH_REROUTE_CATEGORY``).
+    "source_of_truth": "its table's writes were moved to one engine, its source of truth",
 }
 
 

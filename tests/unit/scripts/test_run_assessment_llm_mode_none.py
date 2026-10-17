@@ -190,10 +190,13 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     # key-scoped reads (``68b75de2`` and the ``wp_terms`` joins ``4f9d2751`` and
     # ``966f5a33``) end on Aurora MySQL instead of DynamoDB. 67% after #986 (72 of 107):
     # ``REPLACE INTO wp_wc_product_meta_lookup`` is read as the insert by key it is
-    # (key lookup), which DynamoDB rates best, so it leaves Aurora MySQL.
+    # (key lookup), which DynamoDB rates best, so it leaves Aurora MySQL. 64% after #992
+    # (68 of 107): a table's writes land on one engine, weighted by call rate, so
+    # wp_postmeta's three UPDATEs and wp_woocommerce_order_itemmeta's UPDATE join their
+    # tables' other writes on DynamoDB.
     assert arch["rationale"] == (
         "Hybrid architecture: Aurora MySQL retained as the relational core "
-        "(67% of queries); DynamoDB for key-value access; ElastiCache for "
+        "(64% of queries); DynamoDB for key-value access; ElastiCache for "
         "caching hot data. Schema design was not run, so no tables are "
         "allocated yet."
     )

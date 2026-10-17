@@ -267,6 +267,7 @@ class TestHandlerVersions:
             query_signals,
             ledger=None,
             settled=None,
+            unit_weights=None,
         ):
             moved = [{**qa, "assigned_engine": "dynamodb"} for qa in revised]
             return (
@@ -315,6 +316,7 @@ class TestHandlerVersions:
             query_signals,
             ledger=None,
             settled=None,
+            unit_weights=None,
         ):
             for qa in revised:
                 qa["assigned_engine"] = "dynamodb"

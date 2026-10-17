@@ -110,6 +110,7 @@ def route_flagged_unit(
     source_engine: str = "",
     settled: Mapping[str, int] | None = None,
     tied_engines: list[str] | None = None,
+    weights: Mapping[str, float] | None = None,
 ) -> UnitRouting:
     """The shared step: re-route ``members`` off ``flagged_engine`` by score.
 
@@ -121,7 +122,9 @@ def route_flagged_unit(
     best one wins; an exact tie goes through ``break_tie``. ``score_before`` is
     the flagged engine's own score ignoring the flag.
     """
-    score_before = _unit_score(members, flagged_engine, query_map, _ignoring_flags(scoring_context))
+    score_before = _unit_score(
+        members, flagged_engine, query_map, _ignoring_flags(scoring_context), weights
+    )
     remaining = sorted(
         {e for e in candidates if e != flagged_engine and e not in CACHE_OVERLAY_ENGINES}
     )
@@ -130,7 +133,9 @@ def route_flagged_unit(
     # to engines that can take the unit (ADR-031 Decision 12, #876).
     pool = remaining
     if len(members) > 1:
-        scores, reasons = _group_serviceable_scores(members, pool, query_map, scoring_context)
+        scores, reasons = _group_serviceable_scores(
+            members, pool, query_map, scoring_context, weights
+        )
     else:
         query = query_map.get(members[0]) or {"query_id": members[0]}
         scores, reasons = _serviceable_scores(query, pool, scoring_context)
@@ -267,6 +272,7 @@ def apply_consolidation_flags(
     settled: Mapping[str, int] | None = None,
     co_dependency_groups: list[list[str]] | None = None,
     ledger: MoveLedger | None = None,
+    unit_weights: Mapping[str, float] | None = None,
 ) -> tuple[list[dict], list[dict], list[dict], dict[str, set[str]]]:
     """Apply reality-check flags on consolidated queries (both LLM modes).
 
@@ -357,6 +363,7 @@ def apply_consolidation_flags(
                 source_engine=source_engine,
                 settled=settled,
                 tied_engines=tied,
+                weights=unit_weights,
             )
             flagged_members = [m for m in members if m in gaps]
             outcome = FlagOutcome(

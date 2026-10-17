@@ -355,17 +355,19 @@ def _unit_score(
     engine: str,
     query_map: Mapping[str, Mapping],
     scoring_context: ScoringContext,
+    weights: Mapping[str, float] | None = None,
 ) -> float | None:
-    """The unit's score on ``engine`` (the mean over members), ``None`` if any is gated."""
-    scores: list[float] = []
-    for mqid in members:
-        result = score_query_for_engine(
-            query_map.get(mqid) or {"query_id": mqid}, engine, scoring_context
-        )
-        if result.score is None:
-            return None
-        scores.append(result.score)
-    return sum(scores) / len(scores) if scores else None
+    """The unit's score on ``engine`` (the mean over members, call-rate weighted for
+    a write unit, ``co_dependency.group_engine_scores``), ``None`` if any is gated."""
+    if not members:
+        return None
+
+    def member_score(mqid: str, candidate: str) -> float | None:
+        return score_query_for_engine(
+            query_map.get(mqid) or {"query_id": mqid}, candidate, scoring_context
+        ).score
+
+    return group_engine_scores(members, [engine], member_score, weights).get(engine)
 
 
 def _ignoring_flags(scoring_context: ScoringContext) -> ScoringContext:
@@ -400,6 +402,7 @@ def _group_serviceable_scores(
     candidates: Iterable[str],
     query_map: Mapping[str, Mapping],
     scoring_context: ScoringContext,
+    weights: Mapping[str, float] | None = None,
 ) -> tuple[dict[str, float], list[str]]:
     """A co-dependency group's combined score on each candidate: the mean of
     every member's own score there (the maintainer's "a group's engine
@@ -423,7 +426,7 @@ def _group_serviceable_scores(
     # ADR-031 Decision 4, Amendment 4 (#727): the one group rule; it stops
     # at a candidate's first gated member, so each blocked candidate adds
     # exactly one reason.
-    scores = group_engine_scores(member_qids, candidates, member_score)
+    scores = group_engine_scores(member_qids, candidates, member_score, weights)
     return scores, reasons
 
 
@@ -552,6 +555,7 @@ def sanity_sweep(
     query_signals: Mapping[str, list[str]] | None = None,
     ledger: MoveLedger | None = None,
     settled: Mapping[str, int] | None = None,
+    unit_weights: Mapping[str, float] | None = None,
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Final pass: remove a tiny orphan engine the other committed engines
     can serve (ADR-031 Decision 7: "when an engine serves only a few
@@ -653,6 +657,8 @@ def sanity_sweep(
             12: the resolver's, which the reality check carries,
             ``RoutingTrace.settled_counts``); recounted from
             ``revised_assignments`` when ``None`` (#746).
+        unit_weights: ``write_groups.assignment_unit_weights`` (#992): the
+            call-rate weights a unit holding a write group is judged on.
 
     Returns:
         (updated_assignments, updated_consolidations, sweep_decisions) —
@@ -772,7 +778,7 @@ def sanity_sweep(
 
             if is_group:
                 scores, reasons = _group_serviceable_scores(
-                    members, pool, query_map, scoring_context
+                    members, pool, query_map, scoring_context, unit_weights
                 )
                 label = f"co-dependency group {', '.join(members)}"
             else:
@@ -893,7 +899,9 @@ def sanity_sweep(
             # (ignoring a model flag there) and the score it won with.
             # Rounded to 2 places (a group's mean can run long): the same number
             # in the Move and in the reason.
-            raw_before = _unit_score(members, engine, query_map, _ignoring_flags(scoring_context))
+            raw_before = _unit_score(
+                members, engine, query_map, _ignoring_flags(scoring_context), unit_weights
+            )
             score_before = None if raw_before is None else round(raw_before, 2)
             score_after = round(unit_scores[winner], 2)
             scores_text = _move_scores_text(engine, score_before, winner, score_after)

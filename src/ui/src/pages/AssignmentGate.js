@@ -269,7 +269,8 @@ const AssignmentGatePage = memo(() => {
           id: 'save',
           path: `assessments/${jobId}/assignments?database_name=${encodeURIComponent(databaseName)}`,
           method: 'PUT',
-          params: { overrides: overrideList }
+          // #992: the version these edits were made on; the API refuses a stale edit.
+          params: { overrides: overrideList, base_version: assignmentData?.assignment?.version }
         }
       ]);
 
@@ -288,7 +289,7 @@ const AssignmentGatePage = memo(() => {
     } finally {
       setSavingOverrides(false);
     }
-  }, [jobId, overrides, cacheOverrides, addFlash, fetchData, t]);
+  }, [jobId, overrides, cacheOverrides, addFlash, fetchData, t, assignmentData]);
 
   // ---- Handle Sankey node click ----
   const handleSankeyNodeClick = useCallback((nodeId) => {
