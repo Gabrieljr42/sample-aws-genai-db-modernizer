@@ -175,8 +175,9 @@ class TestMigrationWaves:
         result = run_synthesis_deterministic(JOB, DB, store, assignment_version=2)
         _write_synthesis_report(store, result, assignment_version=2)
         report = store.read_json(f"{DB}/{JOB}/synthesis/v2/report.json")
-        # #1028: migration_waves[].gate_parts added
-        assert report["contract_version"] == "1.27"
+        # #1020: facts.in_scope_query_count, facts.moving_query_count and
+        # facts.resolved_risks_by_severity added
+        assert report["contract_version"] == "1.28"
         assert len(report["migration_waves"]) == 3
         assert report["migration_waves"][2]["engines"] == ["dynamodb"]
 

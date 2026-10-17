@@ -11,6 +11,7 @@ import {
   openRiskCountAt,
   openRiskCountOf,
   resolvedRiskCountOf,
+  resolvedRisksBySeverityText,
   tradeOffCountOf,
   realityCheckDecisions,
   tradeOffsByTab,
@@ -151,6 +152,22 @@ describe('the counts the deliverables print are facts (#748)', () => {
     expect(resolvedRiskCountOf({}, [{}, {}, {}])).toBe(3);
     expect(tradeOffCountOf(undefined, [{}])).toBe(1);
     expect(mappedTableCountOf({ facts: {} }, [{}, {}])).toBe(2);
+  });
+});
+
+// #1020: the resolved risks by severity are the stored fact, worded per severity.
+describe('resolved risks by severity (#1020)', () => {
+  const t = (key, opts) => enMessages[key].replace('{{count}}', opts.count).replace('{{severity}}', opts.severity);
+
+  test('every stored severity, in its order, with its count', () => {
+    const facts = { resolved_risks_by_severity: { HIGH: 2, MEDIUM: 4 } };
+    expect(resolvedRisksBySeverityText({ facts }, t)).toBe('2 high, 4 medium');
+  });
+
+  test('a report with no such map gets no text, not a recount of the list', () => {
+    expect(resolvedRisksBySeverityText({ facts: { resolved_risk_count: 6 } }, t)).toBe('');
+    expect(resolvedRisksBySeverityText({}, t)).toBe('');
+    expect(resolvedRisksBySeverityText({ facts: { resolved_risks_by_severity: {} } }, t)).toBe('');
   });
 });
 

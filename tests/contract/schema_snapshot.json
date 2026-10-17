@@ -17416,7 +17416,23 @@
                     "kind": "array"
                   }
                 },
+                "in_scope_query_count": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
                 "migration_wave_count": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "moving_query_count": {
                   "required": false,
                   "schema": {
                     "kind": "scalar",
@@ -17929,6 +17945,16 @@
                     "kind": "scalar",
                     "minimum": 0,
                     "type": "integer"
+                  }
+                },
+                "resolved_risks_by_severity": {
+                  "required": false,
+                  "schema": {
+                    "additional": {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    "kind": "object"
                   }
                 },
                 "source_table_count": {
@@ -21406,8 +21432,8 @@
         }
       }
     },
-    "schema_hash": "4eba17fcc4e341a2933204056483a2134d26c80a74e6d1cd11eddc3430a00b15",
-    "version": "1.27"
+    "schema_hash": "0e9d8f92428b12eeadfcb13295b8203f0bacdc1d290c26692655f88451d88c9c",
+    "version": "1.28"
   },
   "triage_output.TriageOutputContract": {
     "fields": {

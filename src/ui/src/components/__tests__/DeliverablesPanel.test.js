@@ -45,7 +45,7 @@ jest.mock('@cloudscape-design/components/button', () => ({
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
 const FILES = [
-  { filename: 'assessment.pdf', title: 'Executive summary (PDF)', audience: 'Executives', size_bytes: 1258291, path: 'assessments/job-1/deliverables/assessment.pdf' },
+  { filename: 'executive-report.pdf', title: 'Executive report (PDF)', audience: 'Executives', size_bytes: 1258291, path: 'assessments/job-1/deliverables/executive-report.pdf' },
   { filename: 'engineering-report.md', title: 'Engineering report (Markdown)', audience: 'The team', size_bytes: 20480, path: 'assessments/job-1/deliverables/engineering-report.md' },
   { filename: 'assessment-data.json', title: 'Assessment Data (JSON)', audience: 'Tools', size_bytes: 512, path: 'assessments/job-1/deliverables/assessment-data.json' },
   { filename: 'index.md', title: 'Folder index (Markdown)', audience: 'Everyone', size_bytes: 900, path: 'assessments/job-1/deliverables/index.md' },
@@ -88,7 +88,7 @@ test('three buttons, in order: Executive Summary, Engineering Report, Assessment
   render({ files: FILES, loading: false, error: null });
   const buttons = [...container.querySelectorAll('[data-deliverable]')];
   expect(buttons.map(b => b.getAttribute('data-deliverable'))).toEqual(
-    ['assessment.pdf', 'engineering-report.md', 'assessment-data.json'],
+    ['executive-report.pdf', 'engineering-report.md', 'assessment-data.json'],
   );
   expect(buttons.map(b => b.querySelector('a').textContent)).toEqual(
     ['Executive Summary', 'Engineering Report', 'Assessment Detail'],
@@ -99,23 +99,23 @@ test('three buttons, in order: Executive Summary, Engineering Report, Assessment
 
 test('each button downloads its file from the API, and says which file in its label and tooltip', () => {
   render({ files: FILES, loading: false, error: null });
-  const pdf = container.querySelector('[data-deliverable="assessment.pdf"]');
+  const pdf = container.querySelector('[data-deliverable="executive-report.pdf"]');
   const link = pdf.querySelector('a');
-  expect(link.getAttribute('href')).toBe('http://localhost:8000/api/v1/assessments/job-1/deliverables/assessment.pdf');
-  expect(link.getAttribute('download')).toBe('assessment.pdf');
-  expect(link.getAttribute('aria-label')).toBe('Download assessment.pdf');
+  expect(link.getAttribute('href')).toBe('http://localhost:8000/api/v1/assessments/job-1/deliverables/executive-report.pdf');
+  expect(link.getAttribute('download')).toBe('executive-report.pdf');
+  expect(link.getAttribute('aria-label')).toBe('Download executive-report.pdf');
   expect(link.getAttribute('data-variant')).toBe('primary');
-  expect(pdf.getAttribute('title')).toBe('Executive summary (PDF) · assessment.pdf · 1.2 MB');
+  expect(pdf.getAttribute('title')).toBe('Executive report (PDF) · executive-report.pdf · 1.2 MB');
   expect(container.querySelector('[data-deliverable="engineering-report.md"] a').getAttribute('data-variant')).toBe('normal');
 });
 
 test('the buttons map to FOLDER_ENTRIES filenames; a file the folder lacks has no button', () => {
   expect(DELIVERABLE_BUTTONS.map(b => b.filename)).toEqual(
-    ['assessment.pdf', 'engineering-report.md', 'assessment-data.json'],
+    ['executive-report.pdf', 'engineering-report.md', 'assessment-data.json'],
   );
   render({ files: FILES.filter(f => f.filename !== 'engineering-report.md'), loading: false, error: null });
   expect([...container.querySelectorAll('[data-deliverable]')].map(b => b.getAttribute('data-deliverable'))).toEqual(
-    ['assessment.pdf', 'assessment-data.json'],
+    ['executive-report.pdf', 'assessment-data.json'],
   );
 });
 

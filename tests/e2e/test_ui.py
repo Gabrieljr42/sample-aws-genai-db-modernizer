@@ -26,7 +26,7 @@ from src.report.deliverables import DELIVERABLES_DIR, FOLDER_FILENAMES
 from tests.e2e.pipeline import PipelineResult
 from tests.placeholders import placeholder_leaks
 
-# The results page is a primary deliverable next to the PDF report (#987); its
+# The results page is a primary deliverable next to the executive report (#987); its
 # browser checks (rendering, overflow, accessibility) live here. Restrict this file
 # to Chromium only. NOTE for ci/e2e.sh: pytest-playwright implements only_browser via a
 # runtime pytest.skip() in pytest_runtest_setup (not deselection), so if this suite
@@ -380,7 +380,7 @@ def test_results_page_downloads_the_deliverables_folder(
     Executive Summary, Engineering Report and Assessment Detail, each the
     download of one file of the job's deliverables/ folder, as it is on disk."""
     buttons = {
-        "assessment.pdf": "Executive Summary",
+        "executive-report.pdf": "Executive Summary",
         "engineering-report.md": "Engineering Report",
         "assessment-data.json": "Assessment Detail",
     }
@@ -469,6 +469,35 @@ def test_results_page_shows_the_headline_first(
             )
             assert shown.count() == sum(min(3, len(p["query_ids"])) for p in pairs), r.db
         assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+
+
+def test_results_page_states_the_resolved_risks_by_severity(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    """#1020: the risk section's resolved-risks header reads the stored
+    facts.resolved_risks_by_severity, as the executive and engineering reports do
+    ("6 risks resolved by the assignment: 2 high, 4 medium")."""
+    checked = 0
+    for r in all_runs:
+        facts = json.loads((r.artifact_root / r.report["report"]).read_text())["facts"]
+        by_severity = facts.get("resolved_risks_by_severity") or {}
+        if not by_severity:
+            continue
+        n = facts["resolved_risk_count"]
+        severities = ", ".join(f"{k} {s.lower()}" for s, k in by_severity.items())
+        noun = "risk" if n == 1 else "risks"
+        expected = f"{n} {noun} resolved by the assignment: {severities}"
+        md = r.deliverable("engineering-report.md").read_text(encoding="utf-8")
+        assert f"({severities})" in md, r.db
+        ev = _watch(page)
+        page.goto(f"{ui}/analysis/results/{r.job_id}")
+        page.wait_for_load_state("networkidle")
+        page.locator("#migration-roadmap-section").wait_for()
+        header = page.get_by_text(expected, exact=True)
+        assert header.count() == 1, (r.db, expected)
+        checked += 1
+        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)
+    assert checked, "no sample resolved a risk"
 
 
 def test_ui_shows_only_the_product_name(

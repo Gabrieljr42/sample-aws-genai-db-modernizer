@@ -35,6 +35,17 @@ export function resolvedRiskCountOf(synthesis, shownRisks) {
   return typeof n === 'number' ? n : (shownRisks || []).length;
 }
 
+// #1020: "2 high, 4 medium", the resolved risks by severity
+// (facts.resolved_risks_by_severity, every severity it lists, in its order: it omits
+// a severity with none). Empty when the facts block has no such map.
+export function resolvedRisksBySeverityText(synthesis, t) {
+  const bySeverity = factsOf(synthesis) && factsOf(synthesis).resolved_risks_by_severity;
+  if (!bySeverity || typeof bySeverity !== 'object') return '';
+  return Object.entries(bySeverity)
+    .map(([severity, count]) => t('analysis-results.risk-assessment.severity-count', { count, severity: severity.toLowerCase() }))
+    .join(', ');
+}
+
 // "Trade-offs (12)": the trade-offs that still apply (facts.trade_off_count).
 export function tradeOffCountOf(synthesis, shownTradeOffs) {
   const n = factsOf(synthesis) && factsOf(synthesis).trade_off_count;

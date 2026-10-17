@@ -31,10 +31,9 @@ export function formatBytes(n) {
  * and `t` (the page's own `useTranslation` function), like QueryRoutingTable.
  */
 
-// One entry per button, by FOLDER_ENTRIES filename. The executive PDF of #1020
-// (executive-report.pdf) replaces assessment.pdf here once it ships.
+// One entry per button, by FOLDER_ENTRIES filename (#1020: the executive report PDF).
 export const DELIVERABLE_BUTTONS = [
-  { id: 'executive-summary', filename: 'assessment.pdf', variant: 'primary' },
+  { id: 'executive-summary', filename: 'executive-report.pdf', variant: 'primary' },
   { id: 'engineering-report', filename: 'engineering-report.md', variant: 'normal' },
   { id: 'assessment-detail', filename: 'assessment-data.json', variant: 'normal' },
 ];

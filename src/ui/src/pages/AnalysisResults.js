@@ -60,7 +60,7 @@ import { costBaselineStats } from "../utils/tcoAnalysis";
 import { ENGINE_LABELS } from "../utils/engineNames";
 import { WORKLOAD_FIT_DEFINITION } from "../utils/workloadFitLabels";
 import { optimizationLabel } from "../utils/optimizationLabels";
-import { accessPatternTotals, openRiskCountAt, resolvedRiskCountOf, routingHistoryRecorded, routingKindsById, tradeOffsByTab, tradeOffTabLabel } from "../utils/reportFacts";
+import { accessPatternTotals, openRiskCountAt, resolvedRiskCountOf, resolvedRisksBySeverityText, routingHistoryRecorded, routingKindsById, tradeOffsByTab, tradeOffTabLabel } from "../utils/reportFacts";
 
 
 // ============================================
@@ -388,8 +388,8 @@ const AnalysisResultsPage = memo(() => {
 
   // #269: whether this synthesis summary was replaced by its deterministic
   // fallback (a grounding check rejected the generated text against the final
-  // records, #205) -- the PDF report already says so when it is
-  // (src/report/pdf_report.py); this keeps the Results page in agreement with it.
+  // records, #205) -- the engineering report already says so when it is
+  // (src/report/engineering_report.py); this keeps the Results page in agreement with it.
   const summaryFallback = summaryFallbackInfo(
     synthesis?.summary_source,
     synthesis?.summary_validation_warnings,
@@ -417,7 +417,7 @@ const AnalysisResultsPage = memo(() => {
   // #358: cost breakdown keeps the cache layer's own cost card even though it
   // owns no workload share, and the projected total is the report's own
   // tco_analysis.projected_monthly_cost -- not a sum recomputed from a
-  // filtered subset -- so it matches the PDF report and chat.
+  // filtered subset -- so it matches the executive report and chat.
   const { items: costBreakdown, total: projectedCost } = useMemo(
     () => resolveCostBreakdown(synthesis?.tco_analysis, afterDist, cacheOverlay, synthesis?.facts),
     [synthesis, afterDist, cacheOverlay]
@@ -2453,7 +2453,11 @@ const AnalysisResultsPage = memo(() => {
                     })}
                   />
                   {resolvedRisksList.length > 0 && (
-                    <ExpandableSection headerText={t('analysis-results.risk-assessment.resolved-count', { count: resolvedRiskCountOf(synthesis, resolvedRisksList) })}>
+                    <ExpandableSection headerText={
+                      resolvedRisksBySeverityText(synthesis, t)
+                        ? t('analysis-results.risk-assessment.resolved-count-by-severity', { count: resolvedRiskCountOf(synthesis, resolvedRisksList), severities: resolvedRisksBySeverityText(synthesis, t) })
+                        : t('analysis-results.risk-assessment.resolved-count', { count: resolvedRiskCountOf(synthesis, resolvedRisksList) })
+                    }>
                       <SpaceBetween size="s">
                         {resolvedRisksList.map((risk, idx) => {
                           const { body } = splitRiskDescription(risk.description);
