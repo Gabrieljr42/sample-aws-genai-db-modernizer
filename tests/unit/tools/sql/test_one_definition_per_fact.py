@@ -207,7 +207,6 @@ def test_only_declared_modules_hold_sql_detectors():
 # GROUP BY, ORDER BY, a pattern-match predicate, a literal-prefix LIKE, the SELECT word
 # and the range predicate are not among them: it imports those from regex_facts (#893, #933).
 QUERY_SHAPE_OWN_DETECTORS: dict[str, str] = {
-    "_QUOTED_IDENT_RE": "quoted identifiers made bare before literals are stripped",
     "_DISTINCT_RE": "the shape check's DISTINCT",
     "_CTE_RE": "the shape check's CTE",
     "_WHERE_RE": "the WHERE clause the key predicate is read from",
@@ -226,7 +225,6 @@ QUERY_SHAPE_OWN_DETECTORS: dict[str, str] = {
     "_TABLE_HINTS_RE": "SQL Server's locking hints",
     "_HINT_ARGUMENTS_RE": "a hint's arguments",
     "_HINT_WORD_RE": "a hint's name",
-    "_SPAN_OPENER_RE": "the comment/literal scanner",
 }
 
 

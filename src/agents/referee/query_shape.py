@@ -32,6 +32,11 @@ from collections.abc import Mapping, Sequence
 from src.agents.referee.access_pattern import KEY_LOOKUP, KEY_RANGE, KEY_SCOPED, REFERENCE_READ
 from src.agents.referee.capability_registry import detect_required_capabilities
 from src.agents.referee.table_resolution import SourceScope
+from src.shared.sql_spans import (
+    COMMENTS_LITERALS_AND_IDENTIFIERS,
+    QUOTED_IDENTIFIERS,
+    sub_spans,
+)
 from src.shared.unsupported_pattern import non_scalar_function_names, strip_comments_and_literals
 from src.tools.sql.query_facts import query_facts
 from src.tools.sql.regex_facts import (
@@ -76,7 +81,9 @@ order over non-key columns, an engine-specific function, ..."""
 # BEFORE literals are stripped: ``strip_comments_and_literals`` blanks every
 # double-quoted span, which would otherwise erase the column side of
 # ``"t"."id" = $1`` and leave nothing to tell it apart from ``$1 = $2``.
-_QUOTED_IDENT_RE = re.compile(r'"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]')
+# Found by :data:`QUOTED_IDENTIFIERS` in one linear pass (#886), not a regex:
+# the old ``"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]`` rescanned the rest of the text
+# from every unterminated opener.
 
 _DISTINCT_RE = re.compile(r"\bDISTINCT\b", re.IGNORECASE)
 _CTE_RE = re.compile(
@@ -244,82 +251,20 @@ _LOCKING_HINTS = frozenset({"UPDLOCK", "HOLDLOCK", "XLOCK", "SERIALIZABLE"})
 _ROW_SKIPPING_HINTS = frozenset({"READPAST"})
 
 
-# The openers :func:`_normalized_sql` looks for. Whichever opens first wins, so
-# a quote inside a comment or a literal never pairs with one outside it (review
-# of #871: ``'5"' FOR UPDATE /* "audit" */`` hid the lock).
-_SPAN_OPENER_RE = re.compile(r"/\*|--|['\"`\[]")
-# What can end or escape inside each quoted span: ``'`` literals take backslash
-# escapes, ``"`` identifiers do not.
-_QUOTED_SPAN_STOPS = {"'": re.compile(r"['\\]"), '"': re.compile('"')}
-_SPAN_CLOSERS = {"`": "`", "[": "]", "/*": "*/"}
-
-
-def _quoted_span_end(text: str, start: int, quote: str) -> int:
-    """End (exclusive) of the ``quote``-quoted span opening at ``start``, or -1.
-
-    A doubled quote is an escaped quote, and in a ``'`` literal so is ``\\``
-    followed by any character. Same answer as the regex
-    ``'(?:[^'\\]|\\.|'')*'`` (``"(?:[^"]|"")*"`` without backslash): when the
-    text ends inside the span, the span closes at the first quote of its last
-    doubled pair, as the regex does when it backtracks; with no pair it is
-    unterminated.
-    """
-    stops = _QUOTED_SPAN_STOPS[quote]
-    k = start + 1
-    last_pair = -1
-    while True:
-        stop = stops.search(text, k)
-        if stop is None:
-            return last_pair + 1 if last_pair >= 0 else -1
-        pos = stop.start()
-        if text[pos] == "\\":
-            if pos + 1 >= len(text):
-                return last_pair + 1 if last_pair >= 0 else -1
-            k = pos + 2
-        elif text.startswith(quote * 2, pos):
-            last_pair = pos
-            k = pos + 2
-        else:
-            return pos + 1
-
-
 def _normalized_sql(text: str) -> str:
     """``text`` with comments and literals blanked and quoted identifiers made ``ident``.
 
-    One left-to-right pass in linear time (review of #871): at each step the
-    span that opens first -- a ``/* */`` or ``--`` comment, a ``'...'``
+    One left-to-right pass in linear time (review of #871, ``sql_spans``): at each
+    step the span that opens first -- a ``/* */`` or ``--`` comment, a ``'...'``
     literal (``''`` and backslash escapes), or a ``"..."`` / `` `...` `` /
     ``[...]`` identifier -- is replaced whole, so a quote inside one never
-    pairs with a quote outside it. An opener with no closer is plain text, and
-    once one kind has no closer left, every later opener of that kind is
-    skipped at once instead of rescanning the rest of the text.
+    pairs with a quote outside it. An opener with no closer is plain text.
     """
-    out: list[str] = []
-    unclosed: set[str] = set()
-    last = i = 0
-    while (match := _SPAN_OPENER_RE.search(text, i)) is not None:
-        start, opener = match.start(), match.group()
-        end = -1
-        if opener not in unclosed:
-            if opener == "--":
-                newline = text.find("\n", start)
-                end = len(text) if newline < 0 else newline
-            elif opener in _SPAN_CLOSERS:
-                closer = _SPAN_CLOSERS[opener]
-                found = text.find(closer, start + len(opener))
-                end = found + len(closer) if found >= 0 else -1
-            else:
-                end = _quoted_span_end(text, start, opener)
-            if end < 0:
-                unclosed.add(opener)
-        if end < 0:
-            i = start + 1
-            continue
-        out.append(text[last:start])
-        out.append(" " if opener in ("--", "/*", "'") else " ident ")
-        last = i = end
-    out.append(text[last:])
-    return "".join(out)
+    return sub_spans(
+        text,
+        COMMENTS_LITERALS_AND_IDENTIFIERS,
+        lambda span: " " if span.startswith(("/*", "--", "'")) else " ident ",
+    )
 
 
 def _hint_names(hints: str) -> list[str]:
@@ -405,7 +350,7 @@ _SORT_ITEM_RE = re.compile(
 
 def _unquote_identifiers(text: str) -> str:
     """``"t"."id"`` / `` `id` `` / ``[id]`` -> ``t.id`` / ``id``, keeping the names."""
-    return _QUOTED_IDENT_RE.sub(lambda m: m.group(0)[1:-1].replace('""', '"'), text)
+    return sub_spans(text, QUOTED_IDENTIFIERS, lambda span: span[1:-1].replace('""', '"'))
 
 
 def _qualifier(match: re.Match[str]) -> str:
@@ -702,7 +647,7 @@ def _relational_reasons(
         functions -= aggregate_function_names(text)
     if functions:
         return RELATIONAL
-    with_idents = _QUOTED_IDENT_RE.sub(" ident ", text)
+    with_idents = sub_spans(text, QUOTED_IDENTIFIERS, lambda _span: " ident ")
     sql = strip_comments_and_literals(with_idents)
     if _CTE_RE.search(sql):
         return RELATIONAL
