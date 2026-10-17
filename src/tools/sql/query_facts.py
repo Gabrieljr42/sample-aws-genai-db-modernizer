@@ -47,6 +47,7 @@ from src.shared.sql_comments import strip_leading_comments
 from src.shared.unsupported_pattern import is_dedup_only_group_by, strip_comments_and_literals
 from src.tools.sql.facade import AccessFacts, SqlFacts, query_readings
 from src.tools.sql.regex_facts import (
+    EXISTS_CONDITION_RE,
     SELECT_WORD_RE,
     WildcardLike,
     has_match_against,
@@ -184,17 +185,9 @@ _WRITE_WORD_RE = re.compile(r"\b(?:INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 # ``credit_limit``), which is why they are kept apart from the parsed facts.
 # ---------------------------------------------------------------------------
 
-# EXISTS (subquery), NOT EXISTS (subquery), IN (SELECT ...)
-_EXISTS_OR_IN_SUBQUERY_RE = re.compile(
-    r"""
-    \bEXISTS\s*\(               # EXISTS (subquery)
-    |
-    \bNOT\s+EXISTS\s*\(         # NOT EXISTS (subquery)
-    |
-    \bIN\s*\(\s*SELECT\b        # IN (SELECT ...)
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
+# EXISTS (subquery) or NOT EXISTS (subquery) is ``regex_facts.EXISTS_CONDITION_RE``, the
+# condition the transaction shape blanks too (#930); IN (SELECT ...) is this one.
+_IN_SUBQUERY_RE = re.compile(r"\bIN\s*\(\s*SELECT\b", re.IGNORECASE)
 
 IN_LIST_KEYWORDS: tuple[str, ...] = (
     " in (",
@@ -847,7 +840,7 @@ class QueryFacts:
     @cached_property
     def exists_or_in_subquery(self) -> bool:
         """``EXISTS (``, ``NOT EXISTS (`` or ``IN (SELECT``."""
-        return bool(_EXISTS_OR_IN_SUBQUERY_RE.search(self._text))
+        return bool(EXISTS_CONDITION_RE.search(self._text) or _IN_SUBQUERY_RE.search(self._text))
 
     @cached_property
     def in_list(self) -> bool:

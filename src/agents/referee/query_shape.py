@@ -36,6 +36,7 @@ from src.shared.unsupported_pattern import non_scalar_function_names, strip_comm
 from src.tools.sql.query_facts import query_facts
 from src.tools.sql.regex_facts import (
     GROUP_BY_RE,
+    IN_LIST_RE,
     LITERAL_PREFIX_LIKE_RE,
     ORDER_BY_RE,
     PATTERN_PREDICATE_RE,
@@ -90,8 +91,8 @@ _WHERE_RE = re.compile(
 )
 # "=" that is not part of <=, >=, !=, <=>, :=, ==, =>.
 _EQUALS_RE = re.compile(r"(?<![<>!=:])=(?![=>])")
-# "IN (" -- whether it is "NOT IN" is decided from the operand before it.
-_IN_LIST_RE = re.compile(r"\bIN\s*\(", re.IGNORECASE)
+# "IN (" (regex_facts.IN_LIST_RE) -- whether it is "NOT IN" is decided from the operand
+# before it.
 _NOT_BEFORE_RE = re.compile(r"\bNOT\s*$", re.IGNORECASE)
 # The operand right before an operator / right after it.
 _LEFT_OPERAND_RE = re.compile(r"([A-Za-z_$@:?0-9][\w$@:.?]*|\))\s*$")
@@ -539,7 +540,7 @@ def _has_key_predicate(where: str) -> bool:
         right = _RIGHT_OPERAND_RE.search(where[m.end() :])
         if (left and _is_column(left.group(1))) or (right and _is_column(right.group(1))):
             return True
-    for m in _IN_LIST_RE.finditer(where):
+    for m in IN_LIST_RE.finditer(where):
         before = where[: m.start()]
         if _NOT_BEFORE_RE.search(before):
             continue
