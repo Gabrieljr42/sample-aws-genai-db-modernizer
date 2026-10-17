@@ -44,8 +44,6 @@ from pydantic import BaseModel, Field
 from src.agents.load_test.models import SeedManifest
 from src.contracts.analysis_output import AnalysisOutputContract
 from src.contracts.load_test_models import InfrastructureManifest, LoadTestOutput
-from src.contracts.reality_check_output import RealityCheckOutputContract
-from src.contracts.triage_output import TriageOutputContract
 
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = ("src", "scripts")
@@ -65,14 +63,11 @@ UNTYPED_WRITE_SITES: dict[tuple[str, str, str], type[BaseModel]] = {
     ("src/atx_orchestrator/core.py", "run_analysis_core", "contract"): AnalysisOutputContract,
 }
 
-# Written contracts whose ``contract_version`` predates the one declaration
-# style and has a default but no pattern. The snapshot guard counts an added
-# pattern as MAJOR, so adding it waits on #1006. A model listed here must
-# still have a literal MAJOR.MINOR default.
-PATTERN_PENDING: dict[type[BaseModel], str] = {
-    TriageOutputContract: "#1006",
-    RealityCheckOutputContract: "#1006",
-}
+# Written contracts whose ``contract_version`` has a default but no pattern, with
+# the issue that adds it. Empty since #1006 gave the last two theirs (the snapshot
+# differ counts adopting exactly ``^\d+\.\d+$`` as MINOR). A model listed here
+# must still have a literal MAJOR.MINOR default.
+PATTERN_PENDING: dict[type[BaseModel], str] = {}
 
 
 @dataclass(frozen=True)
@@ -392,3 +387,44 @@ def test_the_resolver_types_a_validated_and_a_returned_model() -> None:
     by_var = {(s.path, s.variable): s for s in _SITES if s.path.startswith("src/agents/referee/")}
     triage = by_var[("src/agents/referee/triage_handler.py", "triage_output")]
     assert [m.__name__ for m in _site_models(triage)] == ["TriageOutputContract"]
+
+
+def _versioned_contracts() -> dict[str, type[BaseModel]]:
+    """Every versioned contract: each ``src/contracts`` model with a literal
+    ``contract_version`` default (the schema snapshot's set, model answers included)
+    and every model in the contract file registry."""
+    from scripts.contract_schema_snapshot import versioned_contract_models
+    from src.shared.contract_versioning import registered_contracts
+
+    found = dict(versioned_contract_models())
+    known = set(found.values())
+    for model in registered_contracts():
+        if model not in known:
+            found[f"{model.__module__.rsplit('.', 1)[-1]}.{model.__qualname__}"] = model
+    return found
+
+
+VERSIONED = _versioned_contracts()
+
+
+def test_the_versioned_set_includes_model_answers_and_registered_files() -> None:
+    names = {m.__qualname__ for m in VERSIONED.values()}
+    assert {"ExecutiveSummaryResponse", "RealityCheckModelResponse"} <= names
+    assert {"OpenSearchModelOutputContract", "Assignment", "SeedManifest"} <= names
+
+
+@pytest.mark.parametrize("key", sorted(VERSIONED))
+def test_every_versioned_contract_declares_the_one_version_style(key: str) -> None:
+    """``contract_version: str = Field(default="X.Y", pattern=r"^\\d+\\.\\d+$")`` on every
+    versioned contract, written to disk or not (ADR-008 Decision 1, #1006)."""
+    model = VERSIONED[key]
+    field = model.model_fields["contract_version"]
+    assert field.annotation is str, f"{key}.contract_version is {field.annotation}, not str"
+    assert not field.is_required() and isinstance(
+        field.default, str
+    ), f"{key}.contract_version has no literal default"
+    assert VERSION_RE.match(field.default), f"{key} default {field.default!r} is not MAJOR.MINOR"
+    patterns = [getattr(m, "pattern", None) for m in field.metadata]
+    assert (
+        patterns.count(r"^\d+\.\d+$") == 1 and len([p for p in patterns if p]) == 1
+    ), f"{key}.contract_version declares {patterns}, not exactly the ^\\d+\\.\\d+$ pattern"

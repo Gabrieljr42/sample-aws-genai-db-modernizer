@@ -99,6 +99,9 @@ def test_contract_value_sets_finds_enums_and_literals(monkeypatch: Any, tmp_path
 
 def test_module_version_reads_the_real_sources() -> None:
     # A versioned model's contract_version, a Version History, and an override.
-    assert module_version("triage_output") == "1.1"
+    from src.contracts.triage_output import TriageOutputContract
+
+    triage_default = TriageOutputContract.model_fields["contract_version"].default
+    assert module_version("triage_output") == triage_default
     assert module_version("move_ledger") is not None
     assert module_version("query_trace") == module_version("synthesis_output")

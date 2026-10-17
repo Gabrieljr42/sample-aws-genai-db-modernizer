@@ -81,6 +81,8 @@ Version History:
   lightweight-alternative table behind it was already gone), so it was always
   empty. Artifacts saved before 2.0 that carry the key still load: the model
   ignores unknown keys, and the key is not written back out.
+- 2.1 (2026-10-17, #1006): ``contract_version`` declares the MAJOR.MINOR pattern
+  every published version already matched (ADR-008 Decision 1).
 """
 
 from typing import Literal
@@ -294,7 +296,9 @@ class RealityCheckOutputContract(BaseModel):
     which get consolidated, and what architectural patterns emerge.
     """
 
-    contract_version: str = Field(default="2.0", description="Contract version")
+    contract_version: str = Field(
+        default="2.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
     source_assignment_version: int = Field(
         ..., ge=1, description="Base assignment version this check was run against"
     )

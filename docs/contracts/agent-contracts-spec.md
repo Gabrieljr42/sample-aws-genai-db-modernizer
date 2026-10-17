@@ -156,6 +156,7 @@ output = CollectorOutput(
 | Make optional field required | MAJOR | 1.2 → 2.0 |
 | Tighten a constraint (`ge`/`le`/`gt`/`lt`/`min_length`/`max_length`/`pattern`) | MAJOR | 1.2 → 2.0 |
 | Loosen a constraint | MINOR | 1.0 → 1.1 |
+| `contract_version` adopts exactly `^\d+\.\d+$` (from an unpatterned string or a MAJOR.MINOR `Literal`, #1006) | MINOR | 1.0 → 1.1 |
 
 ### 2.4 Contract Version Declaration
 

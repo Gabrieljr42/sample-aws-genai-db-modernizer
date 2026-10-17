@@ -49,7 +49,10 @@ This module is the harness for that check, the same shape as
   "Contract Changes" rule: a field removed, a type changed, an optional
   field made required, an enum value removed, or a tightened constraint is
   MAJOR; an additive optional field, a new enum value, a required field
-  relaxed to optional, or a loosened constraint is MINOR. ``overall_bump()``
+  relaxed to optional, or a loosened constraint is MINOR. One exception (#1006):
+  a top-level ``contract_version`` adopting exactly ``VERSION_PATTERN`` (from an
+  unpatterned string, or from a ``Literal`` whose value matches it) is MINOR, since
+  every published version already matches it. ``overall_bump()``
   reduces a change list to the one bump CONTRIBUTING.md requires overall.
 - ``evaluate_snapshot()`` is the full comparison between a committed and a
   freshly built snapshot (new/removed contracts, insufficient bumps, a
@@ -427,8 +430,33 @@ def _diff_union(
     return changes
 
 
+# The one contract_version declaration (ADR-008 Decision 1, #1006).
+VERSION_PATTERN = r"^\d+\.\d+$"
+
+
+def _version_pattern_adopted(before: dict[str, Any], after: dict[str, Any]) -> bool:
+    """A top-level ``contract_version`` that gained exactly ``VERSION_PATTERN``, from an
+    unpatterned string or from a ``Literal`` whose value already matches it. Every
+    published version is MAJOR.MINOR, so no file ever written is refused: MINOR (#1006)."""
+    if not (
+        after.get("kind") == "scalar"
+        and after.get("type") == "string"
+        and after.get("pattern") == VERSION_PATTERN
+        and set(after) == {"kind", "type", "pattern"}
+    ):
+        return False
+    if before.get("kind") == "scalar":
+        return before.get("type") == "string" and set(before) == {"kind", "type"}
+    if before.get("kind") == "const":
+        value = before.get("value")
+        return isinstance(value, str) and re.match(VERSION_PATTERN, value) is not None
+    return False
+
+
 def diff_schema(before: dict[str, Any], after: dict[str, Any], path: str) -> list[Change]:
     """Path-level diff between two ``_structural_node()`` outputs at ``path``."""
+    if path == "contract_version" and _version_pattern_adopted(before, after):
+        return [(path, "minor", f"the version pattern {VERSION_PATTERN!r} adopted (#1006)")]
     if before.get("kind") != after.get("kind"):
         return [(path, "major", f"type changed ({before.get('kind')} -> {after.get('kind')})")]
     kind = before["kind"]

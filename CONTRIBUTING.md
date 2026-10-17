@@ -468,6 +468,9 @@ removal, a type change, a newly required field, a removed enum value, or a
 tightened constraint (`ge`/`le`/`gt`/`lt`/`min_length`/`max_length`/
 `pattern`); loosening a constraint is MINOR (the full table is in
 `docs/contracts/agent-contracts-spec.md`'s Versioning Strategy section).
+One exception: `contract_version` itself adopting exactly `^\d+\.\d+$` (from
+an unpatterned string or a MAJOR.MINOR `Literal`) is MINOR, since every
+published version already matches it (#1006).
 `tests/contract/test_schema_snapshot.py` enforces this against a committed
 JSON Schema snapshot of every versioned contract, keyed by model, in
 `tests/contract/schema_snapshot.json` -- it fails if a schema changes

@@ -24,11 +24,14 @@ per-consolidation answer does not (the Bedrock summary is a separate call).
 Version History:
 - 1.0 (2026-10-14, #628): Initial version. Replaces ``ModelFlagBatch``
   (``{"flags": [...]}``), the Bedrock-only wrapper.
+- 1.1 (2026-10-17, #1006): ``contract_version`` is a MAJOR.MINOR string, not
+  ``Literal["1.0"]`` (ADR-008 Decision 1). An answer saying ``1.0`` still validates.
+  The pattern checks the form only: this is a model's answer, which may echo any
+  version, so no reader checks its MAJOR (model I/O, ADR-008 "Reading Older
+  Artifacts").
 """
 
 from __future__ import annotations
-
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,7 +44,9 @@ class RealityCheckModelResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    contract_version: Literal["1.0"] = "1.0"
+    contract_version: str = Field(
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+    )
     consolidation_corrections: list[RoutingFlagEntry] = Field(
         default_factory=list,
         description="Model flags (ModelFlag); empty when every moved query fits its target",
