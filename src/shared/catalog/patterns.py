@@ -284,6 +284,10 @@ class PatternEntry(BaseModel):
     exempt_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     redesign_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     scan_threshold: ScanThreshold | None = None
+    # A detector's share of a table's calls below which its reads are negligible: a
+    # table read less than this is still "unread" (``unbounded-time-series-ingest``,
+    # maintainer decision on #904).
+    negligible_read_share: float | None = Field(default=None, gt=0, lt=1)
     write_pattern: bool = False
     segment_weighting: SegmentWeighting = "segment"
     engines: dict[str, EngineSupport]

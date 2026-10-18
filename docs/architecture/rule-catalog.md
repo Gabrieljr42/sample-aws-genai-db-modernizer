@@ -380,8 +380,8 @@ Detected by `src.tools.analysis.documentdb_analysis_tools:analyze_documentdb_use
 
 Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases`.
 
-- Aurora PostgreSQL, anti 0.8 (aurora-anti-01): Single-row SELECT by primary key at very high frequency \(&gt;100 calls/second\). Aurora serves it natively with a B-tree point read and scales reads with up to 15 Aurora Replicas \(Amazon Aurora User Guide, Replication with Amazon Aurora\).
-- Aurora MySQL, anti 0.8 (aurora-anti-01): Single-row SELECT by primary key at very high frequency \(&gt;100 calls/second\). Aurora serves it natively with a B-tree point read and scales reads with up to 15 Aurora Replicas \(Amazon Aurora User Guide, Replication with Amazon Aurora\).
+- Aurora PostgreSQL, anti 0.8 (aurora-anti-01): Single-row SELECT by primary key at very high frequency \(more than 30 calls/second\). Aurora serves it natively with a B-tree point read and scales reads with up to 15 Aurora Replicas \(Amazon Aurora User Guide, Replication with Amazon Aurora\).
+- Aurora MySQL, anti 0.8 (aurora-anti-01): Single-row SELECT by primary key at very high frequency \(more than 30 calls/second\). Aurora serves it natively with a B-tree point read and scales reads with up to 15 Aurora Replicas \(Amazon Aurora User Guide, Replication with Amazon Aurora\).
 - No effect on: DynamoDB, DocumentDB, OpenSearch, ElastiCache.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 
@@ -769,8 +769,8 @@ Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cas
 Detected by `src.tools.analysis.aurora_common_analysis_tools:analyze_aurora_common_use_cases`.
 Writes only: no parity anchor borrows from it and no access class lists it.
 
-- Aurora PostgreSQL, anti 0.4 (aurora-anti-04): Append-only table: 10 or more INSERTs per second and no join or aggregate reads, so rows accumulate unread and the table grows without bound unless old rows expire. Guidance only: Aurora sustains the rate, and dropping old partitions is a data-lifecycle task \(PostgreSQL documentation, Table Partitioning\).
-- Aurora MySQL, anti 0.4 (aurora-anti-04): Append-only table: 10 or more INSERTs per second and no join or aggregate reads, so rows accumulate unread and the table grows without bound unless old rows expire. Guidance only: Aurora sustains the rate, and dropping old partitions is a data-lifecycle task \(PostgreSQL documentation, Table Partitioning\).
+- Aurora PostgreSQL, anti 0.4 (aurora-anti-04): Append-only table: 10 or more INSERTs per second, no other writes \(no UPDATE, DELETE, MERGE or REPLACE\) and reads under 1% of its calls, so rows accumulate unread and the table grows without bound unless old rows expire. Guidance only: Aurora sustains the rate, and dropping old partitions is a data-lifecycle task \(PostgreSQL documentation, Table Partitioning\).
+- Aurora MySQL, anti 0.4 (aurora-anti-04): Append-only table: 10 or more INSERTs per second, no other writes \(no UPDATE, DELETE, MERGE or REPLACE\) and reads under 1% of its calls, so rows accumulate unread and the table grows without bound unless old rows expire. Guidance only: Aurora sustains the rate, and dropping old partitions is a data-lifecycle task \(PostgreSQL documentation, Table Partitioning\).
 - No effect on: DynamoDB, DocumentDB, OpenSearch, ElastiCache.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 

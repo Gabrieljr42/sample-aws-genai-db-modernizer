@@ -1054,3 +1054,15 @@ class TestAKeyAnchoredReadIsNotARelationalNeed:
         """aurora-anti-06 (at most two queries): a key-anchored join no longer blocks it."""
         ap = _keyed_anti("aurora-anti-06", POINT, ANCHORED_JOIN)
         assert ap is not None and set(ap.query_ids) == {"point", "join"}
+
+
+def test_the_anti01_text_states_the_threshold_the_rule_uses():
+    """#904: the description said ">100 calls/second" while the rule fires above 30."""
+    from src.tools.analysis.aurora_common_pattern_catalog import (
+        ANTI_PATTERN_BY_ID,
+        HIGH_FREQUENCY_PK_LOOKUP_CPS,
+    )
+
+    description = ANTI_PATTERN_BY_ID["aurora-anti-01"].description
+    assert f"more than {HIGH_FREQUENCY_PK_LOOKUP_CPS:g} calls/second" in description
+    assert ">100" not in description

@@ -12,6 +12,7 @@ Implements:
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping
 
 from src.agents.referee.access_pattern import KEY_SCOPED
@@ -37,6 +38,7 @@ from src.tools.analysis.aurora_common_pattern_catalog import (
     STANDARD_CRUD_MIN_CPS,
     TEXT_COLUMN_RATIO_THRESHOLD,
     TEXT_DATA_TYPES,
+    TIME_SERIES_INGEST_NEGLIGIBLE_READ_SHARE,
     TRANSACTION_WRITE_TYPES,
 )
 from src.tools.analysis.key_access import KeyAccessReader
@@ -341,15 +343,22 @@ def analyze_aurora_common_use_cases(
                 text_search_per_table[tid]["query_ids"].append(qid)
                 text_search_per_table[tid]["total_cps"] += cps
 
-    # Check ingest tables for complex reads (if no reads, it's an anti-pattern)
+    # An ingest table is read when its SELECTs reach the catalog's negligible share of
+    # its calls (#904): a plain read by key reads its rows as much as a join or an
+    # aggregate does, and reads below that share are negligible (maintainer decision).
+    read_cps: dict[str, float] = defaultdict(float)
+    total_cps: dict[str, float] = defaultdict(float)
     for q in queries:
-        qt = (q.get("query_type") or "").upper()
-        if qt == "SELECT" and (
-            q.get("has_joins") or query_facts(q.get("query_text") or "", source_engine).aggregation
-        ):
-            for tid in q.get("tables_accessed") or []:
-                if tid in ingest_per_table:
-                    ingest_per_table[tid]["has_reads"] = True
+        cps = float(q.get("calls_per_second") or 0.0)
+        is_read = (q.get("query_type") or "").upper() == "SELECT"
+        for tid in q.get("tables_accessed") or []:
+            if tid in ingest_per_table:
+                total_cps[tid] += cps
+                if is_read:
+                    read_cps[tid] += cps
+    negligible = TIME_SERIES_INGEST_NEGLIGIBLE_READ_SHARE
+    for tid, data in ingest_per_table.items():
+        data["has_reads"] = read_cps[tid] > 0 and read_cps[tid] >= negligible * total_cps[tid]
 
     # --- Detect aurora-common-04 from schema (FK density > 2) ---
     ri_table_ids: list[str] = []
@@ -473,11 +482,17 @@ def analyze_aurora_common_use_cases(
     if ft_query_ids:
         anti_patterns.append(_build_anti_pattern("aurora-anti-03", ft_query_ids, ft_table_ids))
 
-    # aurora-anti-04: per-table high ingest with no complex reads
+    # aurora-anti-04: per-table high ingest on an append-only table no read touches
+    # (#904): the workload writes it only with INSERTs (``KeyAccessReader.append_only``,
+    # the one definition) and never reads it, so its rows accumulate unread.
     anti04_query_ids: list[str] = []
     anti04_table_ids: list[str] = []
     for tid, data in ingest_per_table.items():
-        if data["total_cps"] >= HIGH_INGEST_CPS_THRESHOLD and not data["has_reads"]:
+        if (
+            data["total_cps"] >= HIGH_INGEST_CPS_THRESHOLD
+            and not data["has_reads"]
+            and reader.append_only(tid)
+        ):
             anti04_query_ids.extend(data["query_ids"])
             anti04_table_ids.append(tid)
 
