@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import re
 import threading
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING
@@ -83,6 +83,7 @@ __all__ = [
     "TimestampColumnReading",
     "WildcardLike",
     "is_timestamp_type",
+    "locate_column",
     "query_facts",
     "scan_sql",
     "source_engine_of",
@@ -1180,26 +1181,45 @@ class ColumnTypes:
     def owner(self, use: ColumnUse) -> tuple[tuple[str, str, bool] | None, str]:
         """``((table_id, column, is_timestamp), "")`` for the collected column ``use``
         names, or ``(None, why)`` when its table can't be told."""
-        if use.from_regex:
-            return None, "statement not parsed"
-        name = use.name.lower()
-        for level in use.scopes:
-            holders: dict[str, tuple[str, bool]] = {}
-            unknown: list[str] = []
-            for ref in level:
-                table_id = self._table_id(ref)
-                if table_id is None:
-                    unknown.append(ref.written)
-                elif name in self.columns.get(table_id, {}):
-                    holders[table_id] = self.columns[table_id][name]
-            if len(holders) == 1:
-                table_id, (written, timestamp) = holders.popitem()
-                return (table_id, written, timestamp), ""
-            if holders:
-                return None, "ambiguous: " + ", ".join(sorted(holders))
-            if unknown:
-                return None, "no collected table " + ", ".join(unknown)
-        return None, "no collected table holds it"
+        table_id, why = locate_column(
+            use, self._table_id, lambda t, name: name in self.columns.get(t, {})
+        )
+        if table_id is None:
+            return None, why
+        written, timestamp = self.columns[table_id][use.name.lower()]
+        return (table_id, written, timestamp), ""
+
+
+def locate_column(
+    use: ColumnUse,
+    table_id_of: Callable[[TableRef], str | None],
+    holds: Callable[[str, str], bool],
+) -> tuple[str | None, str]:
+    """``(table_id, "")`` for the collected table that holds the column ``use`` names, or
+    ``(None, why)`` when it can't be told: the way SQL resolves it, the innermost scope in
+    which exactly one collected table holds a column of that name (``table_id_of``: a
+    written table's id, None when not collected; ``holds(table_id, lower-case name)``).
+    The one resolution the timestamp-column fact and the leading-wildcard ``LIKE`` fact
+    (#935, #942) share."""
+    if use.from_regex:
+        return None, "statement not parsed"
+    name = use.name.lower()
+    for level in use.scopes:
+        holders: set[str] = set()
+        unknown: list[str] = []
+        for ref in level:
+            table_id = table_id_of(ref)
+            if table_id is None:
+                unknown.append(ref.written)
+            elif holds(table_id, name):
+                holders.add(table_id)
+        if len(holders) == 1:
+            return next(iter(holders)), ""
+        if holders:
+            return None, "ambiguous: " + ", ".join(sorted(holders))
+        if unknown:
+            return None, "no collected table " + ", ".join(unknown)
+    return None, "no collected table holds it"
 
 
 @dataclass(frozen=True)

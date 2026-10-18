@@ -488,3 +488,64 @@ class TestTheFallbackReadsLikeTheParse:
     def test_an_order_by_inside_a_window_sorts_no_rows(self, sql, order_by, top_n):
         assert regex_facts.regex_order_by(sql) is order_by
         assert regex_facts.regex_top_n(sql) is top_n
+
+
+class TestTheTestedColumnOfALeadingWildcardLike:
+    """#942: ``WildcardLike.use`` names the one column a leading-wildcard LIKE tests and
+    the tables it can belong to, read through the query's aliases and scopes."""
+
+    @staticmethod
+    def _use(sql, engine="mysql"):
+        (like,) = sql_facts(sql, engine).wildcard_likes
+        return like.use
+
+    @staticmethod
+    def _tables(use):
+        return [[t.name for t in level] for level in use.scopes]
+
+    def test_a_qualified_column_names_the_table_its_alias_stands_for(self):
+        use = self._use("SELECT 1 FROM posts p JOIN users u ON u.id = p.uid WHERE u.name LIKE '%x'")
+        assert (use.name, self._tables(use)) == ("name", [["users"]])
+
+    def test_an_unqualified_column_lists_every_table_of_its_scope(self):
+        use = self._use("SELECT 1 FROM posts p JOIN users u ON u.id = p.uid WHERE name LIKE '%x'")
+        assert self._tables(use) == [["posts", "users"]]
+
+    def test_a_function_of_one_column_tests_that_column(self):
+        (like,) = sql_facts(
+            "SELECT 1 FROM posts WHERE lower(title) LIKE '%x'", "mysql"
+        ).wildcard_likes
+        assert like.column is None  # not a bare column: its type is not the expression's
+        assert (like.use.name, self._tables(like.use)) == ("title", [["posts"]])
+
+    def test_an_expression_over_several_columns_names_none(self):
+        assert self._use("SELECT 1 FROM posts WHERE concat(a, b) LIKE '%x'") is None
+
+    def test_a_derived_table_or_cte_column_has_no_stored_table(self):
+        derived = self._use("SELECT 1 FROM (SELECT title AS t FROM posts) d WHERE d.t LIKE '%x'")
+        cte = self._use(
+            "WITH c AS (SELECT title FROM posts) SELECT 1 FROM c WHERE c.title LIKE '%x'"
+        )
+        assert self._tables(derived) == [] and self._tables(cte) == []
+
+    def test_a_correlated_subquery_column_is_looked_up_outward(self):
+        use = self._use(
+            "SELECT 1 FROM posts p WHERE EXISTS (SELECT 1 FROM tags g WHERE p.title LIKE '%x')"
+        )
+        assert self._tables(use) == [["posts"]]
+
+    def test_the_regex_fallback_knows_no_tables(self):
+        (like,) = sql_facts(
+            "SELECT * FROM posts WHERE title LIKE '%x' AND (((", "mysql"
+        ).wildcard_likes
+        assert like.column == "title" and like.use is None
+
+    def test_it_survives_the_stored_form(self):
+        from src.tools.sql.stored_facts import readings_from_stored, stored_reading
+
+        sql = "SELECT 1 FROM posts p WHERE p.title LIKE '%x'"
+        stored = stored_reading(sql, "mysql", read_sql(sql, "mysql"))
+        restored = readings_from_stored(stored, sql, "mysql")
+        assert restored is not None
+        assert restored[0].wildcard_likes == sql_facts(sql, "mysql").wildcard_likes
+        assert restored[0].wildcard_likes[0].use is not None

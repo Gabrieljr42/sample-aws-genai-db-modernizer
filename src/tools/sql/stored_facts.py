@@ -53,6 +53,7 @@ __all__ = [
 # change to any of them changes the version.
 _READER_SOURCES = (
     "tools/sql/facade.py",
+    "tools/sql/refs.py",
     "tools/sql/regex_facts.py",
     "tools/sql/normalize.py",
     "shared/sql_comments.py",

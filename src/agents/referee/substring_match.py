@@ -14,6 +14,16 @@ pattern's penalty, but only when the scan matters: the query reaches both
 it (FULLTEXT, ``$text``, ``pg_trgm``) is stated as guidance instead. A
 parameterised pattern (``LIKE $1``) is not a leading wildcard here (#912).
 
+Each ``LIKE`` is read against the table that holds its column (#942): the facts layer
+names the column and the tables it can belong to (through the query's aliases and
+scopes), :func:`~src.tools.sql.query_facts.locate_column` picks the collected table
+that holds it, and that table's row count and the column's collected type decide
+whether the scan matters and whether a word pattern is on a text column. When the
+column cannot be traced to one collected table (an expression over several columns, a
+derived table, an ambiguous name, a table the collector did not describe), the older
+approximation stands (the largest table the query reads; an unknown type is text) and
+the decision trace says so (:attr:`SubstringMatch.approximations`).
+
 Every reader takes its numbers and sentences from here: the scorer
 (:func:`scan_adjustments`, merged into the anti-pattern map by
 ``ScoringContext.from_pipeline``), the decision trace (the notes it returns,
@@ -29,10 +39,22 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from src.agents.referee.table_resolution import TableNameResolver
 from src.shared.catalog.engines import CatalogError
-from src.shared.catalog.patterns import EngineSupport, PatternEntry, ScanThreshold, pattern
+from src.shared.catalog.patterns import (
+    EngineSupport,
+    PatternEntry,
+    ScanThreshold,
+    pattern,
+)
 from src.shared.engine_names import display_engine
-from src.tools.sql.query_facts import query_facts, source_engine_of
+from src.tools.sql.query_facts import (
+    WildcardLike,
+    locate_column,
+    query_facts,
+    source_engine_of,
+)
+from src.tools.sql.refs import TableRef
 
 __all__ = [
     "SubstringMatch",
@@ -53,8 +75,13 @@ class SubstringMatch:
     """One query with a leading-wildcard ``LIKE``, and whether its scan matters.
 
     ``word_search``: every such predicate in it is a word search on a text column.
-    ``table_rows``: the largest row count among its tables, None when none is known.
+    ``table_rows``: the row count of the table the scanned ``LIKE`` column is in (the
+    largest, when several are scanned); the largest table the query reads for a column
+    that could not be traced to one; None when none is known.
     ``scan_matters``: not a word search, and both ``scan_threshold`` values reached.
+    ``approximations``: why a predicate was read the older way (the column could not be
+    traced to one collected table, or its type was not collected), one sentence each;
+    empty when every predicate was read from its own table and column (#942).
     """
 
     query_id: str
@@ -62,6 +89,16 @@ class SubstringMatch:
     calls_per_second: float
     table_rows: int | None
     scan_matters: bool
+    approximations: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _LikeReading:
+    """One ``LIKE``: a word search on a text column, the rows of the table it scans."""
+
+    word_search: bool
+    rows: int | None
+    approximations: tuple[str, ...] = ()
 
 
 def _pattern() -> PatternEntry:
@@ -103,30 +140,107 @@ def _query_tables(query: Mapping, tables: Mapping[str, Mapping]) -> list[Mapping
 
 
 def _is_text_column(column: str | None, tables: list[Mapping]) -> bool:
+    """The older reading, for a column not traced to a table: the type of the first
+    query table that has a column of that name, text when none is described."""
     if column is None:
         return True
     for table in tables:
         for col in table.get("columns") or []:
             if str(col.get("column_name") or "").lower() == column:
-                kind = str(col.get("data_type") or "").lower()
-                return not kind or any(word in kind for word in _TEXT_TYPE_WORDS)
+                return _is_text_type(col.get("data_type"))
     return True
 
 
+def _is_text_type(data_type: object) -> bool:
+    kind = str(data_type or "").lower()
+    return not kind or any(word in kind for word in _TEXT_TYPE_WORDS)
+
+
 def _rows(tables: list[Mapping]) -> int | None:
-    counts = [
-        int(t["row_count"])
-        for t in tables
-        if isinstance(t.get("row_count"), int | float) and not isinstance(t.get("row_count"), bool)
-    ]
+    counts = [r for t in tables if (r := _row_count(t)) is not None]
     return max(counts) if counts else None
+
+
+def _row_count(table: Mapping) -> int | None:
+    count = table.get("row_count")
+    return int(count) if isinstance(count, int | float) and not isinstance(count, bool) else None
+
+
+class _Schema:
+    """The collected tables by id, and how a written table name finds its id."""
+
+    def __init__(self, collector: Mapping) -> None:
+        self.by_name = _tables_by_name(collector)
+        self.resolver = TableNameResolver.from_collector(collector)
+        self.by_id: dict[str, Mapping] = {}
+        for table in ((collector.get("database_schema") or {}).get("tables")) or []:
+            if isinstance(table, Mapping) and table.get("table_id"):
+                self.by_id[str(table["table_id"])] = table
+
+    def table_id(self, ref: TableRef) -> str | None:
+        if self.resolver is None:
+            return None
+        return self.resolver.resolve(ref.written) or self.resolver.resolve(ref.name)
+
+    def column(self, table_id: str, name: str) -> Mapping | None:
+        columns: list[Mapping] = self.by_id.get(table_id, {}).get("columns") or []
+        return next((c for c in columns if str(c.get("column_name") or "").lower() == name), None)
+
+
+_OLDER_READING = (
+    ", so the largest table the query reads counts and a column type not found is read as text"
+)
+
+
+def _read_like(like: WildcardLike, schema: _Schema, query_tables: list[Mapping]) -> _LikeReading:
+    """One predicate, from the table that holds its column; the older reading (the
+    largest table the query reads, an unknown type is text) when it can't be traced."""
+    word = like.word_search
+    notes: list[str] = []
+    table_id = None
+    if like.use is None:
+        notes.append(f"the tested expression names no single column{_OLDER_READING}")
+    else:
+        table_id, why = locate_column(
+            like.use,
+            schema.table_id,
+            lambda t, name: schema.column(t, name) is not None,
+        )
+        if table_id is None:
+            notes.append(
+                f"column {like.use.name} was not traced to one collected table ({why})"
+                f"{_OLDER_READING}"
+            )
+    if table_id is None:
+        if word:
+            word = _is_text_column(like.column, query_tables)
+        return _LikeReading(word, _rows(query_tables), tuple(notes))
+    rows = _row_count(schema.by_id[table_id])
+    if rows is None:
+        notes.append(
+            f"table {schema.by_id[table_id].get('table_name') or table_id} has no collected "
+            "row count, so the scan cannot be sized and is not penalised"
+        )
+    if word and like.column is not None:
+        column = schema.column(table_id, like.column)
+        data_type = column.get("data_type") if column is not None else None
+        word = _is_text_type(data_type)
+        if not data_type:
+            notes.append(f"column {like.column} has no collected type, so it is read as text")
+    elif word:
+        notes.append(
+            f"the tested expression wraps column {like.use.name if like.use else '?'}, whose "
+            "type is not the expression's, so it is read as text"
+        )
+    return _LikeReading(word, rows, tuple(notes))
 
 
 def substring_matches(collector: Mapping | None) -> dict[str, SubstringMatch]:
     """``query_id -> SubstringMatch`` for every query with a leading-wildcard ``LIKE``."""
     collector = collector or {}
     threshold = _threshold()
-    tables = _tables_by_name(collector)
+    schema = _Schema(collector)
+    tables = schema.by_name
     source_engine = source_engine_of(collector)
     out: dict[str, SubstringMatch] = {}
     for query in (collector.get("queries") or {}).get("query_patterns") or []:
@@ -135,18 +249,16 @@ def substring_matches(collector: Mapping | None) -> dict[str, SubstringMatch]:
         if not qid or not likes:
             continue
         query_tables = _query_tables(query, tables)
-        word = all(
-            like.word_search and _is_text_column(like.column, query_tables) for like in likes
-        )
+        readings = [_read_like(like, schema, query_tables) for like in likes]
+        word = all(r.word_search for r in readings)
         cps = float(query.get("calls_per_second") or 0.0)
-        rows = _rows(query_tables)
-        matters = (
-            not word
-            and cps >= threshold.min_calls_per_second
-            and rows is not None
-            and rows >= threshold.min_table_rows
+        scanned = [r.rows for r in readings if not r.word_search]
+        known = [r for r in (scanned or [r.rows for r in readings]) if r is not None]
+        matters = cps >= threshold.min_calls_per_second and any(
+            r is not None and r >= threshold.min_table_rows for r in scanned
         )
-        out[qid] = SubstringMatch(qid, word, cps, rows, matters)
+        notes = tuple(dict.fromkeys(n for r in readings for n in r.approximations))
+        out[qid] = SubstringMatch(qid, word, cps, max(known) if known else None, matters, notes)
     return out
 
 
@@ -176,6 +288,8 @@ def engine_reason(engine: str, match: SubstringMatch) -> str | None:
     if support is None or support.kind not in ("native", "scan"):
         return None
     text = f"{display_engine(engine)} {support.why}"
+    if match.approximations:
+        text += " Read approximately: " + "; ".join(match.approximations) + "."
     if support.kind != "scan":
         return text
     if match.word_search:
