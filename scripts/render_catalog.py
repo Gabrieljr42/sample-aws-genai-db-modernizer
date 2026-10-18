@@ -212,6 +212,8 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
             out.append("Detected by " + ", ".join(f"`{d}`" for d in p.detectors) + ".")
         else:
             out.append("No analysis reports this pattern today.")
+        if p.penalty_why:
+            out.append(f"Penalty: {p.penalty} (`{p.penalty_basis}`). {md_text(p.penalty_why)}")
         for label, note in (("Exemption note", p.exempt_note), ("Redesign note", p.redesign_note)):
             if note:
                 out.append(f"{label}: {md_text(note)}")

@@ -396,3 +396,35 @@ def test_a_guidance_only_anti_pattern_is_reported_but_costs_nothing(pattern_id, 
     penalties, reported = _penalties(engine, query)
     assert pattern_id in reported
     assert "pos" not in penalties
+
+
+class TestTheWideTransactionPenaltyIsCalibrated:
+    """#916: the wide-transaction penalty is its basis's points, and the catalog says why."""
+
+    def test_it_is_the_bounded_limit_basis(self) -> None:
+        entry = next(p for p in patterns() if p.id == "wide-transaction")
+        assert (entry.penalty, entry.penalty_basis) == (
+            PENALTY_POINTS["bounded_limit"],
+            "bounded_limit",
+        )
+
+    def test_the_catalog_states_why_with_its_source(self) -> None:
+        entry = next(p for p in patterns() if p.id == "wide-transaction")
+        assert entry.penalty_why
+        assert "100 items" in entry.penalty_why
+        assert "Amazon DynamoDB Developer Guide" in entry.penalty_why
+
+    def test_the_rule_catalog_renders_the_reason(self) -> None:
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[3] / "docs/architecture/rule-catalog.md"
+        ).read_text()
+        section = text.split("### wide-transaction", 1)[1].split("\n### ", 1)[0]
+        assert "Penalty: 10 (`bounded_limit`)." in section
+
+    def test_a_reason_needs_a_basis(self) -> None:
+        with pytest.raises(ValueError, match="penalty_why explains a penalty_basis"):
+            PatternEntry.model_validate(
+                {"id": "x", "detectors": [], "penalty": 0, "penalty_why": "y", "engines": {}}
+            )

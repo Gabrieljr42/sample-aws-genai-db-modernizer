@@ -795,6 +795,7 @@ Writes only: no parity anchor borrows from it and no access class lists it.
 ### wide-transaction
 
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
+Penalty: 10 (`bounded_limit`). DynamoDB runs every item of a wider write within a documented bound: one PartiQL DELETE or UPDATE changes one item \(its condition resolves to a single primary key\), and the documented way to change several is a transaction of up to 100 items or a batch \(Amazon DynamoDB Developer Guide, PartiQL delete statements; Amazon DynamoDB Transactions\), so the design splits the write into bounded calls, reads the keys of a predicate-picked set first, and gives up all-or-nothing atomicity across the calls; the data model needs no redesign \(needs\_redesign is for an access path no server-side operation serves\).
 Writes only: no parity anchor borrows from it and no access class lists it.
 
 - DynamoDB, anti 0.3 (dynamodb-ap-04): A write wider than one transaction: more than 100 items, or rows a range, join, subquery or a filter with no key anchor picks \(a write by a non-unique key column is a key-scoped Query plus batch write, not this\). DynamoDB TransactWriteItems holds up to 100 items and 4 MB across tables \(Amazon DynamoDB Developer Guide, Amazon DynamoDB Transactions\).

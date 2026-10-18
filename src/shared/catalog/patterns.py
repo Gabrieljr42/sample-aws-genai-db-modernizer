@@ -33,6 +33,8 @@ Pattern fields:
   showing the pattern, which sizes ``penalty`` (``PENALTY_POINTS``, one rule for every
   engine, ADR-031 Decision 8 Amendment 6, #920). Required on a file that carries a penalty
   or has an ``anti_pattern``, ``penalized``, ``scan`` or ``redesign`` entry.
+- ``penalty_why``: why the documented consequence is that basis, with its public source
+  (optional, one line; rendered next to the penalty in the rule catalog, #916).
 - ``penalty_aliases``: other spellings of the same penalty key.
 - ``exempt_note`` / ``redesign_note``: the decision-trace sentence for a ``native``
   exemption or a ``redesign`` penalty (``{engine}`` is the engine's display name).
@@ -280,6 +282,7 @@ class PatternEntry(BaseModel):
     capability: Capability | None = None
     penalty: int = Field(ge=0)
     penalty_basis: PenaltyBasis | None = None
+    penalty_why: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     penalty_aliases: tuple[str, ...] = ()
     exempt_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
     redesign_note: str | None = Field(default=None, min_length=1, pattern=_ONE_LINE)
@@ -302,6 +305,8 @@ class PatternEntry(BaseModel):
         priced = bool(self.penalty) or bool(
             set(kinds.values()) & {"anti_pattern", "penalized", "scan", "redesign"}
         )
+        if self.penalty_why and self.penalty_basis is None:
+            raise ValueError("a penalty_why explains a penalty_basis")
         if priced and self.penalty_basis is None:
             raise ValueError("a pattern that carries a penalty names its penalty_basis")
         if self.penalty_basis is not None and self.penalty != penalty_points(self.penalty_basis):
