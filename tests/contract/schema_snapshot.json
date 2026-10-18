@@ -14351,6 +14351,57 @@
           "kind": "array"
         }
       },
+      "terminal": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "cause": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "depth_limit",
+                    "no_kept_engine"
+                  ]
+                }
+              },
+              "flagged_engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason_category": {
+                "required": false,
+                "schema": {
+                  "kind": "anyOf",
+                  "members": [
+                    {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
       "terminal_queries": {
         "required": false,
         "schema": {
@@ -14362,8 +14413,8 @@
         }
       }
     },
-    "schema_hash": "d7d11e94cc8eb18e410e9ead2c49ebfec5a8e6b90abba1c42faac60947cf0a46",
-    "version": "1.0"
+    "schema_hash": "a0d6ebd4510de06b655bc218bfda85f2a1a5d747c1cbdd79e11cb01b51a764b6",
+    "version": "1.1"
   },
   "reality_check_model_response.RealityCheckModelResponse": {
     "fields": {
@@ -18096,6 +18147,14 @@
                               "type": "integer"
                             }
                           },
+                          "flagged_query_count": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
                           "gated_everywhere_query_count": {
                             "required": false,
                             "schema": {
@@ -18105,6 +18164,14 @@
                             }
                           },
                           "more_unservable_count": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "no_fit_query_count": {
                             "required": false,
                             "schema": {
                               "kind": "scalar",
@@ -18482,6 +18549,103 @@
               "type": "null"
             }
           ]
+        }
+      },
+      "flagged_unservable": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "cause": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "depth_limit",
+                    "no_kept_engine"
+                  ]
+                }
+              },
+              "engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "engine_name": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "explanation": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "gate": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "gate_text": {
+                "required": false,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "query_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason_category": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "reason_label": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "required_capabilities": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "source": {
+                "required": true,
+                "schema": {
+                  "kind": "enum",
+                  "values": [
+                    "design_review",
+                    "reality_check"
+                  ]
+                }
+              }
+            }
+          },
+          "kind": "array"
         }
       },
       "job_id": {
@@ -21432,8 +21596,8 @@
         }
       }
     },
-    "schema_hash": "0e9d8f92428b12eeadfcb13295b8203f0bacdc1d290c26692655f88451d88c9c",
-    "version": "1.28"
+    "schema_hash": "bb2e3839dad31759d3cee2f7a91c1e57f75fb6960564d7122142275bfb26ea83",
+    "version": "1.29"
   },
   "triage_output.TriageOutputContract": {
     "fields": {
