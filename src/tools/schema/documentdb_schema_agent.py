@@ -38,7 +38,7 @@ from src.tools.analysis.documentdb_analysis_tools import (
     DOCUMENTDB_TARGET_CLUSTER,
     DOCUMENTDB_TARGET_VERSION,
 )
-from src.tools.schema.base_schema_agent import SchemaDesignRunner
+from src.tools.schema.base_schema_agent import AgentInputPaths, SchemaDesignRunner
 from src.tools.schema.design_metrics import (
     check_design_numbers,
     design_metrics_from_projection,
@@ -46,13 +46,6 @@ from src.tools.schema.design_metrics import (
 )
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Module-level path variables (set by run_documentdb_schema_agent, read by tools)
-# ---------------------------------------------------------------------------
-_collector_path: str | None = None
-_analysis_path: str | None = None
-_revision_context_path: str | None = None
 
 DEFAULT_SKILL_PATH = str(
     Path(__file__).resolve().parent.parent.parent / "skills" / "documentdb-data-modeling.md"
@@ -194,15 +187,15 @@ def _build_model() -> RoleBedrockModel:
     )
 
 
-def load_agent_input() -> dict:
+def load_agent_input(paths: AgentInputPaths | None = None) -> dict:
     """Load collector + analysis + decision trace for the schema designer.
 
-    Reads from paths set by run_documentdb_schema_agent (preferred) or
+    Reads the files given to run_documentdb_schema_agent (preferred) or
     env vars (fallback).
     """
-    collector_path = _collector_path or os.environ.get("COLLECTOR_OUTPUT_PATH")
-    analysis_path = _analysis_path or os.environ.get("ANALYSIS_OUTPUT_PATH")
-    trace_path = os.environ.get("DECISION_TRACE_PATH")
+    paths = paths or AgentInputPaths.resolve()
+    collector_path, analysis_path = paths.collector, paths.analysis
+    trace_path = paths.decision_trace
 
     if not collector_path or not analysis_path:
         raise ValueError(
@@ -383,6 +376,7 @@ def run_documentdb_schema_agent(
     collector_path: str | None = None,
     analysis_path: str | None = None,
     revision_context_path: str | None = None,
+    decision_trace_path: str | None = None,
 ) -> tuple[DocumentDBModelOutputContract, dict]:
     """Run the DocumentDB schema design agent with PE review loop.
 
@@ -397,10 +391,11 @@ def run_documentdb_schema_agent(
     Returns:
         Tuple of (validated output, trace dict for S3 artifact).
     """
-    global _collector_path, _analysis_path, _revision_context_path
-    _collector_path = collector_path
-    _analysis_path = analysis_path
-    _revision_context_path = revision_context_path
+    # This call's own files (#1054): never module state, so concurrent group
+    # designs cannot read each other's input.
+    paths = AgentInputPaths.resolve(
+        collector_path, analysis_path, decision_trace_path, revision_context_path
+    )
 
     model = _build_model()
     system_prompt = (
@@ -409,7 +404,7 @@ def run_documentdb_schema_agent(
 
     # Load input eagerly — don't rely on LLM calling the tool.
     print("[schema-design/documentdb] Loading agent input...")
-    agent_input = load_agent_input()
+    agent_input = load_agent_input(paths)
 
     # Compact input to fit within Bedrock token limits.
     _compact_agent_input(agent_input)
@@ -436,8 +431,8 @@ def run_documentdb_schema_agent(
     )
 
     # Inject revision context if this is a revision-triggered redesign
-    if _revision_context_path:
-        revision_ctx = json.loads(Path(_revision_context_path).read_text(encoding="utf-8"))
+    if paths.revision_context:
+        revision_ctx = json.loads(Path(paths.revision_context).read_text(encoding="utf-8"))
         revision_sections = []
         if revision_ctx.get("exclusion_instructions"):
             revision_sections.append(

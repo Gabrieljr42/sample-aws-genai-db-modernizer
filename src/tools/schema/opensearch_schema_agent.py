@@ -16,6 +16,7 @@ import os
 import time
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from strands import Agent, tool
@@ -36,7 +37,7 @@ from src.shared.bedrock_guardrail import GuardrailConfigError, GuardrailInterven
 from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
 from src.shared.role_bedrock_model import RoleBedrockModel
-from src.tools.schema.base_schema_agent import enforce_design_numbers
+from src.tools.schema.base_schema_agent import AgentInputPaths, enforce_design_numbers
 from src.tools.schema.design_metrics import (
     check_design_numbers,
     design_metrics_from_projection,
@@ -44,13 +45,6 @@ from src.tools.schema.design_metrics import (
 )
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Module-level path variables (set by run_opensearch_schema_agent, read by tools)
-# ---------------------------------------------------------------------------
-_collector_path: str | None = None
-_analysis_path: str | None = None
-_revision_context_path: str | None = None
 
 MAX_PE_ITERATIONS = 2
 DEFAULT_SKILL_PATH = str(
@@ -189,22 +183,41 @@ def _build_model() -> RoleBedrockModel:
     )
 
 
-@tool
-def load_agent_input() -> dict:
+def load_agent_input(paths: AgentInputPaths | None = None) -> dict:
     """Load collector + analysis + decision trace for the schema designer.
 
-    Reads from paths set by run_opensearch_schema_agent (preferred) or
+    Reads the files given to run_opensearch_schema_agent (preferred) or
     env vars (fallback). Also returns 'design_metrics': the pipeline-computed
     design_rps, table sizes and shard counts the skill reads.
     """
-    return _project_input()
+    return _project_input(paths)
 
 
-def _project_input() -> dict:
+def _input_tool(paths: AgentInputPaths) -> Any:
+    """The designer's ``load_agent_input`` tool, bound to this call's files (#1054).
+
+    Built per call so a group's designer reads its own group's input, never the
+    input of another group designed at the same time.
+    """
+
+    @tool
+    def load_agent_input() -> dict:
+        """Load collector + analysis + decision trace for the schema designer.
+
+        Reads the files given to run_opensearch_schema_agent (preferred) or
+        env vars (fallback). Also returns 'design_metrics': the pipeline-computed
+        design_rps, table sizes and shard counts the skill reads.
+        """
+        return _project_input(paths)
+
+    return load_agent_input
+
+
+def _project_input(paths: AgentInputPaths | None = None) -> dict:
     """The ``load_agent_input`` result (a plain function, so the run loop can reuse it)."""
-    collector_path = _collector_path or os.environ.get("COLLECTOR_OUTPUT_PATH")
-    analysis_path = _analysis_path or os.environ.get("ANALYSIS_OUTPUT_PATH")
-    trace_path = os.environ.get("DECISION_TRACE_PATH")
+    paths = paths or AgentInputPaths.resolve()
+    collector_path, analysis_path = paths.collector, paths.analysis
+    trace_path = paths.decision_trace
 
     if not collector_path or not analysis_path:
         raise ValueError(
@@ -336,6 +349,7 @@ def run_opensearch_schema_agent(
     collector_path: str | None = None,
     analysis_path: str | None = None,
     revision_context_path: str | None = None,
+    decision_trace_path: str | None = None,
 ) -> tuple[OpenSearchModelOutputContract, dict]:
     """Run the OpenSearch schema design agent with PE review loop.
 
@@ -347,10 +361,11 @@ def run_opensearch_schema_agent(
     Returns:
         Tuple of (validated output, trace dict for S3 artifact).
     """
-    global _collector_path, _analysis_path, _revision_context_path
-    _collector_path = collector_path
-    _analysis_path = analysis_path
-    _revision_context_path = revision_context_path
+    # This call's own files (#1054): never module state, so concurrent group
+    # designs cannot read each other's input.
+    paths = AgentInputPaths.resolve(
+        collector_path, analysis_path, decision_trace_path, revision_context_path
+    )
 
     trace = SchemaDesignTrace()
     model = _build_model()
@@ -361,7 +376,7 @@ def run_opensearch_schema_agent(
     designer = Agent(
         model=model,
         system_prompt=system_prompt,
-        tools=[load_agent_input],
+        tools=[_input_tool(paths)],
         structured_output_model=OpenSearchModelOutputContract,
         callback_handler=None,
     )
@@ -381,8 +396,8 @@ def run_opensearch_schema_agent(
     )
 
     # Inject revision context if this is a revision-triggered redesign
-    if _revision_context_path:
-        revision_ctx = json.loads(Path(_revision_context_path).read_text(encoding="utf-8"))
+    if paths.revision_context:
+        revision_ctx = json.loads(Path(paths.revision_context).read_text(encoding="utf-8"))
         revision_sections = []
         if revision_ctx.get("exclusion_instructions"):
             revision_sections.append(
@@ -401,10 +416,9 @@ def run_opensearch_schema_agent(
                 "\n\n".join(revision_sections)
             )
 
-    try:
-        metrics: dict | None = _project_input()["design_metrics"]
-    except (ValueError, OSError):
-        metrics = None
+    # The numbers check reads this call's own input (#1054). An unreadable input
+    # is an error here, never a silently skipped check.
+    metrics: dict | None = _project_input(paths)["design_metrics"]
 
     def _designed(prompt: str) -> OpenSearchModelOutputContract:
         """One designer call, then the numbers check (#626) with its correction turns."""

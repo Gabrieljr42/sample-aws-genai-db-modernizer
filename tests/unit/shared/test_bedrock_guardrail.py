@@ -536,12 +536,6 @@ _HANDLERS_THAT_NEVER_SEE_A_MODEL_CALL = {
     "src/tools/schema/base_schema_agent.py::_invoke_designer::JSONDecodeError+TypeError+ValueError": (
         "salvages text the designer already returned; no model call in the try"
     ),
-    "src/tools/schema/dynamodb_schema_agent.py::run_dynamodb_schema_agent::OSError+ValueError": (
-        "reads the input file for design metrics; no model call in the try"
-    ),
-    "src/tools/schema/opensearch_schema_agent.py::run_opensearch_schema_agent::OSError+ValueError": (
-        "reads the input file for design metrics; no model call in the try"
-    ),
 }
 
 

@@ -34,6 +34,7 @@ import os
 import random
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -45,6 +46,48 @@ from src.shared.bedrock_guardrail import GuardrailConfigError, GuardrailInterven
 from src.shared.role_bedrock_model import RoleBedrockModel
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AgentInputPaths:
+    """The files one schema design call reads (#1054): passed down the call chain.
+
+    Each ``run_<engine>_schema_agent`` call gets its own, and its input tool
+    and numbers check read only these, so concurrent group designs never read
+    each other's input. The designer modules hold no path state of their own.
+    """
+
+    collector: str | None = None
+    analysis: str | None = None
+    decision_trace: str | None = None
+    revision_context: str | None = None
+
+    @classmethod
+    def resolve(
+        cls,
+        collector: str | None = None,
+        analysis: str | None = None,
+        decision_trace: str | None = None,
+        revision_context: str | None = None,
+    ) -> "AgentInputPaths":
+        """This call's paths.
+
+        The pipeline always passes the collector and analysis paths, and then
+        only the given paths count: an environment variable never fills one,
+        so a ``DECISION_TRACE_PATH`` left in a shell cannot reach a pipeline
+        design. Only a standalone call with neither path (a developer running
+        a designer by hand) reads ``COLLECTOR_OUTPUT_PATH``,
+        ``ANALYSIS_OUTPUT_PATH`` and ``DECISION_TRACE_PATH``.
+        """
+        if collector is not None or analysis is not None:
+            return cls(collector, analysis, decision_trace, revision_context)
+        return cls(
+            os.environ.get("COLLECTOR_OUTPUT_PATH"),
+            os.environ.get("ANALYSIS_OUTPUT_PATH"),
+            decision_trace or os.environ.get("DECISION_TRACE_PATH"),
+            revision_context,
+        )
+
 
 T = TypeVar("T", bound=BaseModel)
 

@@ -1,6 +1,8 @@
 """Unit tests for schema design agent handler."""
 
+import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -107,7 +109,11 @@ class TestSchemaDesignHandler:
         captured_paths = {}
 
         def capture_dispatch(
-            target_type, collector_path=None, analysis_path=None, revision_context_path=None
+            target_type,
+            collector_path=None,
+            analysis_path=None,
+            revision_context_path=None,
+            decision_trace_path=None,
         ):
             captured_paths["collector"] = collector_path
             captured_paths["analysis"] = analysis_path
@@ -126,12 +132,50 @@ class TestSchemaDesignHandler:
         assert captured_paths["collector"].endswith(".json")
         assert captured_paths["analysis"].endswith(".json")
 
+    def test_the_decision_trace_is_an_argument_never_an_env_var(self, artifact_store):
+        """#1054: the DocumentDB decision trace goes to the agent as an argument;
+        no environment variable carries it while the agent runs."""
+        artifact_store.write_json(
+            "mydb/job-001/analysis-documentdb/analysis.json",
+            artifact_store.read_json("mydb/job-001/analysis-dynamodb/analysis.json"),
+        )
+        artifact_store.write_json(
+            "mydb/job-001/analysis-documentdb/decision-trace.json", {"embedding_candidates": []}
+        )
+        seen: dict = {}
+
+        def capture_dispatch(target_type, **paths):
+            seen.update(paths)
+            seen["env"] = os.environ.get("DECISION_TRACE_PATH")
+            seen["trace"] = json.loads(Path(paths["decision_trace_path"]).read_text())
+            return "{}", "{}"
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch(
+                "src.agents.schema_design.handler._dispatch_schema_agent",
+                side_effect=capture_dispatch,
+            ),
+        ):
+            os.environ.pop("DECISION_TRACE_PATH", None)
+            from src.agents.schema_design.handler import run_schema_design
+
+            run_schema_design("job-001", "mydb", "documentdb", artifact_store)
+
+        assert seen["trace"] == {"embedding_candidates": []}
+        assert seen["env"] is None
+        assert not os.path.exists(seen["decision_trace_path"])
+
     def test_cleans_up_temp_files_after_run(self, artifact_store):
         """Handler cleans up temp files after agent completes."""
         captured_paths = {}
 
         def capture_dispatch(
-            target_type, collector_path=None, analysis_path=None, revision_context_path=None
+            target_type,
+            collector_path=None,
+            analysis_path=None,
+            revision_context_path=None,
+            decision_trace_path=None,
         ):
             captured_paths["collector"] = collector_path
             captured_paths["analysis"] = analysis_path
