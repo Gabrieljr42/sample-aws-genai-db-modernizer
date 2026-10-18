@@ -19,6 +19,10 @@ Version History:
   Every trace model keeps unknown keys (``extra="allow"``); the two LLM advisor
   answer models (``AggregateKeyDesign``, ``DenormStrategy``) keep pydantic's default,
   since they also parse the model's answer.
+- 1.1 (2026-10-17, #915): a write's transaction shape can be ``"key scoped"`` (the
+  rows one value of a non-unique key column addresses), and its trace may carry
+  ``schema_note``, the schema-design requirement that shape implies. Both additive:
+  a 1.0 trace still loads.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.contracts.analysis_output import MigrationComplexity
 
 # The shapes ``src/agents/referee/transaction_shape.py`` classifies a write into.
-TransactionShapeKind = Literal["single item", "bounded", "unbounded"]
+TransactionShapeKind = Literal["single item", "bounded", "key scoped", "unbounded"]
 
 
 class DenormSubtype(str, Enum):
@@ -76,6 +80,9 @@ class TransactionShapeTrace(BaseModel):
     shape: TransactionShapeKind
     items: int | None
     reason: str
+    # A key-scoped write's schema-design requirement (the column must become a
+    # partition key or a GSI's); written only for that shape, never as null.
+    schema_note: str | None = Field(default=None, exclude_if=_is_none)
 
 
 class QueryMatch(BaseModel):
@@ -297,7 +304,7 @@ class DynamoDBDecisionTrace(BaseModel):
     model_config = _KEEP_UNKNOWN
 
     contract_version: str = Field(
-        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
     )
     trace_version: str = Field(
         default="1.1", description="The trace's calibration version from before this contract"
