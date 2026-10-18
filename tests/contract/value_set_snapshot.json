@@ -84,23 +84,25 @@
     "module": "assignment_models",
     "values": [
       "assignment_resolution",
+      "auto_decided",
       "customer_gate",
       "post_schema_routing",
       "reality_check",
       "source_of_truth_reroute"
     ],
-    "version": "1.17"
+    "version": "1.18"
   },
   "assignment_models.AssignmentStatus": {
     "module": "assignment_models",
     "values": [
+      "auto_decided",
       "auto_generated",
       "customer_approved",
       "customer_modified",
       "reroute_rolled_back",
       "rerouted_after_approval"
     ],
-    "version": "1.17"
+    "version": "1.18"
   },
   "capability_ids": {
     "module": "triage_output",
@@ -571,7 +573,7 @@
       "neptune",
       "opensearch"
     ],
-    "version": "1.17"
+    "version": "1.18"
   },
   "feasibility_models.FindingKind": {
     "module": "feasibility_models",
@@ -620,12 +622,13 @@
       "model_flag",
       "rule"
     ],
-    "version": "1.7"
+    "version": "1.8"
   },
   "move_ledger.MovePass": {
     "module": "move_ledger",
     "values": [
       "aurora_fallback",
+      "auto_pick",
       "cache_owner_normalize",
       "candidates",
       "co_dependency",
@@ -644,7 +647,7 @@
       "tie",
       "utility_pin"
     ],
-    "version": "1.7"
+    "version": "1.8"
   },
   "move_ledger.ReasonCode": {
     "module": "move_ledger",
@@ -670,12 +673,13 @@
       "rollback.redesign_failed",
       "sweep.orphan",
       "tie.cleared",
+      "tie.decided_for_you",
       "tie.placeholder.hash",
       "tie.placeholder.settled_workload",
       "tie.source_compatible",
       "tie.stability"
     ],
-    "version": "1.7"
+    "version": "1.8"
   },
   "phase_models.Phase": {
     "module": "phase_models",
@@ -710,7 +714,7 @@
       "group_mean",
       "query"
     ],
-    "version": "1.32"
+    "version": "1.33"
   },
   "referee_output.ArchitectureType": {
     "module": "referee_output",

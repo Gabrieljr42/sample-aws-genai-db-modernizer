@@ -223,7 +223,11 @@ Workflow:
          rationale (this is a small recommendation, not the full table). Ask them
          to choose: continue with this recommendation, or review the full per-query
          routing in detail. This is a REQUIRED stop: WAIT for their reply. Do not
-         call any schema-design tool yet.
+         call any schema-design tool yet. When the summary lists pending engine
+         choices (tables whose queries tie between engines), ask one question per
+         table and pass the answers as finalize_assignment_review(...,
+         table_choices="<table>=<engine>,..."); only if the customer asks you to
+         decide, pass decide_for_me=True. Never pick a tied engine yourself.
       5. Based on the customer's choice:
          * They continue / approve as-is: call
            finalize_assignment_review(job_id, database_name) with no edited_markdown.

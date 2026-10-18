@@ -20,6 +20,10 @@ Version History:
   in place because their table's write group holds a customer-pinned write (a
   table has one writer, ADR-031 Amendment 9); the flag stands as a note on the
   unit, not a move. Defaults to empty, so a 1.0 file still loads.
+- 1.2 (2026-10-18, #1003): No field of its own. The embedded ``MoveEvidence``
+  (move ledger 1.8) gained the optional ``choice_id``, ``choice_scores``,
+  ``choice_unrounded_scores`` and ``choice_rule``, and ``tie_rule`` the value
+  ``tie.decided_for_you``. A 1.1 file still loads.
 """
 
 from __future__ import annotations
@@ -79,7 +83,7 @@ class RouterOutput(BaseModel):
     """Output contract for the post-schema router."""
 
     contract_version: str = Field(
-        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+        default="1.2", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
     )
 
     job_id: str = Field(..., description="Job ID for traceability")

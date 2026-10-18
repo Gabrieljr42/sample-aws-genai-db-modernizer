@@ -677,3 +677,27 @@ def test_the_designed_job_renders_the_schema_design_panels(
         if not r.external:
             assert page.get_by_role("button", name="Next page").count() > 0, r.job_id
         assert ev == {"console": [], "pageerror": [], "failed": []}, (r.job_id, ev)
+
+
+def test_results_page_states_the_pending_engine_choices(
+    page: Page, ui: str, all_runs: list[PipelineResult]
+) -> None:
+    """#1003: the results page states the pending engine choices with the counts
+    report.json's facts hold (the ones the engineering report and the PDF state),
+    and nothing when there are none."""
+    for r in all_runs:
+        report = json.loads((r.artifact_root / r.report["report"]).read_text())
+        facts = report.get("facts") or {}
+        n, q = facts.get("pending_choice_count") or 0, facts.get("pending_choice_query_count") or 0
+        ev = _watch(page)
+        page.goto(f"{ui}/analysis/results/{r.job_id}")
+        page.wait_for_load_state("networkidle")
+        page.locator("#sources-of-truth-section").wait_for()
+        note = page.locator("#engine-choices-note")
+        if n:
+            tables = "table still ties" if n == 1 else "tables still tie"
+            queries = "query" if q == 1 else "queries"
+            assert f"{n} {tables} between engines ({q} {queries})" in note.inner_text(), r.db
+        else:
+            assert note.count() == 0, r.db
+        assert ev == {"console": [], "pageerror": [], "failed": []}, (r.db, ev)

@@ -44,6 +44,7 @@ import QueryRoutingTable from "../components/QueryRoutingTable";
 import CloseCallCallout from "../components/CloseCallCallout";
 import UnservableQueriesCallout from "../components/UnservableQueriesCallout";
 import UnreviewedMovesNote from "../components/UnreviewedMovesNote";
+import EngineChoicesNote from "../components/EngineChoicesNote";
 import MigrationWavePlan from "../components/MigrationWavePlan";
 import ExecutiveSummaryStats from "../components/ExecutiveSummaryStats";
 import SourcesOfTruthCallout from "../components/SourcesOfTruthCallout";
@@ -2035,6 +2036,7 @@ const AnalysisResultsPage = memo(() => {
 
             {/* Reality-check moves no model reviewed (#746): one line when any. */}
             <UnreviewedMovesNote synthesis={resultsData?.synthesis} t={t} />
+            <EngineChoicesNote synthesis={resultsData?.synthesis} t={t} />
 
             {/* Queries on a fallback engine (#729): where each landed and why,
                 its gates, a redesign hint and the assignment review that

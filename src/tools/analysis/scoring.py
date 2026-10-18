@@ -312,6 +312,18 @@ def _cost(p: TableProfile) -> int:
 DEFAULT_WEIGHTS: dict[str, float] = default_score_weights()
 
 
+def weighted_confidence(scores: ScoreBreakdown, weights: dict[str, float] | None = None) -> float:
+    """The weighted sum of the four score dimensions, before :func:`compute_confidence`
+    drops the fraction (#1003: a near-tie's deciding fact)."""
+    w = weights or DEFAULT_WEIGHTS
+    return (
+        scores.pattern_match_score * w.get("pattern_match", 0.4)
+        + scores.complexity_score * w.get("complexity", 0.3)
+        + scores.performance_score * w.get("performance", 0.2)
+        + scores.cost_score * w.get("cost", 0.1)
+    )
+
+
 def compute_confidence(scores: ScoreBreakdown, weights: dict[str, float] | None = None) -> int:
     """Weighted confidence from the four score dimensions.
 
@@ -320,13 +332,7 @@ def compute_confidence(scores: ScoreBreakdown, weights: dict[str, float] | None 
         weights: Optional per-target weights. Keys: pattern_match, complexity,
                  performance, cost. Must sum to 1.0. Defaults to 40/30/20/10.
     """
-    w = weights or DEFAULT_WEIGHTS
-    return int(
-        scores.pattern_match_score * w.get("pattern_match", 0.4)
-        + scores.complexity_score * w.get("complexity", 0.3)
-        + scores.performance_score * w.get("performance", 0.2)
-        + scores.cost_score * w.get("cost", 0.1)
-    )
+    return int(weighted_confidence(scores, weights))
 
 
 @dataclass

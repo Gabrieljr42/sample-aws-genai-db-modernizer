@@ -131,6 +131,20 @@ Version History:
   assignment that split a table's writes is loaded for approval or resumed, with
   rule ``group.write_reroute`` on each moved write. All default to empty/None, so
   artifacts written before 1.17 still load.
+- 1.18 (2026-10-18, #1003, ADR-031 Decision 12 Amendment 10): Added
+  ``Assignment.auto_decided_choices`` (``AutoDecidedChoice``): each pending engine
+  choice ``--auto`` decided for the customer (one per table), with the engine, the
+  alternatives, each engine's unrounded score, the rule that decided it and the
+  customer-facing reason, carried into later versions while every one of its
+  queries stays on that engine. ``PendingEngineChoice`` and ``ChoiceEngine`` are
+  the per-table view of the open ties the gate and the deliverables present (not
+  stored on the assignment). ``Move`` gained the pass ``auto_pick`` and the rule
+  ``tie.decided_for_you`` (move ledger 1.8). A version whose only change is those
+  decisions is ``status = auto_decided`` and ``source = auto_decided``
+  (``AssignmentStatus.AUTO_DECIDED``, ``AssignmentSource.AUTO_DECIDED``), never a
+  customer edit; a batch that also carries a customer pick stays
+  ``customer_modified`` / ``customer_gate``. Defaults to empty, so artifacts
+  written before 1.18 still load.
 """
 
 from datetime import datetime
@@ -175,6 +189,9 @@ class AssignmentStatus(str, Enum):
     # the redesign of ``rolled_back_version`` failed, so that version is
     # abandoned and this one carries the earlier routing and its designs.
     REROUTE_ROLLED_BACK = "reroute_rolled_back"
+    # Written when --auto ("decide for me") settled pending engine choices and
+    # nothing else changed (#1003): the rule decided, not the customer.
+    AUTO_DECIDED = "auto_decided"
 
 
 class AssignmentSource(str, Enum):
@@ -193,6 +210,8 @@ class AssignmentSource(str, Enum):
     # A saved assignment that split a table's writes, re-routed to one source of
     # truth when it is loaded for approval or resumed (#992).
     SOURCE_OF_TRUTH_REROUTE = "source_of_truth_reroute"
+    # --auto's "decide for me" settled pending engine choices (#1003).
+    AUTO_DECIDED = "auto_decided"
 
 
 class QueryAssignment(BaseModel):
@@ -418,11 +437,121 @@ class PostSchemaReroute(BaseModel):
     approved_version: int = Field(..., ge=1, description="The version the customer approved")
 
 
+class ChoiceEngine(BaseModel):
+    """One engine of a pending engine choice (#1003): its scores and its trade-off."""
+
+    engine: str = Field(..., description="Engine id")
+    score: float | None = Field(
+        None,
+        description=(
+            "The score routing compared: the mean over the choice's queries of the shared "
+            "scorer's whole-point scores (a write group's call-weighted mean). None when gated"
+        ),
+    )
+    unrounded_score: float | None = Field(
+        None,
+        description=(
+            "The same mean before the scorer drops its fractions (the shared scorer's exact "
+            "scores), rounded to 2 places. None when gated"
+        ),
+    )
+    settled_query_count: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Queries the plan already places on this engine without a tie "
+            "(tie_break.settled_counts)"
+        ),
+    )
+    trade_off: str = Field("", description="What choosing it means, in customer-facing words")
+
+
+class PendingEngineChoice(BaseModel):
+    """One pending engine choice: a table whose queries tie between engines (#1003).
+
+    The open ties (``QueryAssignment.tied_engines``) grouped per table, so the
+    customer decides once per table, not once per query. A pick applies to every
+    query listed, through the customer gate. Built by
+    ``src.agents.referee.pending_choices``; never stored on the assignment.
+    """
+
+    choice_id: str = Field(
+        ..., description="The id a pick names: the table, made unique within the plan"
+    )
+    table: str = Field(..., description="The table the choice is for")
+    tables: list[str] = Field(
+        default_factory=list, description="Every table the choice's queries touch, sorted"
+    )
+    query_ids: list[str] = Field(..., description="The tied queries a pick applies to, sorted")
+    write_query_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Those that write the table or lock its rows: a pick then also chooses the "
+            "table's source of truth (ADR-031 Amendment 9)"
+        ),
+    )
+    tied_engines: list[str] = Field(..., description="The engines they tie between, sorted")
+    current_engine: str = Field(
+        ...,
+        description=(
+            "Where most of the queries sit until a pick (each one's deterministic "
+            "placeholder; first by name when level)"
+        ),
+    )
+    current_engines: list[str] = Field(
+        default_factory=list,
+        description="Every engine the queries sit on until a pick, sorted",
+    )
+    options: list[ChoiceEngine] = Field(
+        default_factory=list, description="Each tied engine's scores and trade-off"
+    )
+    why_tied: str = Field("", description="Why they tie, in customer-facing words")
+    decide_for_me_engine: str = Field(
+        ..., description="The engine --auto picks for this choice (tie_break.decide_for_me)"
+    )
+    decide_for_me_rule: str = Field(
+        ...,
+        description=(
+            "Which of decide_for_me's rules picks it: unrounded_score, settled_workload "
+            "or tie_break"
+        ),
+    )
+    decide_for_me_reason: str = Field("", description="Why that engine, in customer words")
+
+
+class AutoDecidedChoice(BaseModel):
+    """A pending engine choice ``--auto`` decided for the customer (#1003).
+
+    Recorded on the version that applied it and carried into later versions
+    while every one of its queries stays on ``engine``; a customer pick that
+    moves one of them (the UI can switch it) drops it.
+    """
+
+    choice_id: str = Field(..., description="The choice's id (its table)")
+    table: str = Field(..., description="The table the choice is for")
+    query_ids: list[str] = Field(..., description="The queries it placed, sorted")
+    engine: str = Field(..., description="The engine it placed them on")
+    alternatives: list[str] = Field(
+        default_factory=list, description="The other tied engines, sorted"
+    )
+    unrounded_scores: dict[str, float] = Field(
+        default_factory=dict, description="Each tied engine's unrounded score (2 places)"
+    )
+    scores: dict[str, float] = Field(
+        default_factory=dict, description="Each tied engine's whole-point score routing compared"
+    )
+    rule: str = Field(
+        ..., description="The decide_for_me rule: unrounded_score, settled_workload or tie_break"
+    )
+    reason: str = Field(..., description="Why, in customer-facing words")
+    decided_in_version: int = Field(..., ge=1, description="The version that applied it")
+
+
 class Assignment(BaseModel):
     """Complete versioned assignment artifact."""
 
     contract_version: str = Field(
-        default="1.17", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+        default="1.18", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
     )
 
     job_id: str = Field(..., description="Unique job identifier")
@@ -525,6 +654,14 @@ class Assignment(BaseModel):
             "How the resolver picked one Aurora engine when the source has no Aurora "
             "dialect of its own (#381). None for a homogeneous source and for "
             "artifacts written before 1.6."
+        ),
+    )
+    auto_decided_choices: list[AutoDecidedChoice] = Field(
+        default_factory=list,
+        description=(
+            "Pending engine choices --auto decided for the customer (#1003), one per "
+            "table, carried forward while their queries stay on the decided engine. "
+            "Empty for an artifact written before 1.18."
         ),
     )
     moves: list[Move] = Field(

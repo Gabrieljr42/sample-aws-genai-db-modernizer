@@ -164,6 +164,8 @@ _TIE_RULES = frozenset(
         ReasonCode.TIE_PLACEHOLDER_SETTLED_WORKLOAD,
         ReasonCode.TIE_PLACEHOLDER_HASH,
         ReasonCode.TIE_CLEARED,
+        # --auto's "decide for me" settled the tie (#1003).
+        ReasonCode.TIE_DECIDED_FOR_YOU,
     }
 )
 

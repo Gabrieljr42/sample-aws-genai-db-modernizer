@@ -254,3 +254,62 @@ def test_summary_line():
     assert render_trace_summary("dynamodb", None, 1, None) == (
         "Ends on DynamoDB after 1 routing step."
     )
+
+
+def _auto_pick(from_engine: str, rule: str) -> Move:
+    return _move(
+        pass_=MovePass.AUTO_PICK,
+        reason_code=ReasonCode.TIE_DECIDED_FOR_YOU,
+        from_engine=from_engine,
+        to_engine="documentdb",
+        score_before=78.0,
+        score_after=78.0,
+        runner_up=EngineScore(engine="dynamodb", score=78.0),
+        evidence=MoveEvidence(
+            choice_id="app.incoming_emails",
+            choice_scores={"documentdb": 78.0, "dynamodb": 78.0},
+            choice_unrounded_scores={"documentdb": 78.2, "dynamodb": 78.15},
+            choice_rule=rule,
+        ),
+    )
+
+
+@pytest.mark.parametrize("from_engine", ["dynamodb", "documentdb"])
+def test_a_decided_for_you_move_names_the_tie_the_rule_and_both_unrounded_scores(
+    from_engine: str,
+) -> None:
+    """#1003: --auto's pick reads as decided for the customer, with what decided it."""
+    sentence = render_move_reason(_auto_pick(from_engine, "unrounded_score"))
+    _assert_public(sentence)
+    assert "decided automatically" in sentence and "--auto" not in sentence
+    assert "it scores higher before rounding (DocumentDB 78.20, DynamoDB 78.15)" in sentence
+    assert "tied with DynamoDB" in sentence and "review if needed" in sentence
+    workload = render_move_reason(_auto_pick(from_engine, "settled_workload"))
+    assert "it already serves more of the plan" in workload
+
+
+def test_query_traces_count_a_decided_for_you_tie_as_settled() -> None:
+    from src.shared.query_trace import _latest_tie_rule
+
+    assert _latest_tie_rule([(3, _auto_pick("dynamodb", "unrounded_score"))]) == (
+        ReasonCode.TIE_DECIDED_FOR_YOU
+    )
+
+
+@pytest.mark.parametrize(
+    "code", [ReasonCode.WRITE_GROUP_CUSTOMER_PROPAGATION, ReasonCode.GROUP_CUSTOMER_PROPAGATION]
+)
+def test_a_group_pulled_by_an_auto_pick_never_credits_the_customer(code: ReasonCode) -> None:
+    """#1003: a group pulled by the decide-for-me rule follows the rule, not a customer."""
+    move = _move(
+        pass_=MovePass.CUSTOMER_GROUP_PROPAGATION,
+        reason_code=code,
+        from_engine="dynamodb",
+        to_engine="documentdb",
+        actor=MoveActor.RULE,
+    )
+    sentence = render_move_reason(move)
+    _assert_public(sentence)
+    assert "customer" not in sentence
+    customer = render_move_reason(move.model_copy(update={"actor": MoveActor.CUSTOMER}))
+    assert "customer" in customer

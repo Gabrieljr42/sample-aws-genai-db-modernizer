@@ -27,9 +27,123 @@ _CONSOLIDATED_FROM_TO_RE = CONSOLIDATED_FROM_TO_RE
 _engine_from_reason = engine_id_from_name
 
 
+# The pending engine choices' lead paragraph (#1003), in the engineering report and
+# the executive report's "Decisions needed" card.
+PENDING_CHOICES_NOTE = (
+    "These queries tie between engines at the whole-point score routing compares, so no "
+    "routing rule picks one. Each table is one choice: a pick applies to every query listed "
+    "under it, and until you choose, they sit on a deterministic placeholder. Choose in the "
+    "assignment review; a run with --auto decides for you, by the score before rounding, then "
+    "by the engine the plan already uses more."
+)
+# The auto-decided choices' lead paragraph (#1003).
+AUTO_DECIDED_NOTE = (
+    "These engine choices were ties the decide-for-me rule settled for you: decided "
+    "automatically, review if needed. Change any of them in the assignment review; that "
+    "writes a new assignment version and redesigns only the engines it touches."
+)
+
+
+def _score_pair(engine: dict[str, Any]) -> str:
+    whole = engine.get("score")
+    exact = engine.get("unrounded_score")
+    if not isinstance(whole, (int, float)) or not isinstance(exact, (int, float)):
+        return f"{display_engine(str(engine.get('engine', '')))} (n/a)"
+    return f"{display_engine(str(engine.get('engine', '')))} ({whole:g}; {exact:.2f})"
+
+
+def _bare_table(table: Any) -> str:
+    return str(table or "?").rsplit(".", 1)[-1]
+
+
+def pending_choices_md(report: dict[str, Any]) -> list[str]:
+    """Engineering Report section for the pending engine choices, one per table
+    (#1003); empty without any."""
+    choices = [c for c in report.get("pending_engine_choices") or [] if isinstance(c, dict)]
+    if not choices:
+        return []
+    facts = report_facts(report)
+    n = int(facts.get("pending_choice_count") or 0)
+    q = int(facts.get("pending_choice_query_count") or 0)
+    out = [
+        f"## Pending engine choices ({n} {plural_noun(n, 'table')}, "
+        f"{q} {plural_noun(q, 'query', 'queries')})",
+        "",
+        PENDING_CHOICES_NOTE,
+        "",
+        "| Table | Queries | Tied engines (score; before rounding) | Listed under "
+        "| Decide for me picks |",
+        "|---|---|---|---|---|",
+    ]
+    for c in choices:
+        engines = ", ".join(_score_pair(e) for e in c.get("options") or [] if isinstance(e, dict))
+        listed = c.get("current_engines") or [c.get("current_engine", "")]
+        out.append(
+            f"| `{escaping.md_code(_bare_table(c.get('table')))}` "
+            f"| {len(c.get('query_ids') or [])} "
+            f"| {escaping.md_cell(engines)} "
+            f"| {escaping.md_cell(', '.join(display_engine(str(e)) for e in listed))} "
+            f"| {escaping.md_cell(display_engine(str(c.get('decide_for_me_engine', ''))))} |"
+        )
+    out.append("")
+    for c in choices:
+        ids = c.get("query_ids") or []
+        out += [
+            f"### `{escaping.md_code(_bare_table(c.get('table')))}` "
+            f"({len(ids)} {plural_noun(len(ids), 'query', 'queries')})",
+            "",
+            escaping.md_text(c.get("why_tied") or ""),
+            "",
+        ]
+        for e in c.get("options") or []:
+            if isinstance(e, dict):
+                out.append(
+                    f"- {escaping.md_text(display_engine(str(e.get('engine', ''))))}: "
+                    f"{escaping.md_text(e.get('trade_off') or '')}"
+                )
+        out.append(f"- Decide for me: {escaping.md_text(c.get('decide_for_me_reason') or '')}")
+        out.append("- Queries: " + ", ".join(f"`{escaping.md_code(str(qid))}`" for qid in ids))
+        out.append("")
+    return out
+
+
+def auto_decided_md(report: dict[str, Any]) -> list[str]:
+    """Engineering Report section for the choices ``--auto`` decided (#1003)."""
+    decided = [d for d in report.get("auto_decided_choices") or [] if isinstance(d, dict)]
+    if not decided:
+        return []
+    facts = report_facts(report)
+    n = int(facts.get("auto_decided_choice_count") or 0)
+    q = int(facts.get("auto_decided_query_count") or 0)
+    out = [
+        f"## Decided automatically, review if needed ({n} {plural_noun(n, 'table')}, "
+        f"{q} {plural_noun(q, 'query', 'queries')})",
+        "",
+        AUTO_DECIDED_NOTE,
+        "",
+        "| Table | Queries | Placed on | Alternative | Why |",
+        "|---|---|---|---|---|",
+    ]
+    for d in decided:
+        alternatives = ", ".join(display_engine(e) for e in d.get("alternatives") or [])
+        out.append(
+            f"| `{escaping.md_code(_bare_table(d.get('table')))}` "
+            f"| {len(d.get('query_ids') or [])} "
+            f"| {escaping.md_cell(display_engine(str(d.get('engine', ''))))} "
+            f"| {escaping.md_cell(alternatives)} "
+            f"| {escaping.md_cell(d.get('reason') or '')} |"
+        )
+    out.append("")
+    return out
+
+
 def _tied_queries_md(report: dict[str, Any]) -> list[str]:
     """Engineering Report section for unresolved query ties (#503); empty
     without any.
+
+    A report synthesized since #1003 carries ``pending_engine_choices``: the
+    same ties grouped per table, rendered by :func:`pending_choices_md`. Only an
+    older report (no such field) falls back to the per-query table below.
 
     ``report["tied_queries"]`` is the structured list (``TiedQuery``):
     every query an exact score tie left unresolved, each with the engines
@@ -37,6 +151,8 @@ def _tied_queries_md(report: dict[str, Any]) -> list[str]:
     under -- the same per-query fact the approval gate shows from
     ``QueryAssignment.tied_engines`` directly, so the two never disagree.
     """
+    if report.get("pending_engine_choices") is not None:
+        return pending_choices_md(report)
     tied = [t for t in (report.get("tied_queries") or []) if isinstance(t, dict)]
     if not tied:
         return []

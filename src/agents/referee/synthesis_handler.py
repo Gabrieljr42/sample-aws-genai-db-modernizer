@@ -22,7 +22,7 @@ from src.agents.referee.capability_registry import triage_query_capabilities
 from src.agents.referee.migration_waves import build_migration_waves
 from src.agents.referee.summary_input_budget import apply_summary_input_budget, table_query_weights
 from src.agents.referee.summary_input_slim import slim_summary_input
-from src.agents.referee.synthesis_data import load_synthesis_data
+from src.agents.referee.synthesis_data import SynthesisData, load_synthesis_data
 from src.agents.referee.synthesis_grounding import (
     build_effective_architecture,
     build_fallback_summary,
@@ -709,6 +709,27 @@ def _query_traces(
     return digest.model_dump(mode="json", by_alias=True)
 
 
+def _engine_choices(data: SynthesisData) -> dict:
+    """``pending_engine_choices`` and ``auto_decided_choices`` for report.json (#1003),
+    built the way the customer gate builds them (``assignment_overrides``)."""
+    from src.agents.referee.assignment_overrides import pending_choices_from
+    from src.agents.referee.pending_choices import auto_decisions_still_holding
+    from src.contracts.assignment_models import AutoDecidedChoice
+
+    assignment = data.assignment or {}
+    qas = assignment.get("query_assignments") or []
+    outputs = {e: art.analysis for e, art in data.engines.items() if art.analysis}
+    pending = pending_choices_from(assignment, data.collector, outputs, data.triage)
+    decided = auto_decisions_still_holding(
+        [AutoDecidedChoice.model_validate(d) for d in assignment.get("auto_decided_choices") or []],
+        qas,
+    )
+    return {
+        "pending_engine_choices": [c.model_dump(mode="json") for c in pending],
+        "auto_decided_choices": [d.model_dump(mode="json") for d in decided],
+    }
+
+
 def _write_synthesis_report(
     store: ArtifactStore,
     result: dict,
@@ -756,6 +777,9 @@ def _write_synthesis_report(
             for qa in (data.assignment or {}).get("query_assignments", [])
             if qa.get("tied_engines")
         ],
+        # #1003: the open ties grouped per table, one customer choice each, with
+        # the deciding facts; and --auto's decisions that still hold.
+        **_engine_choices(data),
         # #629: queries the post-schema router moved after approval, so every
         # deliverable states them (and the override path) from one list.
         # Only moves that still hold on this version (a customer edit that moved

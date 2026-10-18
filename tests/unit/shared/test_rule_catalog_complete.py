@@ -439,6 +439,12 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
         "the precision a group's mean is compared at (#992 round 4): float noise in a "
         "weighted mean never decides between engines, an exact tie goes to tie_break",
     ),
+    "src/agents/referee/pending_choices.py": (
+        frozenset({"UNROUNDED_PLACES"}),
+        "the places a pending engine choice's unrounded score is shown and compared at "
+        "(#1003): it only orders a near-tie --auto decides, and it is the same for every "
+        "engine",
+    ),
     "src/agents/referee/write_groups.py": (
         frozenset({"CALL_WEIGHT_FLOOR_SHARE"}),
         "the floor weight of a write with no recorded calls in a call-weighted write group "

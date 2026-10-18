@@ -120,6 +120,14 @@ Version History:
   with a write group the customer re-routed carries
   ``group.write_customer_propagation``, and a saved assignment that split a
   table's writes, re-routed when loaded for approval, ``group.write_reroute``.
+- 1.8 (2026-10-18, #1003, ADR-031 Decision 12 Amendment 10): Added
+  ``MovePass.AUTO_PICK`` (``auto_pick``) and ``ReasonCode.TIE_DECIDED_FOR_YOU``
+  (``tie.decided_for_you``), and the optional ``MoveEvidence`` fields
+  ``choice_id``, ``choice_scores``, ``choice_unrounded_scores`` and
+  ``choice_rule``; additive, 1.7 records still load. ``--auto`` ("decide for
+  me") settles each pending engine choice (one per table) with one Move per
+  query: actor ``rule``, the alternative as the runner-up, and both engines'
+  whole-point and unrounded choice scores in the evidence.
 """
 
 from __future__ import annotations
@@ -154,6 +162,9 @@ class MovePass(str, Enum):
     CUSTOMER_GROUP_PROPAGATION = "customer_group_propagation"  # Decision 4
     CACHE_OWNER_NORMALIZE = "cache_owner_normalize"
     POST_SCHEMA_FLAG = "post_schema_flag"  # Decision 11
+    # --auto's "decide for me" pick for a pending engine choice (Decision 12
+    # Amendment 10, #1003).
+    AUTO_PICK = "auto_pick"
 
 
 class ReasonCode(str, Enum):
@@ -167,6 +178,9 @@ class ReasonCode(str, Enum):
     TIE_PLACEHOLDER_HASH = "tie.placeholder.hash"
     # A Move that only clears a query's unresolved tie (the engine stays).
     TIE_CLEARED = "tie.cleared"
+    # A pending engine choice --auto decided for the customer (#1003): higher
+    # unrounded score, then the engine the plan uses more, then break_tie.
+    TIE_DECIDED_FOR_YOU = "tie.decided_for_you"
     GROUP_MEAN = "group.mean"
     # A unit holding a table's write group: all of a table's writes share one
     # engine, its source of truth (ADR-031 Amendment 9, #992), placed on the unit's mean.
@@ -298,6 +312,33 @@ class MoveEvidence(BaseModel):
         description=(
             "For a reality-check engine change whose destination an exact tie "
             "decided: the tie rule (tie.*). None when no tie was involved"
+        ),
+    )
+    choice_id: str | None = Field(
+        None,
+        description=(
+            "For an auto_pick Move: the pending engine choice it settled (its table). "
+            "None otherwise"
+        ),
+    )
+    choice_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "For an auto_pick Move: each tied engine's whole-point choice score "
+            "(the score routing compared). Empty otherwise"
+        ),
+    )
+    choice_unrounded_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "For an auto_pick Move: each tied engine's unrounded choice score. Empty otherwise"
+        ),
+    )
+    choice_rule: str | None = Field(
+        None,
+        description=(
+            "For an auto_pick Move: the decide-for-me rule that picked the engine "
+            "(unrounded_score, settled_workload or tie_break). None otherwise"
         ),
     )
     previous_tied_engines: list[str] = Field(

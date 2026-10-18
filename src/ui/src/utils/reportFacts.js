@@ -184,3 +184,18 @@ export function unreviewedMoveCountOf(synthesis) {
   const n = factsOf(synthesis) && factsOf(synthesis).unreviewed_move_count;
   return typeof n === 'number' ? n : 0;
 }
+
+// #1003: the pending engine choices (one per table) and the choices --auto decided,
+// from facts.pending_choice_count / pending_choice_query_count /
+// auto_decided_choice_count / auto_decided_query_count; 0 when none, or for a
+// report written before the figures.
+export function engineChoiceCountsOf(synthesis) {
+  const f = factsOf(synthesis) || {};
+  const n = (k) => (typeof f[k] === 'number' ? f[k] : 0);
+  return {
+    pendingTables: n('pending_choice_count'),
+    pendingQueries: n('pending_choice_query_count'),
+    decidedTables: n('auto_decided_choice_count'),
+    decidedQueries: n('auto_decided_query_count'),
+  };
+}

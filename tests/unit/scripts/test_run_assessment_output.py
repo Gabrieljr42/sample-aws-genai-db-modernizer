@@ -319,7 +319,14 @@ def _run_all_in_process(monkeypatch, tmp_path, capsys) -> list[dict]:
 def test_all_status_lines_name_real_artifacts(monkeypatch, tmp_path, capsys):
     status = _run_all_in_process(monkeypatch, tmp_path, capsys)
     by_phase = {s["phase"]: s for s in status}
-    assert list(by_phase) == [*ASSESSMENT_PHASES, "schema_design", "synthesis", "report"]
+    # #1003: -y is --auto, "decide for me": the engine choices are settled first.
+    assert list(by_phase) == [
+        *ASSESSMENT_PHASES,
+        "engine_choices",
+        "schema_design",
+        "synthesis",
+        "report",
+    ]
     for path in _printed_paths(status):
         assert path.startswith("artifacts/wordpress/"), path
         assert (tmp_path / path).is_file(), path

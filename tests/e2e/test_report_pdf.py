@@ -19,11 +19,7 @@ from pypdf.generic import ArrayObject, IndirectObject
 from src.report import executive_report
 from src.report.cache_layer import cache_layer_text
 from src.report.deliverables import FOLDER_FILENAMES
-from src.report.executive_report import (
-    collected_identifiers,
-    table_names,
-    without_table_names,
-)
+from src.report.executive_report import collected_identifiers, table_names, without_table_names
 from src.report.formatting import _cost_baseline_text, _fmt_usd, fmt_num
 from src.report.risks import _severity_counts_text, filtered_risks
 from src.report.roadmap import _wave_headline_stats, resolve_migration_waves
@@ -196,7 +192,10 @@ def test_the_pending_engine_choices(run: PipelineResult) -> None:
     text = _text(run)
     tied = facts["tied_query_count"]
     if tied:
-        assert f"Unresolved engine ties ({tied} quer" in text
+        # #1003: one choice per table, the tied queries counted under them.
+        n = facts["pending_choice_count"]
+        assert f"Pending engine choices ({n} table{'s' if n != 1 else ''}, {tied} quer" in text
+        assert "Unresolved engine ties" not in text
     if not tied and not facts["post_schema_reroute_count"]:
         assert executive_report.L_NO_DECISIONS in text
 

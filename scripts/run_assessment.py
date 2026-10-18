@@ -752,7 +752,88 @@ def _reality_check_artifact(store, job_id: str, db: str) -> dict:
         if overlay:
             out["cache_overlay"] = {k: overlay[k] for k in _CACHE_OVERLAY_FIELDS if k in overlay}
     out["schema_design_engines"] = _schema_design_engines(store, job_id, db, version)
+    out["pending_choices"] = _compact_pending_choices(store, job_id, db)
     return out
+
+
+def _compact_pending_choices(store, job_id: str, db: str) -> list[dict]:
+    """The effective assignment's pending engine choices, one per table (#1003),
+    compact for the approval gate: per table its queries, each tied engine's
+    whole-point and unrounded score and trade-off, why they tie, where the
+    queries sit now, and what --decide-for-me would pick and why."""
+    from src.agents.referee.assignment_overrides import pending_choices_for_job
+
+    choices, _ = pending_choices_for_job(store, db, job_id)
+    return [
+        {
+            "choice": c.choice_id,
+            "table": c.table.rsplit(".", 1)[-1],
+            "queries": len(c.query_ids),
+            "writes": len(c.write_query_ids),
+            "engines": [
+                {
+                    "engine": e.engine,
+                    "score": e.score,
+                    "unrounded_score": e.unrounded_score,
+                    "trade_off": e.trade_off,
+                }
+                for e in c.options
+            ],
+            "why_tied": c.why_tied,
+            "listed_under": c.current_engine,
+            "decide_for_me": c.decide_for_me_engine,
+            "decide_for_me_reason": c.decide_for_me_reason,
+        }
+        for c in choices
+    ]
+
+
+def phase_engine_choices(
+    store, job_id: str, db: str, picks: list[str], decide_for_me: bool
+) -> None:
+    """Apply per-table engine picks (``--choose TABLE=ENGINE``) and, with
+    ``--decide-for-me``, --auto's pick for every other pending choice, as one new
+    assignment version through the customer gate (#1003). Prints one
+    ``engine_choices`` status line: the version, what was picked and decided, the
+    choices still pending and the engines schema design runs next."""
+    from src.agents.referee.assignment_overrides import (
+        AssignmentOverrideError,
+        apply_engine_choices,
+    )
+    from src.agents.referee.pending_choices import EngineChoiceError
+    from src.storage.assignment_versioning import resolve_downstream_assignment_version
+
+    parsed: dict[str, str] = {}
+    for item in picks:
+        table, sep, engine = item.partition("=")
+        if not sep or not table.strip() or not engine.strip():
+            _error("engine_choices", f"--choose expects TABLE=ENGINE, got {item!r}")
+        parsed[table.strip()] = engine.strip()
+    try:
+        result = apply_engine_choices(store, db, job_id, parsed, decide_for_me=decide_for_me)
+    except (EngineChoiceError, AssignmentOverrideError) as exc:
+        _error("engine_choices", str(exc))
+        return  # unreachable
+    version = resolve_downstream_assignment_version(store, db, job_id)
+    data: dict = {
+        "status": "complete" if result is not None else "unchanged",
+        "assignment_version": version,
+        "picked": result.picked if result is not None else {},
+        "decided": [
+            {
+                "choice": p.choice_id,
+                "table": p.table.rsplit(".", 1)[-1],
+                "engine": p.engine,
+                "alternatives": p.alternatives,
+                "queries": len(p.query_ids),
+                "reason": p.reason,
+            }
+            for p in (result.decided if result is not None else [])
+        ],
+        "pending_choices": _compact_pending_choices(store, job_id, db),
+        "schema_design_engines": _schema_design_engines(store, job_id, db, version),
+    }
+    _output("engine_choices", data)
 
 
 def phase_reality_check_finalize(
@@ -986,6 +1067,25 @@ def main() -> None:
         help="Skip interactive pauses (auto-approve)",
     )
     parser.add_argument(
+        "--choose",
+        action="append",
+        default=[],
+        metavar="TABLE=ENGINE",
+        help=(
+            "With --job-id/--db: settle a pending engine choice (one per table) on one of "
+            "its tied engines, for every query listed under it; repeatable (#1003)"
+        ),
+    )
+    parser.add_argument(
+        "--decide-for-me",
+        action="store_true",
+        help=(
+            "With --job-id/--db: decide every pending engine choice not named by --choose "
+            "the way --auto does (the higher score before rounding, then the engine the "
+            "plan already uses more, then the tie rules), and record each decision (#1003)"
+        ),
+    )
+    parser.add_argument(
         "--mode",
         choices=["chat", "ui", "both"],
         default=None,
@@ -1094,6 +1194,22 @@ def _run(args) -> None:  # type: ignore[no-untyped-def]
         _write_state(state)
         return
 
+    # Settle pending engine choices at the approval gate (#1003)
+    if args.choose or args.decide_for_me:
+        if not args.job_id or not args.db or args.file:
+            _error("init", "--choose/--decide-for-me require --job-id and --db (and no --file)")
+        _attach_log(args.artifact_root, args.db, args.job_id)
+        _set_job_context(store, args.db, args.job_id)
+        _start_phase("engine_choices")
+        phase_engine_choices(store, args.job_id, args.db, args.choose, args.decide_for_me)
+        state = _read_state()
+        if state.get("job_id") == args.job_id:
+            state["selected_engines"] = _surviving_engines(
+                store, args.job_id, args.db, state.get("selected_engines", [])
+            )
+            _write_state(state)
+        return
+
     # Header
     print(f"\n{'='*60}", file=sys.stderr)
     print("  Database Modernizer Assessment — Assessment Pipeline", file=sys.stderr)
@@ -1199,6 +1315,14 @@ def _run(args) -> None:  # type: ignore[no-untyped-def]
                 flush=True,
             )
             input()
+        else:
+            # -y is --auto: "decide for me" leaves no engine choice pending (#1003).
+            _start_phase("engine_choices")
+            phase_engine_choices(store, job_id, db_name, [], decide_for_me=True)
+            state["selected_engines"] = _surviving_engines(
+                store, job_id, db_name, state["selected_engines"]
+            )
+            _write_state(state)
 
         _start_phase("schema_design")
         schema_status = phase_schema_design(store, job_id, db_name, args.llm_mode)

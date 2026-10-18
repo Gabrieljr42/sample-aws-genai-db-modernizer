@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from typing import Literal, overload
 
 from src.agents.referee.capability_registry import (
     can_engine_serve_capability,
@@ -57,7 +58,7 @@ from src.shared.catalog.patterns import (
 )
 from src.shared.engine_capabilities import PATTERN_ONLY_ENGINES
 from src.shared.engine_names import display_engine
-from src.tools.analysis.scoring import DEFAULT_WEIGHTS, compute_confidence
+from src.tools.analysis.scoring import DEFAULT_WEIGHTS, compute_confidence, weighted_confidence
 from src.tools.sql.query_facts import source_engine_of
 
 ANTI_PATTERN_PENALTIES: dict[str, int] = anti_pattern_penalties()
@@ -65,6 +66,32 @@ CAPABILITY_SIGNAL_ENGINES: dict[str, frozenset[str]] = capability_signal_engines
 CAPABILITY_REDESIGN_PENALTIES: dict[str, dict[str, int]] = capability_redesign_penalties()
 CAPABILITY_REDESIGN_NOTES: dict[str, str] = capability_redesign_notes()
 CAPABILITY_EXEMPT_NOTES: dict[str, str] = capability_exempt_notes()
+
+
+@overload
+def compute_query_confidence(
+    query_id: str,
+    query: Mapping,
+    engine: str,
+    analysis: Mapping,
+    *,
+    pattern_model: QueryPatternModel,
+    cost_score: int,
+    exact: Literal[False] = False,
+) -> int: ...
+
+
+@overload
+def compute_query_confidence(
+    query_id: str,
+    query: Mapping,
+    engine: str,
+    analysis: Mapping,
+    *,
+    pattern_model: QueryPatternModel,
+    cost_score: int,
+    exact: Literal[True],
+) -> float: ...
 
 
 def compute_query_confidence(
@@ -75,8 +102,13 @@ def compute_query_confidence(
     *,
     pattern_model: QueryPatternModel,
     cost_score: int,
-) -> int:
+    exact: bool = False,
+) -> float:
     """Base confidence (0-100) for a query->engine pair (ADR-031 Decision 2 step 4).
+
+    ``exact`` (#1003) keeps the fractions routing drops: each table's weighted sum
+    and their mean, unrounded. Routing never passes it; a pending engine choice
+    reads it to show, and under ``--auto`` decide, a near-tie.
 
     The pattern dimension is the query's own access-pattern class score on ``engine``
     (``pattern_model.pattern_score``, ADR-031 Decision 14 Amendment 5, #728), never
@@ -105,7 +137,7 @@ def compute_query_confidence(
     included. ``cost_score`` is not read for it.
     """
     if not pattern_model.has_class_score(query):
-        return _unclassified_confidence(query_id, query, engine, analysis)
+        return _unclassified_confidence(query_id, query, engine, analysis, exact=exact)
     pattern_score = pattern_model.pattern_score(query, engine)
     if engine in PATTERN_ONLY_ENGINES and pattern_score <= 0:
         return 0
@@ -119,11 +151,24 @@ def compute_query_confidence(
         breakdown["pattern_match_score"] = pattern_score
         breakdown["cost_score"] = cost_score
         weights = dict(pattern_model.weights.get((engine, table_id)) or DEFAULT_WEIGHTS)
-        scores.append(compute_confidence(ScoreBreakdown(**breakdown), weights))
-    return int(sum(scores) / len(scores)) if scores else 0
+        score = ScoreBreakdown(**breakdown)
+        scores.append(
+            weighted_confidence(score, weights) if exact else compute_confidence(score, weights)
+        )
+    return _mean(scores, exact)
 
 
-def _unclassified_confidence(query_id: str, query: Mapping, engine: str, analysis: Mapping) -> int:
+def _mean(values: list, exact: bool) -> float:
+    """The mean of ``values`` (0 when empty), its fraction dropped unless ``exact``."""
+    if not values:
+        return 0
+    mean = sum(values) / len(values)
+    return mean if exact else int(mean)
+
+
+def _unclassified_confidence(
+    query_id: str, query: Mapping, engine: str, analysis: Mapping, *, exact: bool = False
+) -> float:
     """The base score of a statement with no access-pattern class (``utility`` or
     ``unparsed``): the rule every query had before the switch (#302, #475), kept only
     for statements whose access pattern the facade cannot read.
@@ -147,17 +192,17 @@ def _unclassified_confidence(query_id: str, query: Mapping, engine: str, analysi
         matched = [
             table_recs[t].get("confidence_score", 0) for t in pattern_tables if t in table_recs
         ]
-        return int(sum(matched) / len(matched)) if matched else 0
+        return _mean(matched, exact)
     own = [
         table_recs[t].get("confidence_score", 0)
         for t in query.get("tables_accessed", [])
         if t in table_recs
     ]
     if own:
-        return int(sum(own) / len(own))
+        return _mean(own, exact)
     if table_recs:
         every = [r.get("confidence_score", 0) for r in table_recs.values()]
-        return int(sum(every) / len(every))
+        return _mean(every, exact)
     return 0
 
 
@@ -540,7 +585,9 @@ class EngineScore:
     gate_kind: str | None = None
 
 
-def score_query_for_engine(query: Mapping, engine: str, ctx: ScoringContext) -> EngineScore:
+def score_query_for_engine(
+    query: Mapping, engine: str, ctx: ScoringContext, *, exact: bool = False
+) -> EngineScore:
     """The resolver's adjusted score for ``(query, engine)``, as an
     :class:`EngineScore` -- never ``None`` itself; check ``.score``.
 
@@ -556,6 +603,10 @@ def score_query_for_engine(query: Mapping, engine: str, ctx: ScoringContext) -> 
     ``AssignmentResolver.resolve()``'s own Step 4 arithmetic, so every caller
     of this function and ``resolve()`` itself agree on one score for a given
     ``(query, engine, ctx)`` without either side re-deriving it a second way.
+
+    ``exact=True`` (#1003) is the same score before its fractions are dropped
+    (:func:`compute_query_confidence`): the deciding fact of a pending engine
+    choice, never a routing input.
     """
     query_id = str(query.get("query_id") or "")
     gated = _structural_gate(query, engine, ctx)
@@ -568,13 +619,26 @@ def score_query_for_engine(query: Mapping, engine: str, ctx: ScoringContext) -> 
             gate_kind=GATE_KIND_MODEL_FLAG,
         )
     analysis = ctx.analysis_outputs.get(engine) or {}
-    base = compute_query_confidence(
-        query_id,
-        query,
-        engine,
-        analysis,
-        pattern_model=ctx.pattern_model,
-        cost_score=ctx.cost_score(query, engine),
+    cost_score = ctx.cost_score(query, engine)
+    base = (
+        compute_query_confidence(
+            query_id,
+            query,
+            engine,
+            analysis,
+            pattern_model=ctx.pattern_model,
+            cost_score=cost_score,
+            exact=True,
+        )
+        if exact
+        else compute_query_confidence(
+            query_id,
+            query,
+            engine,
+            analysis,
+            pattern_model=ctx.pattern_model,
+            cost_score=cost_score,
+        )
     )
     penalty = ctx.anti_pattern_map.get((query_id, engine), 0)
     return EngineScore(score=float(max(0, base - penalty)))

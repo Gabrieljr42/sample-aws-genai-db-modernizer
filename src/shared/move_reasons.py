@@ -72,6 +72,7 @@ _RULE_LABEL: dict[ReasonCode, str] = {
     ReasonCode.TIE_PLACEHOLDER_SETTLED_WORKLOAD: "tie held for the customer's choice",
     ReasonCode.TIE_PLACEHOLDER_HASH: "tie held for the customer's choice",
     ReasonCode.TIE_CLEARED: "tie settled",
+    ReasonCode.TIE_DECIDED_FOR_YOU: "tie decided automatically",
     ReasonCode.GROUP_MEAN: "co-dependency group",
     ReasonCode.WRITE_GROUP: "write group: one source of truth",
     ReasonCode.OVERRIDE_TEXT_SEARCH: "full-text search",
@@ -302,8 +303,14 @@ def _engine_change(move: Move) -> str:
         why = f"a design review found that {frm} cannot support this query"
     elif code == ReasonCode.CUSTOMER_PICK:
         why = "the customer chose it"
+    elif code == ReasonCode.TIE_DECIDED_FOR_YOU:
+        why = _decided_for_you(move)
     elif code == ReasonCode.GROUP_CUSTOMER_PROPAGATION:
-        why = "it moves with a co-dependent query the customer re-routed"
+        why = (
+            "it moves with a co-dependent query the customer re-routed"
+            if move.actor != MoveActor.RULE
+            else "it moves with a co-dependent query that was decided automatically"
+        )
     elif code == ReasonCode.WRITE_GROUP_REROUTE:
         group_score = move.evidence.group_scores.get(move.to_engine, move.score_after)
         why = (
@@ -312,8 +319,9 @@ def _engine_change(move: Move) -> str:
             f"({format_score(group_score)})"
         )
     elif code == ReasonCode.WRITE_GROUP_CUSTOMER_PROPAGATION:
+        by = "a customer re-route" if move.actor != MoveActor.RULE else "a decide-for-me pick"
         why = (
-            "a customer re-route moved its table's writes, and a table's writes stay on "
+            f"{by} moved its table's writes, and a table's writes stay on "
             "one engine, its source of truth"
         )
     elif code == ReasonCode.CACHE_LEGACY_OWNER:
@@ -374,11 +382,39 @@ def _same_engine(move: Move) -> str:
         )
     if code == ReasonCode.CUSTOMER_PICK:
         return f"The customer confirmed {to} for this query."
+    if code == ReasonCode.TIE_DECIDED_FOR_YOU:
+        return f"Kept on {to}: {_decided_for_you(move)}."
     if code == ReasonCode.GROUP_MEAN:
         return f"Kept on {to} with its co-dependency group."
     if code == ReasonCode.WRITE_GROUP:
         return f"Kept on {to} with its write group, the table's source of truth."
     return f"Stays on {to} ({rule_label(code)})."
+
+
+# How the "decide for me" rule settled a pending engine choice (#1003), by rule.
+_DECIDED_FOR_YOU: dict[str, str] = {
+    "unrounded_score": "it scores higher before rounding",
+    "settled_workload": "level before rounding, it already serves more of the plan",
+    "tie_break": "level on score and workload, the tie rules picked it",
+}
+
+
+def _decided_for_you(move: Move) -> str:
+    """The clause for an ``auto_pick`` Move: the tie, the rule, both unrounded scores."""
+    exact = move.evidence.choice_unrounded_scores
+    others = [e for e in sorted(exact) if e != move.to_engine] or (
+        [move.runner_up.engine] if move.runner_up else []
+    )
+    with_ = f" with {_names(others)}" if others else ""
+    rule = _DECIDED_FOR_YOU.get(move.evidence.choice_rule or "", "the tie rules picked it")
+    scores = ""
+    if move.to_engine in exact and all(e in exact for e in others) and others:
+        scores = (
+            " ("
+            + ", ".join(f"{display_engine(e)} {exact[e]:.2f}" for e in [move.to_engine, *others])
+            + ")"
+        )
+    return f"tied{with_}, decided automatically: {rule}{scores}; review if needed"
 
 
 def render_move_reason(move: Move) -> str:
@@ -413,6 +449,8 @@ def _tie_settled(rule: ReasonCode | None) -> str:
         return f"; {_TIE_DECIDED[rule]}"
     if rule == ReasonCode.TIE_CLEARED:
         return "; a later routing step settled the tie"
+    if rule == ReasonCode.TIE_DECIDED_FOR_YOU:
+        return "; the tie was decided automatically, review if needed"
     return f"; the tie was settled ({rule_label(rule)})"
 
 

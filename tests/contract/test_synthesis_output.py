@@ -406,7 +406,7 @@ class TestSynthesisOutputContract:
         # facts.resolved_risks_by_severity added
         # #746: facts.unreviewed_move_count added
         # #992: table_sources and facts.table_sources added (1.32)
-        assert output.contract_version == "1.32"
+        assert output.contract_version == "1.33"
 
     def test_summary_input_budget_is_optional(self, valid_synthesis_data):
         assert (

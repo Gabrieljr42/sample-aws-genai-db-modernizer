@@ -21,7 +21,7 @@ from .architecture import (
 )
 from .cache_layer import _cache_layer_md, cache_layer_text
 from .close_calls import close_calls_md
-from .engine_choices import _reroutes_md, _tied_queries_md
+from .engine_choices import _reroutes_md, _tied_queries_md, auto_decided_md
 from .engine_roles import _RELATIONAL_ENGINES, SEARCH_READ_MODEL
 from .facts import report_facts
 from .formatting import (
@@ -728,6 +728,7 @@ def render_engineering_report_md(
 
     out += unreviewed_moves_md(report)
     out += _tied_queries_md(report)
+    out += auto_decided_md(report)
     out += unservable_md(report)
     out += close_calls_md(report)
     out += _reroutes_md(report)

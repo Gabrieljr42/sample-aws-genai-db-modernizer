@@ -1197,6 +1197,100 @@
           ]
         }
       },
+      "auto_decided_choices": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object",
+            "properties": {
+              "alternatives": {
+                "required": false,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "choice_id": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "decided_in_version": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "engine": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "query_ids": {
+                "required": true,
+                "schema": {
+                  "items": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "reason": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "rule": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "scores": {
+                "required": false,
+                "schema": {
+                  "additional": {
+                    "kind": "scalar",
+                    "type": "number"
+                  },
+                  "kind": "object"
+                }
+              },
+              "table": {
+                "required": true,
+                "schema": {
+                  "kind": "scalar",
+                  "type": "string"
+                }
+              },
+              "unrounded_scores": {
+                "required": false,
+                "schema": {
+                  "additional": {
+                    "kind": "scalar",
+                    "type": "number"
+                  },
+                  "kind": "object"
+                }
+              }
+            }
+          },
+          "kind": "array"
+        }
+      },
       "cache_notes": {
         "required": false,
         "schema": {
@@ -1402,6 +1496,58 @@
                         "kind": "array"
                       }
                     },
+                    "choice_id": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "choice_rule": {
+                      "required": false,
+                      "schema": {
+                        "kind": "anyOf",
+                        "members": [
+                          {
+                            "kind": "scalar",
+                            "type": "null"
+                          },
+                          {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "choice_scores": {
+                      "required": false,
+                      "schema": {
+                        "additional": {
+                          "kind": "scalar",
+                          "type": "number"
+                        },
+                        "kind": "object"
+                      }
+                    },
+                    "choice_unrounded_scores": {
+                      "required": false,
+                      "schema": {
+                        "additional": {
+                          "kind": "scalar",
+                          "type": "number"
+                        },
+                        "kind": "object"
+                      }
+                    },
                     "group_gates": {
                       "required": false,
                       "schema": {
@@ -1515,6 +1661,7 @@
                               "rollback.redesign_failed",
                               "sweep.orphan",
                               "tie.cleared",
+                              "tie.decided_for_you",
                               "tie.placeholder.hash",
                               "tie.placeholder.settled_workload",
                               "tie.source_compatible",
@@ -1569,6 +1716,7 @@
                   "kind": "enum",
                   "values": [
                     "aurora_fallback",
+                    "auto_pick",
                     "cache_owner_normalize",
                     "candidates",
                     "co_dependency",
@@ -1622,6 +1770,7 @@
                     "rollback.redesign_failed",
                     "sweep.orphan",
                     "tie.cleared",
+                    "tie.decided_for_you",
                     "tie.placeholder.hash",
                     "tie.placeholder.settled_workload",
                     "tie.source_compatible",
@@ -2038,6 +2187,7 @@
               "kind": "enum",
               "values": [
                 "assignment_resolution",
+                "auto_decided",
                 "customer_gate",
                 "post_schema_routing",
                 "reality_check",
@@ -2056,6 +2206,7 @@
         "schema": {
           "kind": "enum",
           "values": [
+            "auto_decided",
             "auto_generated",
             "customer_approved",
             "customer_modified",
@@ -2224,8 +2375,8 @@
         }
       }
     },
-    "schema_hash": "c36fa40a287cba6bb1a34c3fec4f6ee1901b643b01529b685799afd928035ab5",
-    "version": "1.17"
+    "schema_hash": "5279fcf70b2f6d16e363e5ca83afe0229a579b337df9e147280c7e6e16492adc",
+    "version": "1.18"
   },
   "assignment_models.ValidationResult": {
     "fields": {
@@ -14116,6 +14267,58 @@
                             "kind": "array"
                           }
                         },
+                        "choice_id": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "choice_rule": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "choice_scores": {
+                          "required": false,
+                          "schema": {
+                            "additional": {
+                              "kind": "scalar",
+                              "type": "number"
+                            },
+                            "kind": "object"
+                          }
+                        },
+                        "choice_unrounded_scores": {
+                          "required": false,
+                          "schema": {
+                            "additional": {
+                              "kind": "scalar",
+                              "type": "number"
+                            },
+                            "kind": "object"
+                          }
+                        },
                         "group_gates": {
                           "required": false,
                           "schema": {
@@ -14229,6 +14432,7 @@
                                   "rollback.redesign_failed",
                                   "sweep.orphan",
                                   "tie.cleared",
+                                  "tie.decided_for_you",
                                   "tie.placeholder.hash",
                                   "tie.placeholder.settled_workload",
                                   "tie.source_compatible",
@@ -14434,8 +14638,8 @@
         }
       }
     },
-    "schema_hash": "cac48837388526a799ffdcc0bbb7304a3e176949619854592e59fc273da75484",
-    "version": "1.1"
+    "schema_hash": "ad5816f843e4b61e524d68d768b6ed7a9e5559c9f1741d85995fb9e2ad78f16e",
+    "version": "1.2"
   },
   "reality_check_model_response.RealityCheckModelResponse": {
     "fields": {
@@ -17167,6 +17371,109 @@
           ]
         }
       },
+      "auto_decided_choices": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "items": {
+                "kind": "object",
+                "properties": {
+                  "alternatives": {
+                    "required": false,
+                    "schema": {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    }
+                  },
+                  "choice_id": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "decided_in_version": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "engine": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "query_ids": {
+                    "required": true,
+                    "schema": {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    }
+                  },
+                  "reason": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "rule": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "scores": {
+                    "required": false,
+                    "schema": {
+                      "additional": {
+                        "kind": "scalar",
+                        "type": "number"
+                      },
+                      "kind": "object"
+                    }
+                  },
+                  "table": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "unrounded_scores": {
+                    "required": false,
+                    "schema": {
+                      "additional": {
+                        "kind": "scalar",
+                        "type": "number"
+                      },
+                      "kind": "object"
+                    }
+                  }
+                }
+              },
+              "kind": "array"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
       "cache_overlay": {
         "required": false,
         "schema": {
@@ -17287,6 +17594,66 @@
                         "type": "null"
                       }
                     ]
+                  }
+                },
+                "auto_decided_by_engine": {
+                  "required": false,
+                  "schema": {
+                    "items": {
+                      "kind": "object",
+                      "properties": {
+                        "choice_count": {
+                          "required": false,
+                          "schema": {
+                            "kind": "scalar",
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "engine": {
+                          "required": true,
+                          "schema": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "query_count": {
+                          "required": false,
+                          "schema": {
+                            "kind": "scalar",
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "tables": {
+                          "required": false,
+                          "schema": {
+                            "items": {
+                              "kind": "scalar",
+                              "type": "string"
+                            },
+                            "kind": "array"
+                          }
+                        }
+                      }
+                    },
+                    "kind": "array"
+                  }
+                },
+                "auto_decided_choice_count": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "auto_decided_query_count": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
                   }
                 },
                 "close_calls": {
@@ -17747,6 +18114,69 @@
                       "type": "integer"
                     },
                     "kind": "object"
+                  }
+                },
+                "pending_choice_count": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "pending_choice_pairs": {
+                  "required": false,
+                  "schema": {
+                    "items": {
+                      "kind": "object",
+                      "properties": {
+                        "choice_count": {
+                          "required": false,
+                          "schema": {
+                            "kind": "scalar",
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "engines": {
+                          "required": false,
+                          "schema": {
+                            "items": {
+                              "kind": "scalar",
+                              "type": "string"
+                            },
+                            "kind": "array"
+                          }
+                        },
+                        "query_count": {
+                          "required": false,
+                          "schema": {
+                            "kind": "scalar",
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "tables": {
+                          "required": false,
+                          "schema": {
+                            "items": {
+                              "kind": "scalar",
+                              "type": "string"
+                            },
+                            "kind": "array"
+                          }
+                        }
+                      }
+                    },
+                    "kind": "array"
+                  }
+                },
+                "pending_choice_query_count": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
                   }
                 },
                 "post_schema_reroute_count": {
@@ -19234,6 +19664,190 @@
           "type": "boolean"
         }
       },
+      "pending_engine_choices": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "items": {
+                "kind": "object",
+                "properties": {
+                  "choice_id": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "current_engine": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "current_engines": {
+                    "required": false,
+                    "schema": {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    }
+                  },
+                  "decide_for_me_engine": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "decide_for_me_reason": {
+                    "required": false,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "decide_for_me_rule": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "options": {
+                    "required": false,
+                    "schema": {
+                      "items": {
+                        "kind": "object",
+                        "properties": {
+                          "engine": {
+                            "required": true,
+                            "schema": {
+                              "kind": "scalar",
+                              "type": "string"
+                            }
+                          },
+                          "score": {
+                            "required": false,
+                            "schema": {
+                              "kind": "anyOf",
+                              "members": [
+                                {
+                                  "kind": "scalar",
+                                  "type": "null"
+                                },
+                                {
+                                  "kind": "scalar",
+                                  "type": "number"
+                                }
+                              ]
+                            }
+                          },
+                          "settled_query_count": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "trade_off": {
+                            "required": false,
+                            "schema": {
+                              "kind": "scalar",
+                              "type": "string"
+                            }
+                          },
+                          "unrounded_score": {
+                            "required": false,
+                            "schema": {
+                              "kind": "anyOf",
+                              "members": [
+                                {
+                                  "kind": "scalar",
+                                  "type": "null"
+                                },
+                                {
+                                  "kind": "scalar",
+                                  "type": "number"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "kind": "array"
+                    }
+                  },
+                  "query_ids": {
+                    "required": true,
+                    "schema": {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    }
+                  },
+                  "table": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "tables": {
+                    "required": false,
+                    "schema": {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    }
+                  },
+                  "tied_engines": {
+                    "required": true,
+                    "schema": {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    }
+                  },
+                  "why_tied": {
+                    "required": false,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "write_query_ids": {
+                    "required": false,
+                    "schema": {
+                      "items": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "kind": "array"
+                    }
+                  }
+                }
+              },
+              "kind": "array"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
       "post_schema_reroutes": {
         "required": false,
         "schema": {
@@ -19803,6 +20417,7 @@
                                       "kind": "enum",
                                       "values": [
                                         "aurora_fallback",
+                                        "auto_pick",
                                         "cache_owner_normalize",
                                         "candidates",
                                         "co_dependency",
@@ -19849,6 +20464,7 @@
                                         "rollback.redesign_failed",
                                         "sweep.orphan",
                                         "tie.cleared",
+                                        "tie.decided_for_you",
                                         "tie.placeholder.hash",
                                         "tie.placeholder.settled_workload",
                                         "tie.source_compatible",
@@ -20165,6 +20781,7 @@
                                     "kind": "enum",
                                     "values": [
                                       "aurora_fallback",
+                                      "auto_pick",
                                       "cache_owner_normalize",
                                       "candidates",
                                       "co_dependency",
@@ -20211,6 +20828,7 @@
                                       "rollback.redesign_failed",
                                       "sweep.orphan",
                                       "tie.cleared",
+                                      "tie.decided_for_you",
                                       "tie.placeholder.hash",
                                       "tie.placeholder.settled_workload",
                                       "tie.source_compatible",
@@ -20407,6 +21025,7 @@
                                       "rollback.redesign_failed",
                                       "sweep.orphan",
                                       "tie.cleared",
+                                      "tie.decided_for_you",
                                       "tie.placeholder.hash",
                                       "tie.placeholder.settled_workload",
                                       "tie.source_compatible",
@@ -20722,6 +21341,7 @@
                               "rollback.redesign_failed",
                               "sweep.orphan",
                               "tie.cleared",
+                              "tie.decided_for_you",
                               "tie.placeholder.hash",
                               "tie.placeholder.settled_workload",
                               "tie.source_compatible",
@@ -20853,6 +21473,7 @@
                               "rollback.redesign_failed",
                               "sweep.orphan",
                               "tie.cleared",
+                              "tie.decided_for_you",
                               "tie.placeholder.hash",
                               "tie.placeholder.settled_workload",
                               "tie.source_compatible",
@@ -21928,8 +22549,8 @@
         }
       }
     },
-    "schema_hash": "02b8f0f8ebf1a3e46b806c36c9c3857fbc5c71bc11c9763f5fcf6047c1db6276",
-    "version": "1.32"
+    "schema_hash": "c26b28ebe4ff05df4c540fd260e2a0eb0a06fd8428d09791756f417a81747c0c",
+    "version": "1.33"
   },
   "triage_output.TriageOutputContract": {
     "fields": {

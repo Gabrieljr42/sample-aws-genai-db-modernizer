@@ -246,6 +246,34 @@ ID_FIELD_PATHS = frozenset(
         ("evidence", "replaced_engine"),  # MoveEvidence.replaced_engine
         ("evidence", "tie_rule"),  # MoveEvidence.tie_rule (ReasonCode rule id)
         ("evidence", "previous_tied_engines"),  # MoveEvidence.previous_tied_engines (engine ids)
+        ("evidence", "choice_id"),  # MoveEvidence.choice_id: a table id (#1003)
+        ("evidence", "choice_rule"),  # MoveEvidence.choice_rule: a decide_for_me rule code
+        # Pending engine choices and --auto's decisions (#1003): ids and codes. Each
+        # ``why_tied``/``trade_off``/``decide_for_me_reason``/``reason`` is the
+        # customer-facing sentence (built with display_engine) and is still scanned.
+        ("pending_engine_choices", "choice_id"),
+        ("pending_engine_choices", "table"),
+        ("pending_engine_choices", "tables"),
+        ("pending_engine_choices", "current_engine"),
+        ("pending_engine_choices", "current_engines"),
+        ("pending_engine_choices", "decide_for_me_engine"),
+        ("pending_engine_choices", "decide_for_me_rule"),
+        ("pending_choices", "choice_id"),  # the API's AssignmentResponse.pending_choices
+        ("pending_choices", "table"),
+        ("pending_choices", "tables"),
+        ("pending_choices", "current_engine"),
+        ("pending_choices", "current_engines"),
+        ("pending_choices", "decide_for_me_engine"),
+        ("pending_choices", "decide_for_me_rule"),
+        ("options", "engine"),  # PendingEngineChoice.options[] (ChoiceEngine.engine)
+        ("auto_decided_choices", "choice_id"),
+        ("auto_decided_choices", "table"),
+        ("auto_decided_choices", "engine"),
+        ("auto_decided_choices", "alternatives"),
+        ("auto_decided_choices", "rule"),
+        ("pending_choice_pairs", "tables"),  # ReportFacts.pending_choice_pairs[].tables
+        ("auto_decided_by_engine", "engine"),  # ReportFacts.auto_decided_by_engine[].engine
+        ("auto_decided_by_engine", "tables"),
         # report.json query_traces (QueryTraceDigest, src/contracts/query_trace.py,
         # #339): each trace's steps are Moves (the ("moves", ...) entries above
         # cover them), its first step is ``first_assignment``; the machine

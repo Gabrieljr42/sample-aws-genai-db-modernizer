@@ -69,7 +69,12 @@ from src.shared.workload_fit_labels import WORKLOAD_FIT_DEFINITION
 
 from .architecture import _architecture_engines
 from .cache_layer import cache_layer_text
-from .engine_choices import REROUTE_OVERRIDE_TEXT, reroute_summary
+from .engine_choices import (
+    AUTO_DECIDED_NOTE,
+    PENDING_CHOICES_NOTE,
+    REROUTE_OVERRIDE_TEXT,
+    reroute_summary,
+)
 from .engineering_report import RISK_RULE_NOTE, _engine_role_notes_md
 from .facts import report_facts
 from .formatting import (
@@ -141,6 +146,7 @@ L_DECISIONS_REALITY = "Reality-check decisions"
 L_COST_BREAKDOWN = "Cost by engine"
 L_ASSUMPTIONS = "Assumptions"
 L_TIED_BETWEEN = "Tied between"
+L_PLACED_ON = "Placed on"
 L_NOT_REVIEWED = "Not reviewed"
 
 # ---------------------------------------------------------------------------
@@ -1039,8 +1045,9 @@ def _decisions(report: dict[str, Any], st: dict[str, ParagraphStyle], names: Any
         cards.append(
             _Panel([_para(L_NOT_REVIEWED, st["card_title"]), _para(unreviewed, st["body"])], YELLOW)
         )
+    cards += _engine_choice_cards(report, facts, st)
     tied = [t for t in (report.get("tied_queries") or []) if isinstance(t, dict)]
-    if tied:
+    if tied and report.get("pending_engine_choices") is None:
         n = int(facts.get("tied_query_count") or 0)
         pairs = sorted(
             {
@@ -1094,6 +1101,74 @@ def _decisions(report: dict[str, Any], st: dict[str, ParagraphStyle], names: Any
     for card in cards:
         flow += [card, _gap(10)]
     return flow[:-1]
+
+
+def _choice_count_text(group: dict[str, Any]) -> str:
+    tables = int(group.get("choice_count") or 0)
+    queries = int(group.get("query_count") or 0)
+    return f"{tables} {plural_noun(tables, 'table')}, {queries} {plural_noun(queries, 'query', 'queries')}"
+
+
+def _engine_choice_cards(
+    report: dict[str, Any], facts: dict[str, Any], st: dict[str, ParagraphStyle]
+) -> list:
+    """The pending engine choices (one per table) and the choices ``--auto``
+    decided (#1003), each a "Decisions needed" card; none for an older report."""
+    cards: list = []
+    n = int(facts.get("pending_choice_count") or 0)
+    if n and report.get("pending_engine_choices") is not None:
+        q = int(facts.get("pending_choice_query_count") or 0)
+        pairs = [
+            _labelled(
+                L_TIED_BETWEEN,
+                f"{' and '.join(display_engine(e) for e in p.get('engines') or [])}: "
+                f"{_choice_count_text(p)}",
+                st["small"],
+            )
+            for p in facts.get("pending_choice_pairs") or []
+            if isinstance(p, dict)
+        ]
+        cards.append(
+            _Panel(
+                [
+                    _para(
+                        f"Pending engine choices ({n} {plural_noun(n, 'table')}, "
+                        f"{q} {plural_noun(q, 'query', 'queries')})",
+                        st["card_title"],
+                    ),
+                    _para(PENDING_CHOICES_NOTE, st["body"]),
+                    *pairs,
+                ],
+                YELLOW,
+            )
+        )
+    n = int(facts.get("auto_decided_choice_count") or 0)
+    if n:
+        q = int(facts.get("auto_decided_query_count") or 0)
+        placed = [
+            _labelled(
+                f"{L_PLACED_ON} {display_engine(str(g.get('engine') or ''))}",
+                _choice_count_text(g),
+                st["small"],
+            )
+            for g in facts.get("auto_decided_by_engine") or []
+            if isinstance(g, dict)
+        ]
+        cards.append(
+            _Panel(
+                [
+                    _para(
+                        f"Decided automatically, review if needed ({n} {plural_noun(n, 'table')}, "
+                        f"{q} {plural_noun(q, 'query', 'queries')})",
+                        st["card_title"],
+                    ),
+                    _para(AUTO_DECIDED_NOTE, st["body"]),
+                    *placed,
+                ],
+                YELLOW,
+            )
+        )
+    return cards
 
 
 def _next_steps(report: dict[str, Any], st: dict[str, ParagraphStyle], names: Any) -> list:

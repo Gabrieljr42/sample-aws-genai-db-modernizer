@@ -14,10 +14,18 @@ from src.agents.referee.assignment_overrides import (
     NoAssignmentFound,
     QueryOverrideInput,
     apply_assignment_overrides,
+    apply_engine_choices,
+    pending_choices_for_job,
     reroute_split_writes,
 )
+from src.agents.referee.pending_choices import EngineChoiceError
 from src.api.dependencies import database_name_param, job_id_param
-from src.contracts.assignment_models import Assignment, AssignmentSource, ValidationResult
+from src.contracts.assignment_models import (
+    Assignment,
+    AssignmentSource,
+    PendingEngineChoice,
+    ValidationResult,
+)
 from src.shared.contract_versioning import load_contract
 from src.storage.artifact_store import ArtifactStore
 from src.storage.assignment_versioning import resolve_effective_assignment_version
@@ -54,6 +62,14 @@ class QueryOverride(BaseModel):
     )
 
 
+class TableChoice(BaseModel):
+    """The customer's pick for one pending engine choice (#1003): every query
+    listed under the table moves to ``engine``, one of its tied engines."""
+
+    choice_id: str = Field(..., description="The choice's id (its table, from pending_choices)")
+    engine: str = Field(..., description="One of the choice's tied engines")
+
+
 class ScopeNarrowing(BaseModel):
     """Table-level scope narrowing: exclude entire tables from the current iteration."""
 
@@ -71,6 +87,20 @@ class AssignmentOverrideRequest(BaseModel):
     scope: ScopeNarrowing | None = Field(
         None,
         description="Table-level scope narrowing (exclude entire tables)",
+    )
+    table_choices: list[TableChoice] = Field(
+        default_factory=list,
+        description=(
+            "Per-table picks for pending engine choices (#1003); each applies to every "
+            "query listed under the table"
+        ),
+    )
+    decide_for_me: bool = Field(
+        False,
+        description=(
+            "Decide every pending engine choice not picked here the way --auto does, and "
+            "record each as decided automatically (#1003)"
+        ),
     )
     base_version: int | None = Field(
         None,
@@ -91,6 +121,13 @@ class AssignmentResponse(BaseModel):
     skipped_engines: list[str] = Field(
         default_factory=list,
         description="Engines with zero in-scope queries (schema design will be SKIPPED)",
+    )
+    pending_choices: list[PendingEngineChoice] = Field(
+        default_factory=list,
+        description=(
+            "The open ties grouped per table (#1003): one customer choice each, with "
+            "its queries, each engine's scores and trade-off, and why they tie"
+        ),
     )
 
 
@@ -134,7 +171,8 @@ async def get_assignments(
         raise HTTPException(status_code=404, detail="No assignment artifact found")
 
     assignment = _read_assignment(store, database_name, job_id, version)
-    return AssignmentResponse(assignment=assignment)
+    choices, _ = pending_choices_for_job(store, database_name, job_id, version)
+    return AssignmentResponse(assignment=assignment, pending_choices=choices)
 
 
 @router.put("/{job_id}/assignments", response_model=AssignmentResponse)
@@ -186,14 +224,29 @@ async def put_assignments(
         # A saved assignment that split a table's writes is re-routed to one source
         # of truth first, as a new version the overrides then edit (#992).
         rerouted = reroute_split_writes(store, database_name, job_id)
-        result = apply_assignment_overrides(
-            store,
-            database_name,
-            job_id,
-            overrides,
-            exclude_tables,
-            source=AssignmentSource.CUSTOMER_GATE,
-        )
+        if body.table_choices or body.decide_for_me:
+            # #1003: per-table picks (and "decide for me") go into the same version
+            # as the per-query edits, through the shared gate.
+            applied = apply_engine_choices(
+                store,
+                database_name,
+                job_id,
+                {c.choice_id: c.engine for c in body.table_choices},
+                decide_for_me=body.decide_for_me,
+                source=AssignmentSource.CUSTOMER_GATE,
+                overrides=overrides,
+                exclude_tables=exclude_tables,
+            )
+            result = applied.override if applied is not None else None
+        else:
+            result = apply_assignment_overrides(
+                store,
+                database_name,
+                job_id,
+                overrides,
+                exclude_tables,
+                source=AssignmentSource.CUSTOMER_GATE,
+            )
     except NoAssignmentFound:
         raise HTTPException(
             status_code=404, detail="No assignment artifact found to override"
@@ -207,7 +260,7 @@ async def put_assignments(
                 "warnings": exc.warnings,
             },
         ) from None
-    except AssignmentOverrideError as exc:
+    except (AssignmentOverrideError, EngineChoiceError) as exc:
         # Every other rejected override (UnknownQuery, LosingAuroraEngineOverride,
         # ExcludedEngineOverride, and any future AssignmentOverrideError subclass)
         # maps to the same 400 -- round 2 review: before this, only UnknownQuery
@@ -222,8 +275,18 @@ async def put_assignments(
             )
         raise HTTPException(status_code=400, detail=detail) from None
 
+    if result is None:
+        # "Decide for me" with nothing pending and no edit: the current version.
+        version = _latest_assignment_version(store, database_name, job_id)
+        choices, _ = pending_choices_for_job(store, database_name, job_id, version)
+        return AssignmentResponse(
+            assignment=_read_assignment(store, database_name, job_id, version),
+            pending_choices=choices,
+        )
+    choices, _ = pending_choices_for_job(store, database_name, job_id, result.assignment.version)
     return AssignmentResponse(
         assignment=result.assignment,
         validation=result.validation,
         skipped_engines=result.skipped_engines,
+        pending_choices=choices,
     )

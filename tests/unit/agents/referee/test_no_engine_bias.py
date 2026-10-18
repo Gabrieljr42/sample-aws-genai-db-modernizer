@@ -350,6 +350,45 @@ _ALLOWLIST: dict[tuple[str, str, str], str] = {
         "the shared rule itself; every other caller goes through it rather "
         "than reimplementing it."
     ),
+    (
+        "tie_break.py",
+        "decide_for_me",
+        RULE_SORTED_INDEX0,
+    ): (
+        "level[0] and leaders[0] only run after 'len(...) == 1' -- one element, no "
+        "choice; everything else goes to break_tie. This is the shared --auto rule "
+        "(#1003, ADR-031 Decision 12 Amendment 10): higher unrounded score, then "
+        "settled_counts, then break_tie."
+    ),
+    (
+        "pending_choices.py",
+        "build_pending_choices",
+        RULE_SORTED_INDEX0,
+    ): (
+        "members[0] is a query id (the first of a union-find component, the anchor of "
+        "a placement unit) and the sorted()[0] picks the label table of a choice by how "
+        "many of its queries it holds, then by table name -- a grouping of tied queries "
+        "per table (#1003), never an engine."
+    ),
+    (
+        "pending_choices.py",
+        "build_pending_choices.home",
+        RULE_SORTED_INDEX0,
+    ): (
+        "written[0] and sorted(tables)[0] pick a tied query's table (the table it writes, "
+        "else the one most tied queries touch, then by name) to group it under (#1003); "
+        "a table, never an engine."
+    ),
+    (
+        "pending_choices.py",
+        "_choice",
+        RULE_SORTED_INDEX0,
+    ): (
+        "sorted(on, key=count, name)[0] names the engine most of the choice's queries sit "
+        "on now, for display only ('Listed under'; every engine is in current_engines): a "
+        "choice can group independent queries of one table on different placeholders. "
+        "Nothing is decided here: the pick is tie_break.decide_for_me (#1003)."
+    ),
     # --- Real bias, already tracked by an open issue (not fixed here) ---
     (
         "cache_overlay.py",

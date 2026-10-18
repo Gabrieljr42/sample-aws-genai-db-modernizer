@@ -348,6 +348,16 @@ Version History:
   queries moved after approval split by cause (a write re-routed to one source of
   truth, or a design review's flag). Backward compatible: the new fields default to
   None or 0 for a report synthesized before 1.32.
+- 1.33 (2026-10-18, #1003, ADR-031 Decision 12 Amendment 10): Added
+  ``pending_engine_choices`` (``PendingEngineChoice``): the open ties grouped per
+  table, each with its queries, every tied engine's whole-point and unrounded
+  score, why they tie, each engine's trade-off and the engine ``--auto`` would
+  pick; and ``auto_decided_choices`` (``AutoDecidedChoice``): the choices
+  ``--auto`` decided for the customer, still holding on the effective assignment;
+  and ``facts.pending_choice_count``, ``pending_choice_query_count``,
+  ``pending_choice_pairs``, ``auto_decided_choice_count``, ``auto_decided_query_count``
+  and ``auto_decided_by_engine`` (``PendingChoicePair``, ``AutoDecidedEngine``). Backward compatible: None,
+  0 or empty for a report synthesized before 1.33.
 """
 
 from datetime import datetime
@@ -357,6 +367,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.contracts.assignment_models import (  # re-exported, see docstring below
     AuroraEngineChoice,
+    AutoDecidedChoice,
+    PendingEngineChoice,
     PostSchemaReroute,
     UnresolvedNames,
 )
@@ -1184,6 +1196,24 @@ class TableSourceFacts(BaseModel):
     single_engine_table_count: int = Field(0, ge=0)
 
 
+class PendingChoicePair(BaseModel):
+    """The pending engine choices that tie between the same engines (#1003)."""
+
+    engines: list[str] = Field(default_factory=list, description="The tied engines, sorted")
+    choice_count: int = Field(0, ge=0, description="Choices (tables) in the group")
+    query_count: int = Field(0, ge=0, description="Queries those choices cover")
+    tables: list[str] = Field(default_factory=list, description="Their tables, sorted")
+
+
+class AutoDecidedEngine(BaseModel):
+    """The choices ``--auto`` placed on one engine (#1003)."""
+
+    engine: str = Field(..., description="The engine --auto placed them on")
+    choice_count: int = Field(0, ge=0, description="Choices (tables) placed there")
+    query_count: int = Field(0, ge=0, description="Queries those choices cover")
+    tables: list[str] = Field(default_factory=list, description="Their tables, sorted")
+
+
 class ReportFacts(BaseModel):
     """Every customer-facing figure, computed once at synthesis (#615, ADR-032).
 
@@ -1244,6 +1274,26 @@ class ReportFacts(BaseModel):
         description="The resolved risks by severity (#1020), as open_risks_by_severity",
     )
     tied_query_count: int = Field(0, ge=0)
+    pending_choice_count: int = Field(
+        0, ge=0, description="Pending engine choices, one per table (#1003)"
+    )
+    pending_choice_query_count: int = Field(
+        0, ge=0, description="The tied queries those choices cover (#1003)"
+    )
+    pending_choice_pairs: list[PendingChoicePair] = Field(
+        default_factory=list,
+        description="The pending choices grouped by their tied engines (#1003), sorted",
+    )
+    auto_decided_choice_count: int = Field(
+        0, ge=0, description="Choices --auto decided for the customer, still holding (#1003)"
+    )
+    auto_decided_query_count: int = Field(
+        0, ge=0, description="The queries those decided choices placed (#1003)"
+    )
+    auto_decided_by_engine: list[AutoDecidedEngine] = Field(
+        default_factory=list,
+        description="The decided choices grouped by the engine --auto placed them on (#1003)",
+    )
     unreviewed_move_count: int = Field(
         0,
         ge=0,
@@ -1345,7 +1395,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.32",
+        default="1.33",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )
@@ -1471,6 +1521,22 @@ class SynthesisOutputContract(BaseModel):
             "Each written table's source of truth, writes and replicas (#992, ADR-031 "
             "Amendment 9), from the effective assignment's write_groups. None for a report "
             "synthesized before this field existed."
+        ),
+    )
+    pending_engine_choices: list[PendingEngineChoice] | None = Field(
+        None,
+        description=(
+            "The open ties grouped per table (#1003): one customer choice per table, its "
+            "queries listed under it. Empty list when none; None for a report synthesized "
+            "before this field existed."
+        ),
+    )
+    auto_decided_choices: list[AutoDecidedChoice] | None = Field(
+        None,
+        description=(
+            "Pending engine choices --auto decided for the customer (#1003) that still "
+            "hold on the effective assignment: decided automatically, review if needed. "
+            "Empty list when none; None for a report synthesized before this field existed."
         ),
     )
     post_schema_reroutes: list[PostSchemaReroute] | None = Field(

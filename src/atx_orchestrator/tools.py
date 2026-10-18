@@ -580,6 +580,11 @@ def present_assignment_review(job_id: str, database_name: str) -> str:
       - continue with the recommendation as-is, or
       - review the full per-query routing in detail.
 
+    When ``pending_choices`` is not empty, some tables tie between engines (#1003):
+    ask the customer one question per table (its tied engines, from the summary)
+    and pass their answers to ``finalize_assignment_review`` as ``table_choices``,
+    or ``decide_for_me=True`` if they ask you to decide. Never pick one yourself.
+
     If they choose continue, call ``finalize_assignment_review`` (no edits) to
     approve. If they choose detail, call ``open_detailed_routing_review``. Schema
     design is blocked until ``finalize_assignment_review`` records approval.
@@ -616,6 +621,13 @@ def present_assignment_review(job_id: str, database_name: str) -> str:
         artifact=f"{database_name}/{job_id}/assignment/v{version}/assignment.json",
     )
     summary_md = render_assignment_summary(assignment)
+    # #1003: the open ties, one choice per table, with the deciding facts.
+    from src.agents.referee.assignment_overrides import pending_choices_for_job
+    from src.agents.referee.assignment_review import render_pending_choices
+
+    choices, _ = pending_choices_for_job(store, database_name, job_id, version)
+    if choices:
+        summary_md += "\n" + render_pending_choices(choices)
 
     # The recommendation is a chat message the customer reads to decide "continue"
     # vs "review in detail" — it is intentionally NOT published as a CUSTOMER_OUTPUT
@@ -646,6 +658,16 @@ def present_assignment_review(job_id: str, database_name: str) -> str:
             "assignment_version": version,
             "summary_artifact": summary_key,
             "summary_markdown": summary_md,
+            "pending_choices": [
+                {
+                    "choice_id": c.choice_id,
+                    "tied_engines": c.tied_engines,
+                    "queries": len(c.query_ids),
+                    "current_engine": c.current_engine,
+                    "decide_for_me_engine": c.decide_for_me_engine,
+                }
+                for c in choices
+            ],
         }
     )
 
@@ -800,8 +822,17 @@ def finalize_assignment_review(
     database_name: str,
     edited_markdown: str = "",
     accept_feasibility_risks: bool = False,
+    table_choices: str = "",
+    decide_for_me: bool = False,
 ) -> str:
     """Apply the customer's routing decision and open the schema-design gate.
+
+    ``table_choices`` (#1003): the customer's pick per pending engine choice, as
+    ``TABLE=ENGINE`` pairs separated by commas (the ``choice_id`` values from
+    ``present_assignment_review``); each applies to every query of that table.
+    ``decide_for_me``: settle every other pending choice the deterministic way
+    (higher score before rounding, then the engine the plan already uses more),
+    recorded as decided automatically. Only when the customer asks for it.
 
     This is the single approval point of the review gate. It handles all three
     ways the customer can respond:
@@ -981,15 +1012,38 @@ def finalize_assignment_review(
     propagated: list[str] = []
     effective_version = version
     effective_assignment: Assignment = current
-    if overrides:
+    picks: dict[str, str] = {}
+    for item in (table_choices or "").split(","):
+        if item.strip():
+            table, _, engine = item.partition("=")
+            picks[table.strip()] = engine.strip()
+    result = None
+    if overrides or picks or decide_for_me:
+        from src.agents.referee.assignment_overrides import apply_engine_choices
+        from src.agents.referee.pending_choices import EngineChoiceError
+
         try:
-            result = apply_assignment_overrides(
-                store,
-                database_name,
-                job_id,
-                overrides,
-                source=AssignmentSource.CUSTOMER_GATE,
-            )
+            if picks or decide_for_me:
+                choice_result = apply_engine_choices(
+                    store,
+                    database_name,
+                    job_id,
+                    picks,
+                    decide_for_me=decide_for_me,
+                    source=AssignmentSource.CUSTOMER_GATE,
+                    overrides=overrides,
+                )
+                result = choice_result.override if choice_result is not None else None
+            else:
+                result = apply_assignment_overrides(
+                    store,
+                    database_name,
+                    job_id,
+                    overrides,
+                    source=AssignmentSource.CUSTOMER_GATE,
+                )
+        except EngineChoiceError as e:
+            return json.dumps({"status": "invalid_edit", "error": str(e), "job_id": job_id})
         except AssignmentValidationFailed as e:
             return json.dumps(
                 {
@@ -1004,8 +1058,9 @@ def finalize_assignment_review(
             )
         except (UnknownQuery, NoAssignmentFound, AssignmentOverrideError) as e:
             return json.dumps({"status": "invalid_edit", "error": str(e), "job_id": job_id})
+    if result is not None:
         changed = True
-        applied = len(overrides)
+        applied = len(overrides) + len(picks)
         effective_version = result.assignment.version
         effective_assignment = result.assignment
         # Surface the co-dependency-split (and scope) warnings the validator

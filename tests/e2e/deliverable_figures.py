@@ -229,6 +229,14 @@ def expected_figures(report: dict[str, Any]) -> dict[str, Any]:
         exp["removal_savings"] = savings
 
     exp["tied"] = len([t for t in report.get("tied_queries") or [] if isinstance(t, dict)])
+    if report.get("auto_decided_choices") is not None:
+        # #1003: the choices the decide-for-me rule settled, from the stored list.
+        decided = [d for d in report["auto_decided_choices"] if isinstance(d, dict)]
+        exp["auto_decided"] = len(decided)
+        exp["auto_decided_queries"] = sum(len(d.get("query_ids") or []) for d in decided)
+    if report.get("pending_engine_choices") is not None:
+        # #1003: one choice per table, from the stored list (never the facts).
+        exp["choices"] = len([c for c in report["pending_engine_choices"] if isinstance(c, dict)])
     # #730: the close calls and the settled ties, counted from query_traces.close_calls.
     digest = report.get("query_traces") or {}
     if isinstance(digest.get("close_calls"), list):
@@ -495,6 +503,17 @@ _CLOSE_CALLS_TITLE = re.compile(
 )
 
 
+def _auto_decided(f: Figures, text: str, where: str) -> None:
+    """#1003: "Decided automatically, review if needed (N tables, M queries)"; 0 and 0
+    when the deliverable states none."""
+    m = re.search(
+        r"Decided automatically, review if needed \(([\d,]+) tables?, ([\d,]+) quer(?:y|ies)\)",
+        text,
+    )
+    f.add("auto_decided", _int(m.group(1)) if m else 0, where)
+    f.add("auto_decided_queries", _int(m.group(2)) if m else 0, where)
+
+
 def _close_calls(f: Figures, text: str | None, where: str) -> None:
     """The close-call figures of one "Close calls (N queries), plus T ..." title (#730)."""
     m = _CLOSE_CALLS_TITLE.search(text or "")
@@ -585,6 +604,18 @@ def engineering_figures(md_text: str) -> Figures:
                 f.add(
                     f"cached_reads:{engine_id(m.group(1))}", _int(k.group(1)), "Cache layer section"
                 )
+        # #1003: the same ties as one choice per table, their queries counted.
+        m = re.match(
+            r"^Pending engine choices \(([\d,]+) tables?, ([\d,]+) quer(?:y|ies)\)$", heading
+        )
+        if m:
+            f.add("tied", _int(m.group(2)), "Pending engine choices heading")
+            rows = _md_table_rows(body)
+            f.add("tied", sum(_int(row[1]) for row in rows), "Pending engine choices table")
+            f.add("choices", _int(m.group(1)), "Pending engine choices heading")
+            f.add("choices", len(rows), "Pending engine choices table")
+            for row in rows:
+                f.name(engines_in(md_plain(" ".join(row[2:]))), "Pending engine choices table")
         m = re.match(r"^Unresolved engine ties \(([\d,]+) quer(?:y|ies)\)$", heading)
         if m:
             f.add("tied", _int(m.group(1)), "Unresolved engine ties heading")
@@ -612,8 +643,15 @@ def engineering_figures(md_text: str) -> Figures:
         next((h for h in h2 if h.startswith("Queries on a fallback engine (")), None),
         "fallback heading",
     )
-    if "Unresolved engine ties" not in " ".join(h2):
+    if not re.search(r"Unresolved engine ties|Pending engine choices", " ".join(h2)):
         f.add("tied", 0, "no Unresolved engine ties section")
+    if "Pending engine choices" not in " ".join(h2):
+        f.add("choices", 0, "no Pending engine choices section")
+    _auto_decided(
+        f,
+        next((h for h in h2 if h.startswith("Decided automatically, review if needed (")), ""),
+        "Decided automatically heading",
+    )
     f.add("removed", frozenset(removed), "Retired line and Migration trade-offs")
 
     queries_on_aurora = h2.get("Queries on Aurora by table", "")
@@ -712,7 +750,14 @@ def pdf_figures(text: str) -> Figures:
         removed |= {engine_id(x) for x in re.findall(r"/mo \(([^)]+)\)", r.group(1))}
     f.add("removed", frozenset(removed), "Removed tile and Retired line")
     m = re.search(r"Unresolved engine ties \(([\d,]+) quer(?:y|ies)\)", text)
-    f.add("tied", _int(m.group(1)) if m else 0, "Decisions needed: Unresolved engine ties")
+    c = re.search(r"Pending engine choices \(([\d,]+) tables?, ([\d,]+) quer(?:y|ies)\)", text)
+    f.add(
+        "tied",
+        _int(c.group(2)) if c else (_int(m.group(1)) if m else 0),
+        "Decisions needed: Pending engine choices",
+    )
+    f.add("choices", _int(c.group(1)) if c else 0, "Decisions needed: Pending engine choices")
+    _auto_decided(f, text, "Decisions needed: Decided automatically")
     _fallback_queries(
         f, text if "Queries on a fallback engine (" in text else None, "Decisions needed"
     )

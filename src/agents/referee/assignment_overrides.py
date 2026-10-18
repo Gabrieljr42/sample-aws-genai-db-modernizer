@@ -45,11 +45,13 @@ from src.agents.referee.engine_exclusions import check_exclusions
 from src.agents.referee.move_ledger import (
     MoveLedger,
     apply_to_assignment,
+    best_other,
     check_replay,
     group_key,
     ledger_for,
     state_of,
 )
+from src.agents.referee.pending_choices import AutoPick, auto_decisions_still_holding
 from src.agents.referee.query_pattern import write_access_patterns
 from src.agents.referee.query_scoring import GATE_KIND_WRITE
 from src.agents.referee.table_resolution import TableNameResolver
@@ -64,11 +66,12 @@ from src.contracts.assignment_models import (
     AssignmentSource,
     AssignmentStatus,
     CacheOverlaySummary,
+    PendingEngineChoice,
     PostSchemaReroute,
     QueryAssignment,
     ValidationResult,
 )
-from src.contracts.move_ledger import MoveActor, MoveEvidence, MovePass, ReasonCode
+from src.contracts.move_ledger import EngineScore, MoveActor, MoveEvidence, MovePass, ReasonCode
 from src.shared.capability_labels import capability_gap_phrase
 from src.shared.contract_versioning import load_contract, stamp_artifact_version
 from src.shared.engine_names import SOURCE_ENGINE_DISPLAY_NAMES, display_engine
@@ -103,6 +106,10 @@ class QueryOverrideInput:
     assigned_engine: str | None = None
     in_scope: bool | None = None
     cached: bool | None = None
+    # #1003: set when ``--auto`` ("decide for me") picked ``assigned_engine`` for a
+    # pending engine choice; the Move is then the rule's (pass ``auto_pick``), not
+    # the customer's, and the version records the decision.
+    auto_pick: AutoPick | None = None
 
 
 @dataclass
@@ -550,7 +557,8 @@ def apply_assignment_overrides(
 
     Reads the effective assignment, applies per-query engine/scope overrides and
     optional table-level scope narrowing, builds a new ``customer_modified``
-    version (``version+1``, ``previous_version`` set, ``source`` stamped, fresh
+    version (``auto_decided``, status and source, when every override is an
+    ``--auto`` pick and nothing else changes, #1003) (``version+1``, ``previous_version`` set, ``source`` stamped, fresh
     timestamp), validates it, and writes it. Returns the new assignment plus the
     validation result and the engines left with zero in-scope queries.
 
@@ -613,7 +621,6 @@ def apply_assignment_overrides(
     def scores(query_id: str, from_engine: str, to_engine: str) -> dict:
         """A customer Move's scores: the shared scorer's on both engines, and the
         runner-up (the best-scoring other analyzed engine that may own the query)."""
-        from src.agents.referee.move_ledger import best_other
         from src.agents.referee.query_scoring import score_query_for_engine
 
         if ctx is None:
@@ -632,6 +639,10 @@ def apply_assignment_overrides(
         }
 
     cache_notes: list[str] = []
+    # #1003: the --auto picks this batch applies (by choice id), and the queries the
+    # customer picked themselves (a pick drops an earlier --auto decision).
+    auto_picks: dict[str, AutoPick] = {}
+    customer_picked: set[str] = set()
     # #548 round 2: every excluded override in the batch is collected and
     # reported together (never just the first), and a group move is checked
     # for every member before anything is written -- see
@@ -712,7 +723,23 @@ def apply_assignment_overrides(
                 # tie sentence standing after the field it was about has already
                 # been cleared.
                 was_tied = sorted(qa.tied_engines)
-                if qa.assigned_engine != override.assigned_engine or was_tied:
+                if override.auto_pick is not None:
+                    if qa.assigned_engine != override.assigned_engine or was_tied:
+                        pick = override.auto_pick
+                        alternative = pick.alternatives[0] if pick.alternatives else None
+                        _apply_auto_pick(
+                            ledger,
+                            qa,
+                            pick,
+                            scores(qa.query_id, qa.assigned_engine, pick.engine),
+                            (
+                                scores(qa.query_id, alternative, pick.engine).get("score_before")
+                                if alternative
+                                else None
+                            ),
+                        )
+                    auto_picks[override.auto_pick.choice_id] = override.auto_pick
+                elif qa.assigned_engine != override.assigned_engine or was_tied:
                     # #616: the pick is a Move (pass and rule customer_pick,
                     # actor customer) with the shared scorer's scores.
                     apply_to_assignment(
@@ -725,8 +752,10 @@ def apply_assignment_overrides(
                         actor=MoveActor.CUSTOMER,
                         **scores(qa.query_id, qa.assigned_engine, override.assigned_engine),
                     )
-                qa.customer_override = True
-                if was_tied:
+                if override.auto_pick is None:
+                    qa.customer_override = True
+                    customer_picked.add(qa.query_id)
+                if was_tied and override.auto_pick is None:
                     others = ", ".join(
                         display_engine(e) for e in was_tied if e != qa.assigned_engine
                     )
@@ -750,6 +779,7 @@ def apply_assignment_overrides(
         ledger=ledger,
         scores=scores,
         ctx=ctx,
+        decided_ids={o.query_id for o in owner_overrides if o.auto_pick is not None},
     )
     excluded.extend(group_excluded)
 
@@ -778,14 +808,27 @@ def apply_assignment_overrides(
                     f"excluded tables ({sorted(tables & excluded_tables)}). Keeping query in scope."
                 )
 
+    decided_only = (
+        bool(overrides)
+        and all(
+            o.auto_pick is not None and o.in_scope is None and o.cached is None for o in overrides
+        )
+        and not exclude_tables
+    )
     new_version = current_version + 1
     new_assignment = current.model_copy(
         update={
             # #972: a new file, so today's version, not the loaded one's.
             "contract_version": Assignment.model_fields["contract_version"].default,
             "version": new_version,
-            "status": AssignmentStatus.CUSTOMER_MODIFIED,
-            "source": source,
+            # #1003: a version only --auto's decisions produced is the rule's, not a
+            # customer edit; any customer pick or scope edit keeps it a customer edit.
+            "status": (
+                AssignmentStatus.AUTO_DECIDED
+                if decided_only
+                else AssignmentStatus.CUSTOMER_MODIFIED
+            ),
+            "source": AssignmentSource.AUTO_DECIDED if decided_only else source,
             "timestamp": datetime.now(UTC),
             "query_assignments": list(qa_map.values()),
             # #713 review round 3: a post-schema reroute stays on record only
@@ -808,6 +851,15 @@ def apply_assignment_overrides(
             # #616: moves are per-version: exactly the Moves that produced this
             # version (the cache owner normalisation's, then the customer's).
             "moves": list(ledger.moves),
+            # #1003: --auto's decisions that still hold (a customer pick on one of
+            # their queries drops it), then this batch's own.
+            "auto_decided_choices": _auto_decisions(
+                current.auto_decided_choices,
+                auto_picks,
+                customer_picked,
+                qa_map.values(),
+                new_version_number=current_version + 1,
+            ),
         }
     )
 
@@ -859,6 +911,72 @@ def apply_assignment_overrides(
         written_path=new_path,
         propagated_query_ids=propagated_query_ids,
     )
+
+
+def _apply_auto_pick(
+    ledger: MoveLedger,
+    qa: QueryAssignment,
+    pick: AutoPick,
+    scored: dict,
+    alternative_score: float | None,
+) -> None:
+    """``--auto``'s pick for one query of a pending engine choice (#1003): a Move
+    with pass ``auto_pick``, rule ``tie.decided_for_you``, actor ``rule``; the
+    alternative (with the query's own score there) is the runner-up, and the
+    choice's whole-point and unrounded scores are in the evidence."""
+    alternative = pick.alternatives[0] if pick.alternatives else None
+    runner_up = scored.get("runner_up")
+    if alternative is not None:
+        runner_up = EngineScore(engine=alternative, score=alternative_score)
+    apply_to_assignment(
+        ledger,
+        qa,
+        pick.engine,
+        pass_=MovePass.AUTO_PICK,
+        reason_code=ReasonCode.TIE_DECIDED_FOR_YOU,
+        tied_engines=[],
+        actor=MoveActor.RULE,
+        score_before=scored.get("score_before"),
+        score_after=scored.get("score_after"),
+        runner_up=runner_up,
+        evidence=MoveEvidence(
+            choice_id=pick.choice_id,
+            choice_scores=dict(pick.scores),
+            choice_unrounded_scores=dict(pick.unrounded_scores),
+            choice_rule=pick.rule,
+            previous_tied_engines=sorted(qa.tied_engines),
+        ),
+    )
+    others = _join_names(pick.alternatives)
+    qa.assignment_reason = (
+        f"Placed on {display_engine(pick.engine)}: it tied with {others} on table "
+        f"{pick.table.rsplit('.', 1)[-1]}. {pick.reason} Decided automatically, review if needed."
+    )
+
+
+def _join_names(engines: Iterable[str]) -> str:
+    names = [display_engine(e) for e in engines]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _auto_decisions(
+    previous: Iterable,
+    picks: Mapping[str, AutoPick],
+    customer_picked: set[str],
+    query_assignments: Iterable[QueryAssignment],
+    *,
+    new_version_number: int,
+) -> list:
+    """The version's ``auto_decided_choices`` (#1003): the earlier ones that still
+    hold and that no customer pick in this batch touched, then this batch's own."""
+    qas = list(query_assignments)
+    kept = [
+        d
+        for d in auto_decisions_still_holding(previous, qas)
+        if d.choice_id not in picks and not set(d.query_ids) & customer_picked
+    ]
+    new = [pick.record(new_version_number) for _, pick in sorted(picks.items())]
+    return sorted([*kept, *new], key=lambda d: d.choice_id)
 
 
 def _reroutes_still_holding(reroutes: list, query_assignments) -> list:
@@ -915,6 +1033,7 @@ def _propagate_codependent_overrides(
     ledger: MoveLedger,
     scores: Callable[[str, str, str], dict] | None = None,
     ctx: ScoringContext | None = None,
+    decided_ids: Iterable[str] = (),
 ) -> tuple[list[str], list[ExcludedOverride]]:
     """Move a customer-re-routed query's co-dependent group-mates, and the other
     writes of the tables it writes, with it.
@@ -956,8 +1075,13 @@ def _propagate_codependent_overrides(
     Best-effort: any error building the groups leaves the explicit overrides intact
     and propagates nothing — propagation is an enhancement, never a blocker.
 
+    ``decided_ids`` (#1003) are the overrides the decide-for-me rule made, not the
+    customer: a query pulled along only by them is the rule's Move (actor
+    ``rule``) and its reason says it was decided automatically; one pulled by any
+    customer pick in its unit is the customer's.
+
     Each move is a Move on ``ledger`` (#616: pass ``customer_group_propagation``,
-    actor ``customer``, with the group's key): rule ``group.write_customer_propagation``
+    actor ``customer`` (``rule`` for a decide-for-me pull), with the group's key): rule ``group.write_customer_propagation``
     for a write of a picked table, ``group.customer_propagation`` for a JOIN
     group-mate, scored by ``scores(query_id, from, to)`` when given.
     """
@@ -999,7 +1123,16 @@ def _propagate_codependent_overrides(
                         )
                     )
 
-    def _move(qid: str, target: str, anchor: str, group: list[str], table: str | None) -> None:
+    decided = set(decided_ids)
+
+    def _move(
+        qid: str,
+        target: str,
+        anchor: str,
+        group: list[str],
+        table: str | None,
+        by_rule: bool = False,
+    ) -> None:
         qa = qa_map.get(qid)
         if qa is None or not qa.in_scope or qid in explicit:
             return
@@ -1029,16 +1162,20 @@ def _propagate_codependent_overrides(
             ),
             group_key=group_key(group),
             tied_engines=[],
-            actor=MoveActor.CUSTOMER,
+            actor=MoveActor.RULE if by_rule else MoveActor.CUSTOMER,
             **(scores(qid, qa.assigned_engine, target) if scores else {}),
         )
         qa.co_dependency_propagated = True
+        cause = (
+            f"{anchor} was decided automatically" if by_rule else f"the customer re-routed {anchor}"
+        )
+        change = "an automatic decision" if by_rule else "a customer routing change"
         qa.assignment_reason = (
-            f"Moved with the other writes of table {table} when the customer re-routed {anchor}: "
+            f"Moved with the other writes of table {table} when {cause}: "
             "a table's writes stay on one engine, its source of truth."
             if table
             else f"Co-located with co-dependent query group of {anchor} (shared JOIN) "
-            f"after a customer routing change."
+            f"after {change}."
         )
         propagated.append(qid)
 
@@ -1050,7 +1187,11 @@ def _propagate_codependent_overrides(
         if len(chosen) == 1:
             # The whole unit follows the one engine picked for it.
             target = next(iter(chosen))
-            anchor = sorted(touched)[0]
+            # The customer's pick leads when there is one; a unit only the rule
+            # picked moves by the rule.
+            by_customer = sorted(touched - decided)
+            by_rule = not by_customer
+            anchor = (by_customer or sorted(touched))[0]
             anchor_tables = set(tables_written_by.get(anchor, []))
             for qid in group:
                 # Each member says why it moves: a write of a table moves with the
@@ -1058,7 +1199,7 @@ def _propagate_codependent_overrides(
                 # its JOIN group.
                 own = tables_written_by.get(qid, [])
                 shared = sorted(anchor_tables & set(own)) or sorted(own)
-                _move(qid, target, anchor, group, shared[0] if shared else None)
+                _move(qid, target, anchor, group, shared[0] if shared else None, by_rule)
             continue
         # Explicitly split across engines: the JOIN split is respected (the
         # feasibility reviewer flags it), but each picked write still pulls
@@ -1067,7 +1208,7 @@ def _propagate_codependent_overrides(
             for table in tables_written_by.get(anchor, []):
                 members = write_groups.get(table, [])
                 for qid in members:
-                    _move(qid, explicit[anchor], anchor, list(members), table)
+                    _move(qid, explicit[anchor], anchor, list(members), table, anchor in decided)
     return sorted(propagated), excluded
 
 
@@ -1257,10 +1398,7 @@ def reroute_split_writes(
     Returns None when the effective version splits no table's writes (nothing
     is written then), or no version exists.
     """
-    from src.agents.referee.co_dependency import (
-        build_co_dependency_groups,
-        group_engine_scores,
-    )
+    from src.agents.referee.co_dependency import build_co_dependency_groups, group_engine_scores
     from src.agents.referee.query_scoring import ScoringContext, score_query_for_engine
     from src.agents.referee.tie_break import break_tie
     from src.agents.referee.triage import SOURCE_ENGINE_TO_AURORA
@@ -1465,3 +1603,106 @@ def reroute_split_writes(
         affected_engines=sorted(affected),
         pin_conflicts=pin_conflicts,
     )
+
+
+# ---------------------------------------------------------------------------
+# Pending engine choices, one per table (#1003, ADR-031 Decision 12 Amendment 10)
+# ---------------------------------------------------------------------------
+
+
+def pending_choices_for_job(
+    store: _Store, database_name: str, job_id: str, version: int | None = None
+) -> tuple[list[PendingEngineChoice], int]:
+    """``(choices, version)``: the effective assignment's open ties grouped per table
+    (``pending_choices.build_pending_choices``), scored with the pipeline's own
+    ``ScoringContext``. ``([], 0)`` when no assignment exists."""
+    version = version or resolve_effective_assignment_version(store, database_name, job_id)
+    if version == 0:
+        return [], 0
+    loaded = _load_for_edit(store, database_name, job_id, version, new_version=False)
+    choices = pending_choices_from(
+        loaded.raw, loaded.collector_output, loaded.analysis_outputs, loaded.triage
+    )
+    return choices, version
+
+
+def pending_choices_from(
+    assignment: Mapping,
+    collector_output: Mapping | None,
+    analysis_outputs: Mapping[str, Mapping] | None,
+    triage: Mapping | None,
+) -> list[PendingEngineChoice]:
+    """An assignment's pending engine choices (#1003) from the pipeline's own
+    artifacts, scored the way the customer gate scores (the losing Aurora
+    engine's analysis dropped, ``ScoringContext.from_pipeline``). The gate and
+    synthesis both read them through here, so every surface shows the same ones."""
+    from src.agents.referee.pending_choices import build_pending_choices
+    from src.agents.referee.query_scoring import ScoringContext
+    from src.agents.referee.triage import SOURCE_ENGINE_TO_AURORA
+
+    collector_output = dict(collector_output or {})
+    outputs = _drop_losing_aurora_analysis(
+        {e: dict(a) for e, a in (analysis_outputs or {}).items() if a}, dict(assignment)
+    )
+    ctx = ScoringContext.from_pipeline(outputs, triage or {}, collector_output) if outputs else None
+    return build_pending_choices(
+        assignment.get("query_assignments") or [],
+        collector_output,
+        ctx,
+        SOURCE_ENGINE_TO_AURORA.get(source_database_engine(collector_output)),
+    )
+
+
+@dataclass
+class EngineChoicesResult:
+    """What applying per-table picks (and ``--auto``'s decisions) wrote (#1003)."""
+
+    override: AssignmentOverrideResult
+    picked: dict[str, str]
+    decided: list[AutoPick]
+
+
+def apply_engine_choices(
+    store: _Store,
+    database_name: str,
+    job_id: str,
+    picks: Mapping[str, str] | None = None,
+    *,
+    decide_for_me: bool = False,
+    source: AssignmentSource = AssignmentSource.CUSTOMER_GATE,
+    overrides: Iterable[QueryOverrideInput] = (),
+    exclude_tables: list[str] | None = None,
+) -> EngineChoicesResult | None:
+    """Apply per-table engine picks, and with ``decide_for_me`` ``--auto``'s pick for
+    every other pending choice, as ONE new version through the customer gate
+    (:func:`apply_assignment_overrides`).
+
+    ``picks`` maps a choice id (or a table's bare name) to one of its tied engines;
+    a customer pick is a ``customer_pick`` Move, an ``--auto`` one an ``auto_pick``
+    Move recorded in ``auto_decided_choices``. ``overrides`` and ``exclude_tables``
+    (the gate's per-query edits) go into the same version; a per-query override
+    wins over a table pick for its own query. Returns None when there is nothing
+    to apply (no pick, no pending choice and no override). Raises
+    ``pending_choices.UnknownChoice`` / ``EngineNotTied`` (nothing written) or the
+    gate's own errors.
+    """
+    from src.agents.referee.pending_choices import choice_overrides
+
+    choices, version = pending_choices_for_job(store, database_name, job_id)
+    if version == 0:
+        raise NoAssignmentFound
+    engine_of, auto, picked = choice_overrides(choices, picks, decide=decide_for_me)
+    explicit = list(overrides)
+    if not engine_of and not explicit and not exclude_tables:
+        return None
+    own = {o.query_id for o in explicit if o.assigned_engine is not None}
+    batch = explicit + [
+        QueryOverrideInput(query_id=qid, assigned_engine=engine, auto_pick=auto.get(qid))
+        for qid, engine in sorted(engine_of.items())
+        if qid not in own
+    ]
+    result = apply_assignment_overrides(
+        store, database_name, job_id, batch, exclude_tables, source=source
+    )
+    decided = sorted({p.choice_id: p for p in auto.values()}.values(), key=lambda p: p.choice_id)
+    return EngineChoicesResult(override=result, picked=picked, decided=decided)

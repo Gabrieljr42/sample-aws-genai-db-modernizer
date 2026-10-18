@@ -101,6 +101,7 @@ def _pdf_required(report: dict[str, Any], exp: dict[str, Any]) -> set[str]:
     req = _common_required(report, exp) - {k for k in exp if k.startswith("cached_reads:")}
     req -= {"close_calls", "settled_ties"}
     req |= {"cost:total", "tables_migrate", "tied", "engine_count"}
+    req |= {"choices", "auto_decided", "auto_decided_queries"} & set(exp)
     req |= {f"cost:{e}" for e in final_architecture(report)}
     return req
 
@@ -110,6 +111,7 @@ def _engineering_required(report: dict[str, Any], exp: dict[str, Any]) -> set[st
         _common_required(report, exp)
         | _whole_schema_required(exp)
         | {"cost:total", "engine_count", "tied", "tables_migrate"}
+        | ({"choices", "auto_decided", "auto_decided_queries"} & set(exp))
     )
     req |= {f"queries:{e}" for e in final_architecture(report) if e.startswith("aurora")}
     req |= {k for k in exp if k.startswith("tables:")}
@@ -249,7 +251,9 @@ def test_the_trace_appendix_agrees_with_the_unresolved_ties(run: PipelineResult)
     appendix = md[md.index("## Appendix: per-query routing decisions") :]
     open_ties = int((report.get("facts") or {}).get("tied_query_count") or 0)
     assert trace["open_tie_query_count"] == open_ties
-    m = re.search(r"Unresolved engine ties \((\d+) quer", md)
+    m = re.search(r"Unresolved engine ties \((\d+) quer", md) or re.search(
+        r"Pending engine choices \(\d+ tables?, (\d+) quer", md
+    )
     assert (int(m.group(1)) if m else 0) == open_ties
     if trace["ever_tied_query_count"]:
         assert f"{trace['ever_tied_query_count']} tied at some step ({open_ties} still open)" in (

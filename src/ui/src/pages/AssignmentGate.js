@@ -30,6 +30,7 @@ import ExpandableSection from "@cloudscape-design/components/expandable-section"
 import { SideNavigationConfigurations } from "../config/GlobalConfigurations";
 import AppHeader from "../components/AppHeader";
 import SummaryFallbackNotice from "../components/SummaryFallbackNotice";
+import PendingEngineChoices from "../components/PendingEngineChoices";
 import ApiManager from "../classes/ApiManager";
 import ChartSankey from "../components/ChartSankey";
 import {
@@ -291,6 +292,33 @@ const AssignmentGatePage = memo(() => {
     }
   }, [jobId, overrides, cacheOverrides, addFlash, fetchData, t, assignmentData]);
 
+  // ---- Save per-table engine choices (#1003) ----
+  const handleSaveChoices = useCallback(async (body) => {
+    setSavingOverrides(true);
+    try {
+      const api = new ApiManager();
+      const results = await api.execute([
+        {
+          id: 'choices',
+          path: `assessments/${jobId}/assignments?database_name=${encodeURIComponent(databaseName)}`,
+          method: 'PUT',
+          params: { ...body, base_version: assignmentData?.assignment?.version }
+        }
+      ]);
+      if (results['choices']?.success) {
+        addFlash('success', t('assignment-gate.flash.overrides-saved'), t('assignment-gate.flash.overrides-saved-detail', { count: (body.table_choices || []).length + (body.overrides || []).length }));
+        fetchData();
+      } else {
+        const msg = results['choices']?.error?.message || t('assignment-gate.flash.save-failed-detail');
+        addFlash('error', t('assignment-gate.flash.save-failed'), msg);
+      }
+    } catch (error) {
+      addFlash('error', t('assignment-gate.flash.save-failed'), error.message);
+    } finally {
+      setSavingOverrides(false);
+    }
+  }, [jobId, databaseName, assignmentData, addFlash, fetchData, t]);
+
   // ---- Handle Sankey node click ----
   const handleSankeyNodeClick = useCallback((nodeId) => {
     if (nodeId && nodeId !== 'patterns') {
@@ -431,6 +459,14 @@ const AssignmentGatePage = memo(() => {
   const queryAssignments = useMemo(() => {
     return assignmentData?.assignment?.query_assignments || [];
   }, [assignmentData]);
+
+  // #1003: the open ties grouped per table (built by the API), and the choices
+  // --auto decided (still holding on this version).
+  const pendingChoices = useMemo(() => assignmentData?.pending_choices || [], [assignmentData]);
+  const autoDecided = useMemo(
+    () => assignmentData?.assignment?.auto_decided_choices || [],
+    [assignmentData],
+  );
 
   // #629: queries the post-schema router moved after approval.
   const reroutedIds = useMemo(
@@ -889,6 +925,16 @@ const AssignmentGatePage = memo(() => {
           </SpaceBetween>
         </ExpandableSection>
       )}
+
+      {/* #1003: one engine choice per table */}
+      <PendingEngineChoices
+        choices={pendingChoices}
+        decided={autoDecided}
+        engineLabel={(e) => ENGINE_COLORS[e]?.label || e}
+        onSubmit={handleSaveChoices}
+        saving={savingOverrides}
+        t={t}
+      />
 
       {/* Action Bar */}
       <Container>

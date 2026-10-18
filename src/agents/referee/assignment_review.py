@@ -31,7 +31,7 @@ from typing import Any
 
 from src.agents.referee.assignment_overrides import QueryOverrideInput
 from src.agents.referee.triage import ANALYSIS_AGENTS
-from src.contracts.assignment_models import Assignment
+from src.contracts.assignment_models import Assignment, PendingEngineChoice
 
 # --- Editable-surface catalog (single source of truth) ----------------------
 # The renderer, the parser's validation, and the customer guidance all read
@@ -376,6 +376,34 @@ def render_assignment_summary(assignment: Assignment) -> str:
         in_scope_n = sum(1 for qa in group if qa.in_scope)
         lines.append(f"| {engine} | {in_scope_n} / {len(group)} | {_top_reasons(group)} |")
     lines.append("")
+    return "\n".join(lines)
+
+
+def render_pending_choices(choices: list[PendingEngineChoice]) -> str:
+    """The pending engine choices, one per table (#1003), for the review chat: per
+    table its queries, each tied engine's scores and trade-off, why they tie, and
+    the engine "decide for me" would pick. Empty when nothing is pending."""
+    if not choices:
+        return ""
+    total = sum(len(c.query_ids) for c in choices)
+    lines = [
+        f"## Pending engine choices ({len(choices)} table(s), {total} queries)",
+        "",
+        "Each table below ties between engines, so no routing rule picks one. Choose one "
+        "engine per table (it applies to every query listed), or ask to decide for you.",
+        "",
+    ]
+    for c in choices:
+        now = ", ".join(c.current_engines or [c.current_engine])
+        lines.append(f"### {c.choice_id} ({len(c.query_ids)} queries, now on {now})")
+        lines.append("")
+        lines.append(_sanitize_cell(c.why_tied))
+        for e in c.options:
+            lines.append(f"- {e.engine}: {_sanitize_cell(e.trade_off)}")
+        lines.append(
+            f"- decide for me: {c.decide_for_me_engine} ({_sanitize_cell(c.decide_for_me_reason)})"
+        )
+        lines.append("")
     return "\n".join(lines)
 
 

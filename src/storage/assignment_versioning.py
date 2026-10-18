@@ -109,8 +109,16 @@ _POST_SCHEMA_ROUTING_SOURCE = "post_schema_routing"
 # A saved assignment re-routed to one source of truth per table when loaded for
 # approval (#992) edits the version it was loaded from, like a customer edit.
 _SOURCE_OF_TRUTH_REROUTE_SOURCE = "source_of_truth_reroute"
+# The decide-for-me rule's settlement of pending engine choices (#1003) edits the
+# version it was applied to, like a customer edit, but nobody approved it.
+_AUTO_DECIDED_SOURCE = "auto_decided"
 _EDIT_SOURCES = frozenset(
-    {_CUSTOMER_GATE_SOURCE, _POST_SCHEMA_ROUTING_SOURCE, _SOURCE_OF_TRUTH_REROUTE_SOURCE}
+    {
+        _CUSTOMER_GATE_SOURCE,
+        _POST_SCHEMA_ROUTING_SOURCE,
+        _SOURCE_OF_TRUTH_REROUTE_SOURCE,
+        _AUTO_DECIDED_SOURCE,
+    }
 )
 
 

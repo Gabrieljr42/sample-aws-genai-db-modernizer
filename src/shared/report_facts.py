@@ -1000,6 +1000,45 @@ CLOSE_CALL_MARGIN = 5.0
 CLOSE_CALL_IDS_SHOWN = 5
 
 
+def engine_choice_facts(report: Mapping[str, Any]) -> dict[str, Any]:
+    """The pending engine choices' figures (#1003): how many choices (one per
+    table) and the tied queries they cover, the same grouped by tied engines
+    (``pending_choice_pairs``), and the choices ``--auto`` decided, grouped by the
+    engine it placed them on (``auto_decided_by_engine``)."""
+    pending = [c for c in report.get("pending_engine_choices") or [] if isinstance(c, Mapping)]
+    decided = [d for d in report.get("auto_decided_choices") or [] if isinstance(d, Mapping)]
+    pairs: dict[tuple[str, ...], list[Mapping[str, Any]]] = {}
+    for c in pending:
+        pairs.setdefault(tuple(sorted(c.get("tied_engines") or [])), []).append(c)
+    by_engine: dict[str, list[Mapping[str, Any]]] = {}
+    for d in decided:
+        by_engine.setdefault(str(d.get("engine") or ""), []).append(d)
+    return {
+        "pending_choice_count": len(pending),
+        "pending_choice_query_count": sum(len(c.get("query_ids") or []) for c in pending),
+        "pending_choice_pairs": [
+            {
+                "engines": list(engines),
+                "choice_count": len(rows),
+                "query_count": sum(len(c.get("query_ids") or []) for c in rows),
+                "tables": sorted(str(c.get("table") or "") for c in rows),
+            }
+            for engines, rows in sorted(pairs.items())
+        ],
+        "auto_decided_choice_count": len(decided),
+        "auto_decided_query_count": sum(len(d.get("query_ids") or []) for d in decided),
+        "auto_decided_by_engine": [
+            {
+                "engine": engine,
+                "choice_count": len(rows),
+                "query_count": sum(len(d.get("query_ids") or []) for d in rows),
+                "tables": sorted(str(d.get("table") or "") for d in rows),
+            }
+            for engine, rows in sorted(by_engine.items())
+        ],
+    }
+
+
 def is_close_call(trace: Mapping[str, Any]) -> bool:
     """Whether a query's decision trace (``QueryTraceResponse`` as JSON) is a close call.
 
@@ -1475,6 +1514,8 @@ def compute_report_facts(
         "trade_off_count": n_trade_offs - sum(1 for t in rc_trade_offs if t["reversed"]),
         **risks,
         "tied_query_count": len(tied),
+        # #1003: the open ties as one choice per table, and --auto's decisions.
+        **engine_choice_facts(report),
         # #629: queries the post-schema router moved after the customer approved.
         "post_schema_reroute_count": sum(
             1 for r in report.get("post_schema_reroutes") or [] if isinstance(r, dict)

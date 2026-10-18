@@ -284,6 +284,65 @@ def pick_unresolved_tie_placeholder(
     return ranked[0], False
 
 
+# The three rules ``decide_for_me`` applies, in order (#1003), named once so the
+# Move's evidence, the deliverables and the tests read the same ids.
+DECIDED_BY_UNROUNDED_SCORE = "unrounded_score"
+DECIDED_BY_SETTLED_WORKLOAD = "settled_workload"
+DECIDED_BY_TIE_BREAK = "tie_break"
+DECIDED_BY_RULES: tuple[str, ...] = (
+    DECIDED_BY_UNROUNDED_SCORE,
+    DECIDED_BY_SETTLED_WORKLOAD,
+    DECIDED_BY_TIE_BREAK,
+)
+
+
+def decide_for_me(
+    tied: list[str],
+    unrounded_scores: Mapping[str, float],
+    current_engines: set[str],
+    source_compatible_engine: str | None,
+    settled_counts: Mapping[str, int],
+    key: str,
+) -> tuple[str, str, TieKind | None]:
+    """``--auto``'s pick for one pending engine choice (#1003, maintainer decision
+    2026-10-17, ADR-031 Decision 12 Amendment 10): "decide for me".
+
+    ``tied`` are the engines a choice ties between at whole-point resolution;
+    ``unrounded_scores`` each one's score before rounding (the choice's mean of
+    the shared scorer's ``exact`` scores). In order:
+
+    1. the higher unrounded score (``DECIDED_BY_UNROUNDED_SCORE``);
+    2. among engines still level, the one the plan already uses more:
+       ``settled_counts`` (:func:`settled_counts`, never a tied query, so the
+       answer cannot depend on the order other choices are decided in), which
+       keeps the plan to fewer engines (``DECIDED_BY_SETTLED_WORKLOAD``);
+    3. otherwise :func:`break_tie` over the engines still level, with the same
+       ``settled_counts`` (``DECIDED_BY_TIE_BREAK``; its ``tie_kind`` is
+       returned too): the source-compatible engine, then stability (the engine
+       the choice's queries already sit on), then the placeholder's hash on
+       ``key``.
+
+    No engine name, traffic or query count other than ``settled_counts`` is an
+    input. Returns ``(engine, rule, tie_kind)``; ``tie_kind`` is ``None`` unless
+    rule 3 decided.
+    """
+    candidates = sorted(set(tied))
+    if not candidates:
+        raise ValueError("decide_for_me needs at least one engine")
+    scored = {e: float(unrounded_scores.get(e, float("-inf"))) for e in candidates}
+    top = max(scored.values())
+    level = [e for e in candidates if scored[e] == top]
+    if len(level) == 1:
+        return level[0], DECIDED_BY_UNROUNDED_SCORE, None
+    leaders = _settled_workload_leaders(level, settled_counts)
+    if len(leaders) == 1:
+        return leaders[0], DECIDED_BY_SETTLED_WORKLOAD, None
+    winner, kind = break_tie(
+        leaders, current_engines, source_compatible_engine, settled_counts, query_id=key
+    )
+    return winner, DECIDED_BY_TIE_BREAK, kind
+
+
 def break_tie(
     tied: list[str],
     current_engines: set[str],

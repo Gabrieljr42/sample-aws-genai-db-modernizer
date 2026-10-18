@@ -66,7 +66,7 @@ _REVISION_REQUEST = {
 # model -> (the version a loaded file says today, a pre-#972 file it wrote)
 LEGACY_FILES: dict[type[BaseModel], tuple[str, dict[str, Any]]] = {
     Assignment: (
-        "1.17",
+        "1.18",
         {
             "job_id": "job-1",
             "version": 1,
@@ -139,7 +139,7 @@ LEGACY_FILES: dict[type[BaseModel], tuple[str, dict[str, Any]]] = {
         {"confirmed_version": 2, "confirmed_at": _TS, "engine": "dynamodb"},
     ),
     RouterOutput: (
-        "1.1",
+        "1.2",
         {
             "job_id": "job-1",
             "routings": [

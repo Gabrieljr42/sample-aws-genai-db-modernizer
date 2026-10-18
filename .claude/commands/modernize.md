@@ -10,7 +10,7 @@ Read files with the Read tool (use `offset`/`limit` for large files). Search fil
 ## Arguments
 
 - `<collector_file>` — path to collector output JSON (required); the `.json` file (a bundled sample whose `.json` is not extracted yet, such as `docs/examples/wordpress/wordpress-collection.json`, is extracted from its tracked `.zip` by the script)
-- `--auto` — unattended run: never ask the user anything. Skips every decision gate (auto-approve); on a phase failure, abort (see Error Handling). Equivalent to `-y`.
+- `--auto` — unattended run: never ask the user anything. Skips every decision gate (auto-approve) and means "decide for me": every pending engine choice is settled by the deterministic rule and recorded as decided automatically; on a phase failure, abort (see Error Handling). Equivalent to `-y`.
 - `--mode chat|ui|both` — experience mode. Default is `both`: results in chat with the local UI alongside. `--mode chat` is chat only, with no UI. `--mode ui` is UI-first: chat carries only the approval-gate numbers, UI pointers, and the final result line — no phase summaries. `--auto` without `--mode` also means `both`.
 
 ## Step 0: Experience Mode
@@ -97,12 +97,17 @@ When `before_distribution` and `after_distribution` are identical (or `consolida
 
 Unless `{experience_mode}` is `chat`, also point the user at the Sankey/assignment page in the UI before they decide.
 
+**Pending engine choices.** The line's `pending_choices` lists, one entry per table, queries that tie between engines, so no routing rule picks one (`choice`, `table`, `queries`, `engines` with each `score`, `unrounded_score` and `trade_off`, `why_tied`, `listed_under`, `decide_for_me` and `decide_for_me_reason`). A model never picks one: the customer does, or the deterministic "decide for me" rule does.
+
+- **With `--auto`** and a non-empty `pending_choices`: do not ask. Run `uv run python scripts/run_assessment.py --job-id {job_id} --db {database_name} --decide-for-me`. It prints one `{"phase": "engine_choices", ...}` line: tell the user each `decided` entry's `table`, `engine` and `reason`, marked "decided automatically, review if needed", and design the `schema_design_engines` of that line in Phase 6, not the `reality_check` line's.
+- **Without `--auto`**: ask one question per entry, for example "Table `theme_fields` (13 queries) ties between DocumentDB and DynamoDB: which engine?", with its `why_tied`, each engine's scores and `trade_off`, and what "decide for me" would pick and why. Then run `uv run python scripts/run_assessment.py --job-id {job_id} --db {database_name} --choose <choice>=<engine>` with one `--choose` per answer (add `--decide-for-me` when the user asks you to decide the rest). Use its `engine_choices` line as above.
+
 Ask: "Approve this assignment and continue to Schema Design, or modify?"
 Only proceed to schema design after user approval (unless `--auto`).
 
 ### Phase 6: Schema Design (Parallel Subagents)
 
-Design exactly the engines in `schema_design_engines` from the `reality_check` status line — never re-derive the list from `after_distribution` (it lists owners only, so the cache-layer engine would be dropped). The skill name replaces every `_` in the engine id with `-`: `aurora_mysql` → `/design-schema-aurora-mysql`.
+Design exactly the engines in `schema_design_engines` from the `reality_check` status line (or the `engine_choices` line, when you settled pending engine choices) — never re-derive the list from `after_distribution` (it lists owners only, so the cache-layer engine would be dropped). The skill name replaces every `_` in the engine id with `-`: `aurora_mysql` → `/design-schema-aurora-mysql`.
 
 DynamoDB is always designed as split → one subagent per group → merge, and **the orchestrator runs that flow itself** (6a-6c): never dispatch `/design-schema-dynamodb` as one subagent, because its group subagents would report to you, not to it.
 
