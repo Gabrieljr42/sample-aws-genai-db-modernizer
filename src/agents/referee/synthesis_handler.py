@@ -58,6 +58,7 @@ from src.contracts.executive_summary_response import (
     ExecutiveSummaryResponse,
     parse_executive_summary_response,
 )
+from src.contracts.skipped_placeholders import SkippedSynthesisReport
 from src.contracts.synthesis_output import SynthesisOutputContract
 from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.shared.contract_versioning import stamp_artifact_version
@@ -1150,18 +1151,10 @@ def _collect_trade_offs(data):
 
 
 def _write_empty_report(store, database_name, job_id, assignment_version=0):
-    output = {
-        "job_id": job_id,
-        "database_name": database_name,
-        "agent_type": "referee-synthesis",
-        "status": "completed",
-        "ranking": [],
-        "needs_deeper_analysis": False,
-        "summary": "No analysis outputs were available for synthesis.",
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
+    # A skipped placeholder of its own contract, not a SynthesisOutputContract (#1023).
+    output = SkippedSynthesisReport(job_id=job_id, database_name=database_name)
     if assignment_version > 0:
         key = f"{database_name}/{job_id}/synthesis/v{assignment_version}/report.json"
     else:
         key = f"{database_name}/{job_id}/referee-synthesis/report.json"
-    store.write_json(key, output)
+    store.write_json(key, output.model_dump(mode="json"))

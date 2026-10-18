@@ -32,6 +32,7 @@ from src.agents.schema_design.scope import (
     assess_schema_scope,
 )
 from src.contracts.aurora_design_delta import is_design_delta
+from src.contracts.skipped_placeholders import SkippedSchemaOutput
 from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.shared.contract_versioning import stamp_artifact_version
 from src.storage.artifact_store import ArtifactStore
@@ -656,12 +657,12 @@ def run_schema_design(
     filtered_tables = collector_output.get("database_schema", {}).get("tables", [])
     if not filtered_tables and assignment_version > 0:
         print(f"[schema-design/{target_type}] No tables assigned — skipping schema design")
-        placeholder = {
-            "target_type": target_type,
-            "status": "skipped",
-            "reason": "No queries or tables assigned to this engine",
-            "assignment_version": assignment_version,
-        }
+        # A placeholder of its own contract, not the design (#1023).
+        placeholder = SkippedSchemaOutput(
+            target_type=target_type,
+            reason="No queries or tables assigned to this engine",
+            assignment_version=assignment_version,
+        )
         if assignment_version > 0:
             out_key = (
                 f"{database_name}/{job_id}/schema-{target_type}"
@@ -669,7 +670,7 @@ def run_schema_design(
             )
         else:
             out_key = f"{database_name}/{job_id}/schema-{target_type}/schema_output.json"
-        store.write_json(out_key, placeholder)
+        store.write_json(out_key, placeholder.model_dump(mode="json"))
         print(f"[schema-design/{target_type}] Placeholder written to {out_key}")
         return EMPTY_REPORT
 

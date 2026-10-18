@@ -210,23 +210,46 @@ def test_every_read_back_artifact_loads_a_newer_file_with_unknown_fields(
     """Each registered contract file the job wrote, with an unknown field added to every
     object its model types (a file a later MINOR wrote), still loads through
     ``load_contract`` (ADR-008 Decision 5, #976): no read-back artifact refuses it."""
-    from src.shared.contract_versioning import contract_for_artifact, is_model_io, load_contract
+    from src.shared.contract_versioning import contract_for_payload, is_model_io, load_contract
     from tests.contract.test_extra_policy import with_unknown_fields
 
     loaded = []
     for path in sorted(run.job_dir().rglob("*.json")):
         key = str(path.relative_to(run.artifact_root))
-        model = None if is_model_io(key) else contract_for_artifact(key)
-        if model is None:
+        if is_model_io(key):
             continue
         data = json.loads(path.read_text())
         if not isinstance(data, dict) or "contract_version" not in data:
             continue  # a raw upload or a legacy placeholder, not a stored contract
+        # the payload picks the contract: a skipped file is its placeholder's (#1023)
+        model = contract_for_payload(key, data)
+        if model is None:
+            continue
         newer = with_unknown_fields(model, data)
         assert isinstance(newer, dict)
         load_contract(model, newer, artifact=key)
         loaded.append(model.__name__)
     assert {"Assignment", "AnalysisOutputContract", "SynthesisOutputContract"} <= set(loaded)
+
+    # A job with every engine designed writes no skipped file, so the placeholders are
+    # also checked here, each as the file a skipped phase writes (#1023).
+    from src.contracts.skipped_placeholders import SkippedSchemaOutput, SkippedSynthesisReport
+
+    skipped = {
+        "artifacts/db/job/schema-dynamodb/v1/schema_output.json": SkippedSchemaOutput(
+            target_type="dynamodb", reason="no queries assigned"
+        ),
+        "artifacts/db/job/synthesis/v1/report.json": SkippedSynthesisReport(
+            job_id="job", database_name="db"
+        ),
+    }
+    for key, placeholder in skipped.items():
+        data = placeholder.model_dump(mode="json")
+        model = contract_for_payload(key, data)
+        assert model is type(placeholder), key
+        newer = with_unknown_fields(model, data)
+        assert isinstance(newer, dict)
+        load_contract(model, newer, artifact=key)
 
 
 @pytest.mark.deterministic

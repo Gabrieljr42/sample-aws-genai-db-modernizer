@@ -54,13 +54,7 @@ _UPLOAD = (
     "contract and carries no contract_version; the collector output written from it is "
     "stamped"
 )
-_PLACEHOLDER_SHAPE = (
-    "a placeholder, not the contract (status/reason only); it carries no contract_version "
-    "and is read as legacy -- #1023 decides whether placeholders get a model"
-)
-
 _UPLOADS = "1/1/uploads/collector-output.json"
-_SCHEMA_OUTPUT = "1/1/schema-1/v1/schema_output.json"
 
 # (file, function, data expression, the path shapes written, " | "-joined) -> why
 # this contract-file write does not go through the model. Keyed on the path too, so
@@ -83,24 +77,6 @@ NOT_THROUGH_MODEL: dict[tuple[str, str, str, str], str] = {
         "json.loads(offline_input.read_text())",
         "discourse/atxtool1/uploads/collector-output.json",
     ): _UPLOAD,
-    (
-        "src/agents/referee/synthesis_handler.py",
-        "_write_empty_report",
-        "output",
-        "1/1/synthesis/v1/report.json | 1/1/referee-synthesis/report.json",
-    ): _PLACEHOLDER_SHAPE,
-    (
-        "src/agents/schema_design/handler.py",
-        "run_schema_design",
-        "placeholder",
-        f"{_SCHEMA_OUTPUT} | 1/1/schema-1/schema_output.json",
-    ): _PLACEHOLDER_SHAPE,
-    (
-        "src/agents/schema_design/group_merger.py",
-        "merge_schema_groups",
-        "skipped",
-        _SCHEMA_OUTPUT,
-    ): (_PLACEHOLDER_SHAPE),
 }
 
 # (file, function, data expression, "") -> what the write stores, for a write whose

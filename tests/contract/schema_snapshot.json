@@ -16755,6 +16755,163 @@
     "schema_hash": "50e9db46dceaa744f691eb2f55fc8b74fe29a774651c854fb47aace15217fa92",
     "version": "1.1"
   },
+  "skipped_placeholders.SkippedSchemaOutput": {
+    "fields": {
+      "assignment_version": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "kind": "scalar",
+              "type": "integer"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "excluded_queries": {
+        "required": false,
+        "schema": {
+          "kind": "anyOf",
+          "members": [
+            {
+              "items": {
+                "kind": "object",
+                "properties": {
+                  "query_id": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "reason": {
+                    "required": true,
+                    "schema": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "kind": "array"
+            },
+            {
+              "kind": "scalar",
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "reason": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "status": {
+        "required": false,
+        "schema": {
+          "kind": "const",
+          "value": "skipped"
+        }
+      },
+      "target_type": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      }
+    },
+    "schema_hash": "4d473a3eecb8ba117757604bc40c633a77c2e6974549971a46477292ddc317a1",
+    "version": "1.0"
+  },
+  "skipped_placeholders.SkippedSynthesisReport": {
+    "fields": {
+      "agent_type": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "contract_version": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        }
+      },
+      "database_name": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "job_id": {
+        "required": true,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "needs_deeper_analysis": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "type": "boolean"
+        }
+      },
+      "ranking": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "object"
+          },
+          "kind": "array"
+        }
+      },
+      "status": {
+        "required": false,
+        "schema": {
+          "kind": "const",
+          "value": "skipped"
+        }
+      },
+      "summary": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      },
+      "timestamp": {
+        "required": false,
+        "schema": {
+          "kind": "scalar",
+          "type": "string"
+        }
+      }
+    },
+    "schema_hash": "d42adc63a053850d10c7c5df89f51790ae64226159dc13c55ca50de75671140f",
+    "version": "1.0"
+  },
   "synthesis_output.SynthesisOutputContract": {
     "fields": {
       "agent_type": {

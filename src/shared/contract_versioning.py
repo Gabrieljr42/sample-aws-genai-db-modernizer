@@ -356,9 +356,49 @@ def contract_for_artifact(path: str) -> type[BaseModel] | None:
     return None
 
 
+# A ``status: "skipped"`` payload at these paths is a placeholder, not the design
+# or report the path holds otherwise (#1023): its version is checked against the
+# placeholder's model, for any engine (one with no design contract too).
+_SKIPPED = "skipped"
+_PLACEHOLDERS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"(?:^|/)schema-[^/]+/(?:v\d+/)?schema_output\.json$"),
+        "src.contracts.skipped_placeholders:SkippedSchemaOutput",
+    ),
+    (
+        re.compile(r"(?:^|/)(?:synthesis/(?:v\d+/)?|referee-synthesis/)report\.json$"),
+        "src.contracts.skipped_placeholders:SkippedSynthesisReport",
+    ),
+)
+
+
+def placeholder_for_artifact(path: str) -> type[BaseModel] | None:
+    """The skipped placeholder that may be stored at ``path`` instead of its contract."""
+    if is_model_io(path):
+        return None
+    for pattern, target in _PLACEHOLDERS:
+        if pattern.search(path):
+            return _import(target)
+    return None
+
+
+def contract_for_payload(path: str, data: object) -> type[BaseModel] | None:
+    """The contract ``data`` stored at ``path`` is: the path's contract, or its skipped
+    placeholder when the payload says ``status: "skipped"`` (the status is read first)."""
+    model = contract_for_artifact(path)
+    if isinstance(data, Mapping) and data.get("status") == _SKIPPED:
+        return placeholder_for_artifact(path) or model
+    return model
+
+
 def registered_contracts() -> list[type[BaseModel]]:
-    """Every contract the registry knows, once each."""
-    return list(dict.fromkeys(_import(target) for _, target in _registry()))
+    """Every contract the registry knows (skipped placeholders included), once each."""
+    return list(
+        dict.fromkeys(
+            [_import(target) for _, target in _registry()]
+            + [_import(target) for _, target in _PLACEHOLDERS]
+        )
+    )
 
 
 def stamp_artifact_version(path: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -369,7 +409,7 @@ def stamp_artifact_version(path: str, data: dict[str, Any]) -> dict[str, Any]:
     file is never one the store then refuses to read. An unregistered path is
     returned unchanged.
     """
-    model = contract_for_artifact(path)
+    model = contract_for_payload(path, data)
     if model is None:
         return data
     return {**data, "contract_version": current_version(model)}
@@ -383,7 +423,7 @@ def check_artifact[T](path: str, data: T) -> T:
     """
     if not isinstance(data, Mapping):
         return data
-    model = contract_for_artifact(path)
+    model = contract_for_payload(path, data)
     if model is None:
         return data
     return read_payload(data, model, artifact=path)  # type: ignore[return-value]
