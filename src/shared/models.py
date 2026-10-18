@@ -50,6 +50,8 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from src.shared.role_bedrock_model import RoleBedrockModel
 
+from src.shared.bedrock_guardrail import converse_guardrail_fields, strands_guardrail_kwargs
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -422,6 +424,8 @@ def bedrock_model_kwargs(
     cache_config = _cache_config(spec, profile)
     if cache_config is not None:
         kwargs["cache_config"] = cache_config
+    # Optional guardrail (#144): adds nothing unless BEDROCK_GUARDRAIL_* is set.
+    kwargs.update(strands_guardrail_kwargs())
     return kwargs
 
 
@@ -438,6 +442,7 @@ def converse_request_fields(role: Role, *, model_id: str | None = None) -> dict[
     if temperature is not None:
         inference["temperature"] = temperature
     request: dict[str, Any] = {"modelId": model_id, "inferenceConfig": inference}
+    request.update(converse_guardrail_fields())
     fields = _model_fields(spec, profile)
     if fields:
         request["additionalModelRequestFields"] = fields
@@ -479,4 +484,6 @@ def build_bedrock_model(
     from src.shared.role_bedrock_model import RoleBedrockModel
 
     kwargs = bedrock_model_kwargs(role, model_id=model_id, max_tokens=max_tokens)
-    return RoleBedrockModel(profile=profile_for(kwargs["model_id"]), **kwargs, **transport)
+    return RoleBedrockModel(
+        profile=profile_for(kwargs["model_id"]), phase=role.value, **kwargs, **transport
+    )

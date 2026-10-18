@@ -195,6 +195,10 @@ def main() -> None:
         help="Root directory for local artifacts (default: ./artifacts)",
     )
     args = parser.parse_args()
+    if args.llm_mode == "bedrock":
+        from src.shared.bedrock_guardrail import exit_on_invalid_guardrail_config
+
+        exit_on_invalid_guardrail_config()
 
     from scripts._sandbox import sandbox_violation
 

@@ -16,6 +16,13 @@ import logging
 
 from src.contracts.agent_interaction_models import AgentQuestion
 from src.contracts.assignment_models import ValidationResult
+from src.shared.bedrock_guardrail import (
+    GuardrailConfigError,
+    GuardrailIntervened,
+    check_invoke_model_body,
+    invoke_model_guardrail_kwargs,
+    tag_guarded_input,
+)
 from src.shared.models import Role, invoke_model_body, resolve_model_id
 
 logger = logging.getLogger(__name__)
@@ -40,6 +47,19 @@ def _validate_free_text(question: AgentQuestion, answer: str) -> ValidationResul
     """
     try:
         return _bedrock_validate(question, answer)
+    except GuardrailConfigError:
+        raise  # a partial guardrail setting is never "Bedrock unavailable"
+    except GuardrailIntervened as exc:
+        # Not retried. The check only gates the answer, so it stays accepted,
+        # with a warning that says why no verdict exists.
+        logger.error("%s", exc)
+        return ValidationResult(
+            valid=True,
+            warnings=[
+                "A Bedrock guardrail blocked the free-text answer check "
+                "(not retried) — answer accepted without semantic check"
+            ],
+        )
     except Exception:
         logger.warning(
             "Bedrock unavailable for free-text validation of question %s; "
@@ -58,10 +78,13 @@ def _bedrock_validate(question: AgentQuestion, answer: str) -> ValidationResult:
     import boto3  # deferred import — only needed for free-text validation
 
     client = boto3.client("bedrock-runtime")
+    # With a guardrail on, the customer's answer is tagged so the prompt-attack
+    # filter evaluates it (InvokeModel only evaluates tagged content).
+    guarded_answer, guardrail_body = tag_guarded_input(answer)
     prompt = (
         f"Does the following answer adequately address the question?\n\n"
         f"Question: {question.question}\n"
-        f"Answer: {answer}\n\n"
+        f"Answer: {guarded_answer}\n\n"
         f"Respond with only 'yes' or 'no'."
     )
     model_id = resolve_model_id(Role.LIGHT_CHECK)
@@ -69,14 +92,19 @@ def _bedrock_validate(question: AgentQuestion, answer: str) -> ValidationResult:
         modelId=model_id,
         contentType="application/json",
         accept="application/json",
+        **invoke_model_guardrail_kwargs(),
         body=json.dumps(
-            invoke_model_body(
-                Role.LIGHT_CHECK, [{"role": "user", "content": prompt}], model_id=model_id
-            )
+            {
+                **invoke_model_body(
+                    Role.LIGHT_CHECK, [{"role": "user", "content": prompt}], model_id=model_id
+                ),
+                **guardrail_body,
+            }
         ),
     )
 
     result = json.loads(response["body"].read())
+    check_invoke_model_body(result, "free-text answer check")
     # Newer models may lead with a (possibly empty) thinking block.
     answer_text = next(
         (

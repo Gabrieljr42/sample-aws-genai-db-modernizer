@@ -21,6 +21,7 @@ from src.contracts.analysis_output import (
     AnalysisOutputContract,
     TargetDatabase,
 )
+from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.tools.analysis.documentdb_analysis_tools import (
     LlmDocumentDBAdvisor,
     _fallback_embedding_strategy,
@@ -194,6 +195,8 @@ def analyze_for_documentdb(
     Returns:
         Tuple of (AnalysisOutputContract, decision_trace_dict, mermaid_diagram_str).
     """
+    if llm_mode == "bedrock":
+        require_valid_guardrail_config()
     if llm_mode == "none":
         return analyze_for_documentdb_deterministic(analysis_input)
 

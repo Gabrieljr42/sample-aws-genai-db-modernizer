@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from src.agents.prompt_framing import frame_untrusted
 from src.contracts.aurora_design_delta import AuroraDesignDeltaContract
 from src.contracts.schema_design_input import AgentAnalysisInput, AgentCollectorInput
+from src.shared.bedrock_guardrail import GuardrailConfigError, GuardrailIntervened
 from src.tools.schema.aurora_common.delta_merge import AuroraDesignBase, merge_design_delta
 from src.tools.schema.aurora_common.design_view import build_design_view, render_request
 
@@ -124,6 +125,8 @@ def merge_or_correct[T: BaseModel](
         )
         try:
             delta = runner._invoke_designer(prompt, previous_output=delta)
+        except (GuardrailIntervened, GuardrailConfigError):
+            raise  # a block is final; the lenient merge must not hide it
         except Exception as exc:  # keep the first delta; lenient merge records the errors
             logger.debug("[schema-design/%s] delta correction failed: %s", engine, exc)
             logger.warning(

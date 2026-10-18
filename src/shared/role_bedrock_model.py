@@ -30,6 +30,11 @@ from strands.types.content import Messages
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolChoiceAuto, ToolChoiceAutoDict, ToolSpec
 
+from src.shared.bedrock_guardrail import (
+    GuardrailIntervened,
+    blocked_by_guardrail,
+    guard_messages,
+)
 from src.shared.models import ModelProfile
 
 logger = logging.getLogger(__name__)
@@ -40,7 +45,11 @@ _FORCED_KEYS = ("any", "tool")
 #: switch for them, so a release that renames one would silently bring back the
 #: behaviour the override removes (e.g. a paid cache write on every user turn).
 #: Fail at import instead (#626).
-_OVERRIDDEN_HOOKS = ("_inject_cache_point", "_get_additional_request_fields")
+_OVERRIDDEN_HOOKS = (
+    "_inject_cache_point",
+    "_get_additional_request_fields",
+    "_format_bedrock_messages",
+)
 _missing = [name for name in _OVERRIDDEN_HOOKS if not callable(getattr(BedrockModel, name, None))]
 if _missing:
     raise ImportError(
@@ -62,9 +71,11 @@ def is_forced(tool_choice: ToolChoice | None) -> bool:
 class RoleBedrockModel(BedrockModel):
     """A ``BedrockModel`` whose forced ``tool_choice`` follows the model family."""
 
-    def __init__(self, *, profile: ModelProfile, **kwargs: Any) -> None:
+    def __init__(self, *, profile: ModelProfile, phase: str = "model", **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.profile = profile
+        #: The phase named in a :class:`GuardrailIntervened` error (the role's name).
+        self.phase = phase
         #: Token totals over every call this model made, plus the call count.
         self.usage: dict[str, int] = {"calls": 0, **dict.fromkeys(USAGE_FIELDS, 0)}
 
@@ -95,6 +106,8 @@ class RoleBedrockModel(BedrockModel):
         tool_choice: ToolChoice | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[StreamEvent, None]:
+        stop_reason: str | None = None
+        guardrail_trace: Mapping[str, Any] | None = None
         async for event in super().stream(
             messages,
             tool_specs,
@@ -102,10 +115,28 @@ class RoleBedrockModel(BedrockModel):
             tool_choice=self.safe_tool_choice(tool_choice),
             **kwargs,
         ):
-            usage = event.get("metadata", {}).get("usage") if isinstance(event, dict) else None
-            if usage:
-                self._record_usage(usage)
+            if isinstance(event, dict):
+                metadata: Mapping[str, Any] = event.get("metadata") or {}  # type: ignore[assignment]
+                if metadata.get("usage"):
+                    self._record_usage(metadata["usage"])
+                trace: Mapping[str, Any] = metadata.get("trace") or {}
+                if trace.get("guardrail"):
+                    guardrail_trace = trace["guardrail"]
+                if "messageStop" in event:
+                    stop_reason = event["messageStop"].get("stopReason")
             yield event
+        # Only a guardrail's block ends here; a masking-only intervention
+        # (e.g. PII set to anonymize) is a normal reply.
+        if blocked_by_guardrail(stop_reason, guardrail_trace):
+            raise GuardrailIntervened(self.phase)
+
+    def _format_bedrock_messages(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        """Strands' messages, with customer-data blocks marked as guard content when a
+        guardrail is attached (see :func:`~src.shared.bedrock_guardrail.split_guard_content`)."""
+        messages: list[dict[str, Any]] = super()._format_bedrock_messages(*args, **kwargs)
+        if self.config.get("guardrail_id"):
+            return guard_messages(messages)
+        return messages
 
     def _inject_cache_point(
         self, messages: list[dict[str, Any]], *args: Any, **kwargs: Any

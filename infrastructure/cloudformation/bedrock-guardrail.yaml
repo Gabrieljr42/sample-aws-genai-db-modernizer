@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  OPTIONAL - An Amazon Bedrock Guardrail for the Database Modernizer Assessment.
+  The guardrail screens model inputs for prompt attacks (table, column and query
+  text in a collection is customer-controlled) and masks or blocks PII in model
+  outputs. A published version is created because the model-call settings accept
+  only a numbered version, not DRAFT.
+
+  This template only defines the guardrail. Nothing in the project deploys it.
+  Deploy it yourself, in the account that runs the Bedrock calls, then export
+  its two outputs:
+
+    aws cloudformation deploy \
+      --template-file infrastructure/cloudformation/bedrock-guardrail.yaml \
+      --stack-name modernizer-bedrock-guardrail
+    export BEDROCK_GUARDRAIL_ID=<GuardrailId output>
+    export BEDROCK_GUARDRAIL_VERSION=<GuardrailVersion output>
+
+  The runtime role also needs bedrock:ApplyGuardrail on the GuardrailArn output.
+  See docs/other-ways-to-run-it.md (Bedrock mode) and docs/use-claude-code.md
+  (Claude Code).
+
+Parameters:
+  GuardrailName:
+    Type: String
+    Description: Name of the guardrail
+    Default: modernizer-assessment
+    AllowedPattern: '^[0-9a-zA-Z-_]{1,50}$'
+    ConstraintDescription: Up to 50 letters, digits, hyphens or underscores
+
+  PromptAttackStrength:
+    Type: String
+    Description: Strength of the prompt-attack filter on model inputs (NONE turns it off)
+    Default: HIGH
+    AllowedValues:
+      - NONE
+      - LOW
+      - MEDIUM
+      - HIGH
+
+  PiiFilterAction:
+    Type: String
+    Description: >-
+      What to do with PII found in model outputs. ANONYMIZE replaces it with a
+      placeholder and lets the reply through. BLOCK refuses the whole reply.
+      NONE turns the PII filters off. With BEDROCK_GUARDRAIL_TRACE=disabled the
+      project cannot tell a mask from a block, so any ANONYMIZE hit in an output
+      ends that phase as a block.
+    Default: ANONYMIZE
+    AllowedValues:
+      - ANONYMIZE
+      - BLOCK
+      - NONE
+
+  BlockedMessage:
+    Type: String
+    Description: Message returned in place of a blocked input or output
+    Default: Blocked by the Amazon Bedrock Guardrail attached to this assessment.
+    MinLength: 1
+    MaxLength: 500
+
+  KmsKeyArn:
+    Type: String
+    Description: Optional customer managed KMS key ARN to encrypt the guardrail (empty uses an AWS owned key)
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$'
+
+  CrossRegionGuardrailProfileArn:
+    Type: String
+    Description: >-
+      Optional guardrail profile ARN. Set it when the model calls use a
+      cross-region inference profile (the default model IDs are "us." profiles),
+      so the guardrail can be evaluated in the regions the request is routed to.
+      Example: arn:aws:bedrock:us-east-1:111122223333:guardrail-profile/us.guardrail.v1:0
+    Default: ''
+    # The Bedrock API's own pattern for a guardrail profile ARN (it allows ':' in the version).
+    AllowedPattern: '^$|^arn:aws(-[^:]+)?:bedrock:[a-z0-9-]{1,20}:[0-9]{12}:guardrail-profile/[a-z0-9-]+[.]{1}guardrail[.]{1}v[0-9:]+$'
+
+Conditions:
+  UsePromptAttackFilter: !Not [!Equals [!Ref PromptAttackStrength, NONE]]
+  UsePiiFilters: !Not [!Equals [!Ref PiiFilterAction, NONE]]
+  UseKmsKey: !Not [!Equals [!Ref KmsKeyArn, '']]
+  UseCrossRegionProfile: !Not [!Equals [!Ref CrossRegionGuardrailProfileArn, '']]
+
+Rules:
+  AtLeastOnePolicy:
+    Assertions:
+      - Assert: !Or
+          - !Not [!Equals [!Ref PromptAttackStrength, NONE]]
+          - !Not [!Equals [!Ref PiiFilterAction, NONE]]
+        AssertDescription: Turn on at least one of the prompt-attack filter and the PII filters
+
+Resources:
+  Guardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Ref GuardrailName
+      Description: Prompt-attack filter on inputs and PII filters on outputs for the Database Modernizer Assessment
+      BlockedInputMessaging: !Ref BlockedMessage
+      BlockedOutputsMessaging: !Ref BlockedMessage
+      KmsKeyArn: !If [UseKmsKey, !Ref KmsKeyArn, !Ref 'AWS::NoValue']
+      CrossRegionConfig: !If
+        - UseCrossRegionProfile
+        - GuardrailProfileArn: !Ref CrossRegionGuardrailProfileArn
+        - !Ref 'AWS::NoValue'
+      # The prompt-attack filter screens inputs only; Bedrock requires the
+      # output strength of this filter type to be NONE.
+      ContentPolicyConfig: !If
+        - UsePromptAttackFilter
+        - FiltersConfig:
+            - Type: PROMPT_ATTACK
+              InputStrength: !Ref PromptAttackStrength
+              OutputStrength: NONE
+        - !Ref 'AWS::NoValue'
+      # PII is filtered on outputs only: inputs are the customer's own
+      # collection, and masking them would corrupt the assessment.
+      SensitiveInformationPolicyConfig: !If
+        - UsePiiFilters
+        - PiiEntitiesConfig:
+            - Type: EMAIL
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: PHONE
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: NAME
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: ADDRESS
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: US_SOCIAL_SECURITY_NUMBER
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: CREDIT_DEBIT_CARD_NUMBER
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: AWS_ACCESS_KEY
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: AWS_SECRET_KEY
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+            - Type: PASSWORD
+              Action: !Ref PiiFilterAction
+              InputEnabled: false
+              OutputEnabled: true
+              OutputAction: !Ref PiiFilterAction
+        - !Ref 'AWS::NoValue'
+      Tags:
+        - Key: Project
+          Value: Database Modernizer Assessment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # A numbered version is what the model-call settings take. A new version is
+  # created only when this resource changes; edit the description to publish one.
+  GuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !GetAtt Guardrail.GuardrailId
+      Description: Published version of the Database Modernizer Assessment guardrail
+
+Outputs:
+  GuardrailId:
+    Description: Value for BEDROCK_GUARDRAIL_ID (and the Claude Code X-Amzn-Bedrock-GuardrailIdentifier header)
+    Value: !GetAtt Guardrail.GuardrailId
+
+  GuardrailVersion:
+    Description: Value for BEDROCK_GUARDRAIL_VERSION (and the Claude Code X-Amzn-Bedrock-GuardrailVersion header)
+    Value: !GetAtt GuardrailVersion.Version
+
+  GuardrailArn:
+    Description: Resource for the bedrock:ApplyGuardrail permission of the role that makes the model calls
+    Value: !GetAtt Guardrail.GuardrailArn

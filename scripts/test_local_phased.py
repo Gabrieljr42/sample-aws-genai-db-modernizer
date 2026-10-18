@@ -63,6 +63,10 @@ def main():
         help="LLM mode for reality check (default: none = deterministic only)",
     )
     args = parser.parse_args()
+    if args.llm_mode == "bedrock":
+        from src.shared.bedrock_guardrail import exit_on_invalid_guardrail_config
+
+        exit_on_invalid_guardrail_config()
 
     collector_file = args.collector_file
     db_name_override = args.db_name

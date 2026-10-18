@@ -32,6 +32,7 @@ from src.agents.schema_design.scope import (
     assess_schema_scope,
 )
 from src.contracts.aurora_design_delta import is_design_delta
+from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.shared.contract_versioning import stamp_artifact_version
 from src.storage.artifact_store import ArtifactStore
 from src.storage.assignment_versioning import engine_scope, read_assignment
@@ -596,6 +597,8 @@ def run_schema_design(
 
     Requirements: 6.1, 6.2, 6.3, 10.1
     """
+    if llm_mode == "bedrock":
+        require_valid_guardrail_config()
     if llm_mode == "none":
         return _skip_without_model(target_type)
 
@@ -956,6 +959,8 @@ def run_schema_design_auto(
     """
     from src.agents.schema_design.group_splitter import MAX_GROUP_SIZE
 
+    if llm_mode == "bedrock":
+        require_valid_guardrail_config()
     if llm_mode == "none":
         return _skip_without_model(target_type)
     if llm_mode == "external":
@@ -1160,6 +1165,8 @@ def run_schema_design_with_injected(
     With ``llm_mode="none"`` the cascade is skipped without a model call
     (issue #281).
     """
+    if llm_mode == "bedrock":
+        require_valid_guardrail_config()
     if llm_mode == "none":
         _skip_without_model(target_type)
         return

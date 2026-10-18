@@ -77,6 +77,9 @@ BEDROCK_SMOKE: tuple[str, ...] = (
     "src/agents/schema_design/revision_handler.py",
     "src/agents/analysis/dynamodb_analysis_agent.py",
     "src/agents/analysis/documentdb_analysis_agent.py",
+    "src/agents/analysis/aurora_pg_analysis_agent.py",
+    "src/agents/analysis/aurora_mysql_analysis_agent.py",
+    "scripts/test_local_phased.py",
     "src/agents/referee/synthesis_handler.py",
     "scripts/run_analysis.py",
     "scripts/run_assessment.py",
@@ -91,6 +94,7 @@ BEDROCK_SMOKE: tuple[str, ...] = (
     "src/tools/analysis/llm_advisor_base.py",
     "src/tools/schema/*_schema_agent.py",
     "src/shared/role_bedrock_model.py",
+    "src/shared/bedrock_guardrail.py",
     "src/tools/schema/aurora_common/bedrock_delta.py",
     "src/atx_orchestrator/*.py",  # runtime/* uses agent_builder_sdk for plumbing, still listed
 )

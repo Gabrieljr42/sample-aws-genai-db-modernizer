@@ -57,6 +57,11 @@ from src.contracts.reality_check_model_response import (
     parse_reality_check_response,
 )
 from src.contracts.reality_check_output import RealityCheckOutputContract
+from src.shared.bedrock_guardrail import (
+    GuardrailConfigError,
+    GuardrailIntervened,
+    require_valid_guardrail_config,
+)
 from src.shared.contract_versioning import stamp_artifact_version
 from src.shared.engine_elimination import eliminated_engines as settled_eliminated_engines
 from src.shared.engine_names import PLACEHOLDER_ENGINES
@@ -395,6 +400,7 @@ def run_reality_check_handler(
     # Step 2: LLM phase — determined by llm_mode. Bedrock validates the
     # consolidations here; its summary is written after the sweep (step 3b).
     if llm_mode == "bedrock":
+        require_valid_guardrail_config()
         _run_bedrock_llm_phase(det, database_name)
 
     elif llm_mode == "external":
@@ -995,6 +1001,12 @@ def _generate_executive_summary(det: dict) -> str | None:
             print(f"[reality-check] Executive summary generated ({len(narrative)} chars)")
             return narrative
 
+    except GuardrailConfigError:
+        raise
+    except GuardrailIntervened as exc:
+        # Not retried: the deterministic summary stands.
+        logger.error("%s", exc)
+        print(f"[reality-check] ERROR: {exc}")
     except ValidationError as exc:
         logger.error("LLM executive summary is off the contract (%s)", validation_error_note(exc))
     except Exception as exc:
