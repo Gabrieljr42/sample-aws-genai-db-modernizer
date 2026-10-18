@@ -23,6 +23,7 @@ concerns = [
     "$facet needs DocumentDB 8.0.2+ — otherwise run multiple pipelines in parallel",
     "$setWindowFields needs DocumentDB 8.0.2+ — otherwise use Computed Pattern or application layer",
 ]
+table_bonus = 8
 
 [engines.opensearch]
 kind = "unscored"

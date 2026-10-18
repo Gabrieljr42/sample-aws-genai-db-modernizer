@@ -24,6 +24,8 @@ why = "One entity's attribute rows (an entity-attribute-value table) read by the
 concerns = [
     "Wildcard indexes ($**) not supported in any DocumentDB version — flatten queryable attributes to top-level with targeted compound indexes",
 ]
+# Schema flexibility reduces migration complexity.
+complexity_feature = true
 
 [engines.opensearch]
 kind = "unscored"

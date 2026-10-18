@@ -16,6 +16,7 @@ catalog = "dynamodb"
 catalog_id = "dynamodb-05"
 score = 90
 why = "Small, rarely written reference tables read by key (feature flags, config, lookup tables): GetItem or BatchGetItem on the key, with DynamoDB Accelerator for microsecond reads at an extra node cost (Amazon DynamoDB Developer Guide, Working with items; In-memory acceleration with DAX)."
+table_bonus = 10
 
 [engines.documentdb]
 kind = "unscored"

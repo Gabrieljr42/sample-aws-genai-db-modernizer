@@ -28,6 +28,7 @@ concerns = [
     "Deep aggregation nesting (>3 levels) can cause memory pressure.",
     "High cardinality fields in sub-aggregations may require field data cache tuning.",
 ]
+table_bonus = 15
 
 [engines.elasticache]
 kind = "unscored"

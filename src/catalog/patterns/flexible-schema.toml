@@ -22,6 +22,9 @@ why = "Tables with JSON/JSONB columns or high column count with many nullable fi
 concerns = [
     "JSON_EXTRACT at query time should be replaced by top-level fields at write time",
 ]
+table_bonus = 8
+# Schema flexibility reduces migration complexity.
+complexity_feature = true
 
 [engines.opensearch]
 kind = "unscored"

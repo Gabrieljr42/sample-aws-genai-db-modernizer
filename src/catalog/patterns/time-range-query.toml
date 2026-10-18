@@ -29,6 +29,7 @@ concerns = [
     "Hot shard risk if all documents are in the same time bucket.",
     "Index lifecycle management (ILM) policy needed for retention.",
 ]
+table_bonus = 10
 
 [engines.elasticache]
 kind = "unscored"

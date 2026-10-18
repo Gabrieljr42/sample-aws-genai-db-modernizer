@@ -184,11 +184,7 @@ def _apply_aurora_pg_adjustments(
     # The Aurora SQL features both engines have, plus PostgreSQL's own (JSONB, arrays,
     # ON CONFLICT): pattern bonuses, and more features increase the complexity fit.
     pattern, complexity = apply_aurora_feature_adjustments(
-        pattern,
-        complexity,
-        pattern_types,
-        own_bonuses={"jsonb-operations": 10, "upsert-conflict": 5},
-        own_features=frozenset({"jsonb-operations", "array-operations"}),
+        "aurora_postgresql", pattern, complexity, pattern_types
     )
 
     return ScoreBreakdown(

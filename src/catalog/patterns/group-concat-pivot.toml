@@ -36,6 +36,8 @@ why = "String aggregation with string_agg (a source's GROUP_CONCAT, STRING_AGG o
 concerns = [
     "An ORDER BY inside the aggregate is needed for a stable order.",
 ]
+table_bonus = 5
+complexity_feature = true
 
 # Detection signals: GROUP_CONCAT, string aggregation patterns
 [engines.aurora_mysql]
@@ -48,6 +50,8 @@ why = "String aggregation with GROUP_CONCAT (a source's STRING_AGG or LISTAGG) f
 concerns = [
     "Default group_concat_max_len (1024) may truncate results; increase as needed.",
 ]
+table_bonus = 5
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

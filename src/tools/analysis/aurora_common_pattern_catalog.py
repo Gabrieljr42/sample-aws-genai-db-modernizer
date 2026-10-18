@@ -125,11 +125,6 @@ SKIP_QUERY_TYPES: frozenset[str] = frozenset({"SHOW", "DESCRIBE", "EXPLAIN", "SE
 # Minimum CPS threshold for standard-crud pattern (avoids noise from rarely-used queries)
 STANDARD_CRUD_MIN_CPS: float = 0.5
 
-# Baseline pattern_match_score floor for tables with queries but no detected patterns.
-# Represents "valid relational workload, nothing exceptional" — prevents zero scores
-# that make tables look unsuitable when they're perfectly fine on Aurora.
-BASELINE_PATTERN_MATCH_FLOOR: int = 45
-
 # Thresholds
 HIGH_FREQUENCY_PK_LOOKUP_CPS: float = 30.0
 # The high-ingest threshold is shared with every engine: pattern_catalog_base.

@@ -37,6 +37,8 @@ why = "Recursive CTEs (WITH RECURSIVE) for hierarchical data traversal: org char
 concerns = [
     "Deep recursion (>100 levels) may require LIMIT on recursion depth.",
 ]
+table_bonus = 15
+complexity_feature = true
 
 [engines.aurora_mysql]
 kind = "fit"
@@ -48,6 +50,8 @@ why = "Recursive CTEs (WITH RECURSIVE) for hierarchical data traversal on MySQL 
 concerns = [
     "Deep hierarchies need cte_max_recursion_depth raised, and a cycle needs a guard in the query.",
 ]
+table_bonus = 15
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

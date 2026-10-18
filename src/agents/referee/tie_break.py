@@ -67,6 +67,8 @@ import logging
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from src.shared import catalog
+
 logger = logging.getLogger(__name__)
 
 TieKind = str  # one of TIE_KINDS, below
@@ -88,10 +90,10 @@ TIE_KINDS: tuple[str, ...] = (TIE_KIND_SOURCE_COMPATIBLE, TIE_KIND_STABILITY, TI
 # source-compatible engine is not removed in favour of an engine that scores
 # its queries no better, unless that engine is at least this much cheaper in
 # standing cost, as a share of the source-compatible engine's standing cost ...
-CHEAPER_ENGINE_MIN_SAVING_SHARE = 0.40
+CHEAPER_ENGINE_MIN_SAVING_SHARE = catalog.threshold("cheaper_engine_min_saving_share")
 # ... AND saves at least this much a month (USD). Both must hold; each is
 # inclusive at its boundary.
-CHEAPER_ENGINE_MIN_SAVING_MONTHLY = 100.0
+CHEAPER_ENGINE_MIN_SAVING_MONTHLY = catalog.threshold("cheaper_engine_min_saving_monthly")
 
 
 def group_tie(

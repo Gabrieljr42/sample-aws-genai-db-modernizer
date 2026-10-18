@@ -21,6 +21,7 @@ from collections.abc import Iterable, Mapping
 
 from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.utility_statements import is_utility_statement
+from src.shared import catalog
 from src.shared.capability_labels import LEGACY_CAPABILITY_IDS
 from src.shared.unsupported_pattern import is_dedup_only_group_by
 from src.tools.sql.query_facts import QueryFacts, query_facts
@@ -44,69 +45,22 @@ __all__ = [
 # Hard capability matrix — architectural constraints, not fit preferences.
 #
 # A capability here means the engine CAN serve this pattern at all,
-# even if poorly. Absence means "structurally impossible."
+# even if poorly. Absence means "structurally impossible." The matrix, the query
+# facts that require each capability and the triage signals that imply one are
+# ``src/catalog/gates.toml``'s ``[capabilities.<id>]`` tables (ADR-031 Decision 8,
+# #921), with the reason for each; the loader checks a capability linked to a
+# pattern file (``pattern_capability``) names the engines that file supports. The
+# detectors themselves live in ``src.tools.sql.query_facts``, once each.
 # ---------------------------------------------------------------------------
 
-ENGINE_CAPABILITIES: dict[str, set[str]] = {
-    # TransactWriteItems/TransactGetItems are ACID across up to 100 items (ADR-031
-    # Decision 3): a transaction is never a capability DynamoDB lacks. A write too
-    # wide for one transaction is scored by its shape (transaction_shape, #493).
-    "dynamodb": {"multi_doc_acid", "strong_consistency"},
-    # $regex (LIKE/regex-equivalent) and $text are both native query
-    # operators, so DocumentDB can run a text-pattern predicate
-    # (text_pattern_match, named inverted_index before #493: it says the
-    # engine can run the predicate, not that it has an index for it). A
-    # leading-wildcard $regex runs as a scan, the same position Aurora MySQL's
-    # LIKE is in; that is a score difference, the substring-match pattern
-    # (src/catalog/patterns/substring-match.toml), never this gate. Previously
-    # omitted here, which hard-excluded DocumentDB while admitting Aurora MySQL
-    # for the identical position -- fixed by #485.
-    "documentdb": {"multi_doc_acid", "strong_consistency", "aggregation", "text_pattern_match"},
-    "opensearch": {"text_pattern_match", "scan_engine", "aggregation"},
-    "aurora_postgresql": {
-        "multi_doc_acid",
-        "strong_consistency",
-        "scan_engine",
-        "text_pattern_match",
-        "aggregation",
-        "complex_joins",
-        "sql_admin",
-        "computed_join",
-    },
-    # InnoDB FULLTEXT indexes (MATCH ... AGAINST) since MySQL 5.6
-    "aurora_mysql": {
-        "multi_doc_acid",
-        "strong_consistency",
-        "scan_engine",
-        "text_pattern_match",
-        "aggregation",
-        "complex_joins",
-        "sql_admin",
-        "computed_join",
-    },
-}
+ENGINE_CAPABILITIES: dict[str, set[str]] = {}
+for _cap, _entry in catalog.hard_capabilities().items():
+    for _engine in _entry.engines:
+        ENGINE_CAPABILITIES.setdefault(_engine, set()).add(_cap)
 
-# ---------------------------------------------------------------------------
-# Capability facts -- which engine-neutral query facts (#491,
-# ``src.tools.sql.query_facts``) mean a query requires a hard capability. The
-# detectors themselves live in that module, once each; this registry only
-# says what a fact requires.
-# ---------------------------------------------------------------------------
-
+# Which engine-neutral query facts (#491) mean a query requires a hard capability.
 CAPABILITY_FACTS: dict[str, tuple[str, ...]] = {
-    # A text search: a leading-wildcard or parameterised LIKE, a full-text,
-    # regular-expression or similarity match (``QueryFacts.text_search``, the
-    # fact triage's text_search signal reads too, #893).
-    "text_pattern_match": ("text_search",),
-    # A ranking or offset window function, a recursive CTE.
-    "scan_engine": ("ranking_window_function", "offset_window_function", "recursive_cte"),
-    # An aggregate call, SQL_CALC_FOUND_ROWS, a window function, or a GROUP
-    # BY that does more than de-duplicate (#338, #336:
-    # ``QueryFacts.needs_aggregation``).
-    "aggregation": ("needs_aggregation",),
-    # A join on a computed expression (review of #375, finding B2).
-    "computed_join": ("computed_join_key",),
-    "multi_doc_acid": (),  # Structural detection, not from the query text
+    cap: entry.facts for cap, entry in catalog.hard_capabilities().items()
 }
 
 
@@ -154,19 +108,15 @@ def requires_computed_join_capability(
 # ---------------------------------------------------------------------------
 # Triage signal → hard capability mapping
 #
-# When a triage signal implies a hard architectural requirement, map it here.
-# Not all signals imply hard capabilities — most are just workload preferences.
+# When a triage signal implies a hard architectural requirement (a capability's
+# ``triage_signals`` in ``src/catalog/gates.toml``). Not all signals imply hard
+# capabilities — most are just workload preferences.
 # ---------------------------------------------------------------------------
 
 SIGNAL_TO_CAPABILITY: dict[str, str] = {
-    "text_search": "text_pattern_match",
-    # SUM/COUNT/AVG with GROUP BY, or an aggregate combined with a JOIN, is a
-    # hard requirement: an engine with no aggregation capability (DynamoDB)
-    # cannot run it at all, even on a single query, not just "poorly" (#338).
-    "aggregations": "aggregation",
-    # 3+ table joins are the same kind of hard requirement -- DynamoDB and
-    # OpenSearch have no join capability regardless of how the data is keyed.
-    "complex_joins": "complex_joins",
+    signal: cap
+    for cap, entry in catalog.hard_capabilities().items()
+    for signal in entry.triage_signals
 }
 
 

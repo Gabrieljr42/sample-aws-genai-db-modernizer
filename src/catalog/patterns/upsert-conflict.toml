@@ -39,6 +39,7 @@ why = "UPSERT with ON CONFLICT DO UPDATE and RETURNING clause. Aurora PG handles
 concerns = [
     "High-concurrency upserts on the same key may cause retry loops.",
 ]
+table_bonus = 5
 
 [engines.aurora_mysql]
 kind = "unscored"

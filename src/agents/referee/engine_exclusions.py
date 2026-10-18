@@ -14,7 +14,7 @@ the technical, log-only reason -- so the customer can pick a different engine
 instead of having their choice silently moved somewhere else.
 
 Design: registry-based, so adding new engines (Neptune, ElastiCache, etc.)
-is just adding entries to EXCLUSION_RULES.
+is just adding ``[[exclusions]]`` entries to ``src/catalog/gates.toml`` (#921).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from src.shared import catalog
 from src.tools.sql.query_facts import query_facts
 
 
@@ -53,70 +54,33 @@ class ExclusionRule:
 # detectors live there, once each.
 
 
-def _has_leading_wildcard(query_text: str, source_engine: str) -> bool:
-    """A ``LIKE '%...'`` (leading wildcard): the ``leading_wildcard_like`` fact, part
-    of the ``text_search`` fact the capability gate reads for DynamoDB too."""
-    return query_facts(query_text, source_engine).leading_wildcard_like
+def _fact_check(fact: str, minimum: int | None) -> Callable[[str, str], bool]:
+    """The check for a rule on ``fact``: truthy, or at least ``minimum`` for a count."""
 
+    def check(query_text: str, source_engine: str) -> bool:
+        value = getattr(query_facts(query_text, source_engine), fact)
+        return value >= minimum if minimum is not None else bool(value)
 
-def _has_write_with_subquery(query_text: str, source_engine: str) -> bool:
-    """Detect INSERT/UPDATE/DELETE containing a subquery."""
-    return query_facts(query_text, source_engine).write_with_subquery
-
-
-def _has_two_joins(query_text: str, source_engine: str) -> bool:
-    """Two or more joins (the facade's ``join_count``, the collector's own)."""
-    return query_facts(query_text, source_engine).join_count >= 2
+    return check
 
 
 # ---------------------------------------------------------------------------
-# Exclusion Registry
-#
-# Add new engines/rules here. Each rule must have:
-#   - engine: which engine this excludes
-#   - rule_id: stable identifier for tracking
-#   - description: technical reason (for logs)
-#   - customer_message: plain-language verb-phrase fragment for a
-#     customer-facing rejection (#548); no leading subject, no engine name,
-#     no "auto-reassigned" wording
-#   - check: function(query_text, source_engine) -> bool
+# Exclusion Registry: ``src/catalog/gates.toml``'s ``[[exclusions]]`` (ADR-031
+# Decision 8, #921), in file order. Each rule names the engine it excludes, a
+# stable rule_id, the query fact (and ``min`` for a count), the technical
+# description (logs) and the plain customer_message fragment (#548): no
+# leading subject, no engine name, no "auto-reassigned" wording.
 # ---------------------------------------------------------------------------
 
 EXCLUSION_RULES: list[ExclusionRule] = [
-    # DynamoDB exclusions
     ExclusionRule(
-        engine="dynamodb",
-        rule_id="ddb-no-leading-wildcard",
-        description="Leading wildcard LIKE '%term' requires full scan; search engine territory",
-        # round 3 review: "(LIKE '%...')", not a specific literal like
-        # "(LIKE '%term%')" -- the fixed example text could otherwise read
-        # like a quote of the customer's own SQL even when their actual
-        # pattern is something else, e.g. '%a%'.
-        customer_message="uses a leading-wildcard search (LIKE '%...')",
-        check=_has_leading_wildcard,
-    ),
-    # OpenSearch exclusions
-    ExclusionRule(
-        engine="opensearch",
-        rule_id="os-no-write-subquery",
-        description=(  # nosemgrep: string-concat-in-list
-            "OpenSearch cannot perform transactional writes with subquery logic. "
-            "The application layer must handle conditional insert/update logic before indexing."
-        ),
-        customer_message=(  # nosemgrep: string-concat-in-list
-            "performs a conditional write with a subquery, which needs transactional "
-            "guarantees it can't provide"
-        ),
-        check=_has_write_with_subquery,
-    ),
-    # ElastiCache exclusions
-    ExclusionRule(
-        engine="elasticache",
-        rule_id="ec-no-complex-join",
-        description="ElastiCache cannot perform multi-table JOINs; it's a key-value/data structure store",
-        customer_message="joins more than one table, and a key-value store can't serve joins",
-        check=_has_two_joins,
-    ),
+        engine=rule.engine,
+        rule_id=rule.rule_id,
+        description=rule.description,
+        customer_message=rule.customer_message,
+        check=_fact_check(rule.fact, rule.min),
+    )
+    for rule in catalog.exclusions()
 ]
 
 # Build lookup: engine → list of rules

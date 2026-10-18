@@ -53,6 +53,25 @@ Fields:
   profile of every engine, and the default, gives cost the same weight (maintainer
   decision, #1002): the cost dimension is per query and engine-aware, so a per-engine
   cost weight would only add a flat bonus. The loader rejects a catalog where they differ.
+- ``thresholds`` (optional, #921): the routing thresholds and floors that apply to this
+  engine alone, one ``[thresholds.<name>]`` table each with a ``value`` and the ``why``
+  for it (OpenSearch's justification floors, the cache overlay's hot-read floor). A
+  threshold every engine shares lives in ``src/catalog/routing.toml`` instead.
+- ``source_engines`` (optional, #921): the source database engines (the collector's
+  ``source_database.engine``, lower case) whose own dialect this engine is: the Aurora
+  engine a homogeneous migration keeps. A source engine names at most one engine.
+- ``pattern_only`` (#475, #921): the engine scores a query only on the query's own
+  matched pattern, never on a table-wide average (``engine_capabilities.
+  PATTERN_ONLY_ENGINES``).
+- ``absorbs_only`` (optional, #296, #921): the reality check lets this engine absorb only
+  a query showing one of these triage ``signals`` or requiring one of these hard
+  ``capabilities`` (``reality_check_rules.may_absorb``).
+- ``override_needs_justification`` (#475, #921): a triage signal override onto this
+  engine applies only when the reality check's justification floor agrees the signal is
+  real (``assignment_resolver``).
+- ``complexity_by_feature_count`` (optional, #921): the complexity points a table earns
+  for showing 1, 2, ... of the patterns whose entry on this engine is a
+  ``complexity_feature`` (the last value for any higher count; the Aurora SQL features).
 """
 
 from __future__ import annotations
@@ -123,6 +142,31 @@ class EnginePricing(BaseModel):
         return self
 
 
+class Threshold(BaseModel):
+    """One routing threshold or floor and the reason for its value (#921)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    value: int | float
+    why: str = Field(min_length=1, pattern=r"^[^\n]+$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_number(cls, data: object) -> object:
+        if isinstance(data, Mapping) and isinstance(data.get("value"), bool):
+            raise ValueError("a threshold value is a number")
+        return data
+
+
+class AbsorbOnly(BaseModel):
+    """What a query must show for the reality check to let the engine absorb it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    signals: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ()
+
+
 class EngineEntry(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -136,6 +180,12 @@ class EngineEntry(BaseModel):
     colors: EngineColors
     pricing: EnginePricing | None = None
     score_weights: dict[str, dict[str, float]] = Field(default_factory=dict)
+    thresholds: dict[str, Threshold] = Field(default_factory=dict)
+    source_engines: tuple[str, ...] = ()
+    pattern_only: bool = False
+    absorbs_only: AbsorbOnly | None = None
+    override_needs_justification: bool = False
+    complexity_by_feature_count: tuple[int, ...] = ()
 
     @model_validator(mode="after")
     def _roles_that_never_own(self) -> EngineEntry:
@@ -195,7 +245,20 @@ def load_engine_catalog(directory: Path = CATALOG_DIR) -> tuple[EngineEntry, ...
         if len(set(orders)) != len(orders):
             raise CatalogError(f"{field} values repeat: {sorted(orders)}")
     _one_cost_weight(entries)
+    _one_engine_per_source(entries)
     return tuple(sorted(entries, key=lambda e: e.display_order))
+
+
+def _one_engine_per_source(entries: Iterable[EngineEntry]) -> None:
+    """A source engine names at most one target engine as its own dialect (#921)."""
+    seen: dict[str, str] = {}
+    for e in entries:
+        for source in e.source_engines:
+            if source in seen:
+                raise CatalogError(
+                    f"source engine {source!r} is named by both {seen[source]} and {e.id}"
+                )
+            seen[source] = e.id
 
 
 def _one_cost_weight(entries: Iterable[EngineEntry]) -> None:
@@ -268,6 +331,26 @@ def score_weights(engine: str, profile: str | None = None) -> dict[str, float]:
         if e.id == engine and profile in e.score_weights:
             return dict(e.score_weights[profile])
     raise KeyError(f"{engine} has no score_weights.{profile}")
+
+
+def engine_threshold(engine: str, name: str) -> int | float:
+    """``engine``'s ``[thresholds.<name>]`` value (#921). Raises ``KeyError`` for a
+    threshold the engine's file does not define."""
+    for e in engines():
+        if e.id == engine and name in e.thresholds:
+            return e.thresholds[name].value
+    raise KeyError(f"{engine} has no thresholds.{name}")
+
+
+def engine_entry(engine: str) -> EngineEntry | None:
+    """The engine file for ``engine``, or ``None`` for an id the catalog does not know."""
+    return next((e for e in engines() if e.id == engine), None)
+
+
+def source_engine_dialects() -> dict[str, str]:
+    """Source database engine (lower case) to the target engine that is its own dialect,
+    from every active engine's ``source_engines`` (``triage.SOURCE_ENGINE_TO_AURORA``)."""
+    return {s: e.id for e in engines() if e.status in ACTIVE for s in e.source_engines}
 
 
 # Engines routing can target today: every routing-facing role set is restricted to these.

@@ -20,6 +20,7 @@ concerns = [
     "Hot partitions if all writes go to 'latest' partition — consider time-bucketing",
     "Analytics queries (GROUP BY time) better served by aggregation or export to S3",
 ]
+table_bonus = 10
 
 [engines.documentdb]
 kind = "unscored"

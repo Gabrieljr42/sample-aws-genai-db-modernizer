@@ -46,7 +46,7 @@ from src.agents.referee.query_shape import locking_clause
 from src.agents.referee.tie_break import break_tie, settled_counts
 from src.agents.referee.utility_statements import is_sequence_fetch
 from src.contracts.move_ledger import MoveEvidence, MovePass, ReasonCode
-from src.shared.cache_engines import CACHE_ENGINES, HOT_READ_MIN_CALLS_PER_SECOND
+from src.shared.cache_engines import CACHE_ENGINES, HOT_READ_MIN_CALLS_PER_SECOND, cache_threshold
 from src.shared.cache_pattern_labels import CACHE_PATTERN_LABELS
 from src.shared.engine_names import display_engine
 from src.shared.migration_wave_engines import SEARCH_ENGINES
@@ -71,11 +71,11 @@ CACHE_OVERLAY_ENGINES = CACHE_ENGINES
 NON_SYSTEM_OF_RECORD_ENGINES = CACHE_OVERLAY_ENGINES | SEARCH_ENGINES
 
 # Largest average result size (rows) a cached query may return.
-CACHE_MAX_ROWS_AVG = 100.0
+CACHE_MAX_ROWS_AVG = cache_threshold("max_rows_avg")
 
 # A table whose writes are at least this share of its calls is write-heavy: cache
 # entries on it would be invalidated about as often as they are read.
-WRITE_HEAVY_TABLE_MIN_WRITE_SHARE = 0.5
+WRITE_HEAVY_TABLE_MIN_WRITE_SHARE = cache_threshold("write_heavy_table_min_write_share")
 
 # Triage signals that hint at a cacheable shape. Hints only: they never decide
 # ownership, and they count only for a query that is already hot.

@@ -22,6 +22,7 @@ concerns = [
     "Embedded arrays must stay bounded — unbounded growth hits 16MB limit",
     "Updates to embedded items rewrite the entire parent document",
 ]
+table_bonus = 12
 
 [engines.opensearch]
 kind = "unscored"

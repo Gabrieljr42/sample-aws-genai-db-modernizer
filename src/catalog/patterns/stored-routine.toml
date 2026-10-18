@@ -37,6 +37,7 @@ concerns = [
     "Stored routines increase operational complexity and are harder to version-control.",
     "Consider migrating complex logic to application layer for testability.",
 ]
+complexity_feature = true
 
 # Detection signals: CALL procedure, DELIMITER patterns
 [engines.aurora_mysql]
@@ -50,6 +51,7 @@ concerns = [
     "Stored routines increase operational complexity and are harder to version-control.",
     "Consider migrating complex logic to application layer for testability.",
 ]
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

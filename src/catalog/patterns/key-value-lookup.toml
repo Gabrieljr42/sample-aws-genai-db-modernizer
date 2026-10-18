@@ -18,6 +18,7 @@ catalog_id = "dynamodb-01"
 score = 100
 why = "Single-item reads by the full primary key: GetItem, or BatchGetItem for up to 100 keys and 16 MB, at single-digit-millisecond latency at any scale (Amazon DynamoDB Developer Guide, Working with items; Amazon DynamoDB API Reference, BatchGetItem)."
 concerns = ["Large item sizes (>400KB) require splitting"]
+table_bonus = 15
 
 [engines.documentdb]
 kind = "unscored"

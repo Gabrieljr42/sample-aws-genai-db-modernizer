@@ -1,4 +1,5 @@
-"""The rule catalog (ADR-031 Decision 8). This slice carries the engine files only."""
+"""The rule catalog (ADR-031 Decision 8): the engine files, plus the shared routing
+thresholds, hard gates and triage signals (``routing``, #921)."""
 
 from src.shared.catalog.engines import (
     ACTIVE,
@@ -11,12 +12,22 @@ from src.shared.catalog.engines import (
     EngineEntry,
     EnginePricing,
     default_score_weights,
+    engine_entry,
     engine_ids,
+    engine_threshold,
     engines,
     load_engine_catalog,
     pricing,
     score_weight_profiles,
     score_weights,
+    source_engine_dialects,
+)
+from src.shared.catalog.routing import (
+    exclusions,
+    hard_capabilities,
+    signal_targets,
+    threshold,
+    triage_signals,
 )
 
 __all__ = [
@@ -29,7 +40,15 @@ __all__ = [
     "EngineColors",
     "EngineEntry",
     "EnginePricing",
+    "engine_entry",
     "engine_ids",
+    "engine_threshold",
+    "exclusions",
+    "hard_capabilities",
+    "signal_targets",
+    "source_engine_dialects",
+    "threshold",
+    "triage_signals",
     "engines",
     "load_engine_catalog",
     "default_score_weights",

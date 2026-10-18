@@ -23,6 +23,7 @@ concerns = [
     "Hot partitions come from low-cardinality or skewed partition keys, or a time bucket as partition key; sequential numeric keys are hashed and spread evenly (Amazon DynamoDB Developer Guide, Designing partition keys)",
     "Batch writes limited to 25 items per request",
 ]
+table_bonus = 8
 
 [engines.documentdb]
 kind = "unscored"

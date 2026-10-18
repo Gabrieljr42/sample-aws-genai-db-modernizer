@@ -187,11 +187,7 @@ def _apply_aurora_mysql_adjustments(
     # FULLTEXT, ON DUPLICATE KEY): pattern bonuses, and more features increase the
     # complexity fit.
     pattern, complexity = apply_aurora_feature_adjustments(
-        pattern,
-        complexity,
-        pattern_types,
-        own_bonuses={"json-document-query": 10, "fulltext-search": 10, "upsert-duplicate-key": 5},
-        own_features=frozenset({"json-document-query", "fulltext-search", "upsert-duplicate-key"}),
+        "aurora_mysql", pattern, complexity, pattern_types
     )
 
     return ScoreBreakdown(

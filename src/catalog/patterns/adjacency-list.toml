@@ -18,6 +18,10 @@ concerns = [
     "Complex key design required — needs careful PK/SK modeling",
     "Deep hierarchies may require multiple queries or GSI",
 ]
+# A denormalizable join: a moderate fit that needs design work (more migration effort).
+bonus_group = "denormalizable-join"
+table_bonus = 5
+complexity_bonus = -10
 
 [engines.documentdb]
 kind = "unscored"

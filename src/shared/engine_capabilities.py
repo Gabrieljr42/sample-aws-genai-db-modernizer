@@ -48,6 +48,7 @@ capability tables are the only ones left.
 
 from __future__ import annotations
 
+from src.shared import catalog
 from src.shared.catalog.patterns import capability_engines
 
 # Engines with native multi-row / multi-document ACID transactions: a single
@@ -159,4 +160,6 @@ FUZZY_SEARCH_ENGINES: frozenset[str] = capability_engines("fuzzy_search")
 # -- applied consistently everywhere so a query that correctly starts off
 # OpenSearch in the first assignment is not routed back onto it by the
 # reality check's own consolidation pass.
-PATTERN_ONLY_ENGINES: frozenset[str] = frozenset({"opensearch"})
+PATTERN_ONLY_ENGINES: frozenset[str] = frozenset(
+    e.id for e in catalog.engines() if e.pattern_only and e.status in catalog.ACTIVE
+)

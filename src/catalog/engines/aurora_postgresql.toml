@@ -6,6 +6,11 @@ ui_picker_order = 9
 status = "active"
 role = "relational"
 system_of_record = true
+# The source engines whose own dialect this is: a homogeneous migration keeps them here (#921).
+source_engines = ["postgresql", "postgres"]
+# Complexity points for a table using 1, or 2 or more, of the SQL features whose pattern
+# entry is a complexity_feature: more Aurora features, a closer relational fit (#921).
+complexity_by_feature_count = [10, 15]
 
 [colors]
 ui = "#9c5700"

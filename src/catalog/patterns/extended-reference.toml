@@ -21,6 +21,7 @@ why = "Queries joining large transactional tables with small reference/lookup ta
 concerns = [
     "Denormalized fields must be updated when reference data changes (rare for lookups)",
 ]
+table_bonus = 10
 
 [engines.opensearch]
 kind = "unscored"

@@ -49,7 +49,9 @@ matches ten query-pattern groups (key-value lookups, range queries,
 status filters, writes, complex joins, aggregations, large scans,
 time-series, session store, metadata/config) and five schema-level signals
 (JSON columns, junction tables, high FK density, self-referential FKs, EAV
-pattern), each naming the engines it is evidence for:
+pattern), each naming the engines it is evidence for (the signal's `targets` in
+`src/catalog/triage_signals.toml`; the source-engine-to-Aurora map is the Aurora
+engine files' `source_engines`):
 
 ```python
 # src/agents/referee/triage.py (real code, trimmed)
@@ -98,7 +100,8 @@ names and list-of-object shapes:
 - `signals` — every detected `TriageSignalRecord` (signal, targets,
   evidence, query IDs, table IDs, query count), for the decision trace.
 - `query_capabilities` — per-query hard-capability requirements (detected via
-  `src/agents/referee/capability_registry.py`), used later to catch an engine
+  `src/agents/referee/capability_registry.py`, from the gate in
+  `src/catalog/gates.toml`), used later to catch an engine
   that cannot actually serve a query it was assigned.
 - `confidence_score` — 0-100, computed from the signals that fired (50 plus 5
   per signal, up to 100; see `_compute_triage_confidence` in

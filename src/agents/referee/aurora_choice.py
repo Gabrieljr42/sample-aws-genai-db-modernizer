@@ -35,10 +35,11 @@ from typing import Any
 from src.agents.referee.tie_break import break_tie
 from src.agents.referee.triage import BASELINE, SOURCE_ENGINE_TO_AURORA
 from src.agents.referee.utility_statements import has_sequence_reference
+from src.shared import catalog
 from src.shared.engine_names import display_engine
 from src.tools.sql.query_facts import query_facts, scan_sql, source_engine_of
 
-AURORA_ENGINES = frozenset({"aurora_postgresql", "aurora_mysql"})
+AURORA_ENGINES = catalog.engine_ids(status=catalog.ACTIVE, role="relational")
 
 # Calibration (#381): on the wordpress (MySQL) and discourse (PostgreSQL) deterministic
 # samples, aurora_mysql and aurora_postgresql's table_recommendations confidence scores
@@ -54,7 +55,7 @@ AURORA_ENGINES = frozenset({"aurora_postgresql", "aurora_mysql"})
 # fallback below, in ``pick_aurora_engine``, to go through the shared ADR-031
 # tie-break instead of a bare name preference) -- it is not "the same as" that
 # fallback's default any more, now that the fallback has none of its own.
-MARGIN_RATIO = 0.05
+MARGIN_RATIO = catalog.threshold("aurora_choice_margin_ratio")
 
 # ADR-031 Decision 6 amendment (maintainer decision, 2026-10-14, #656): when the two
 # Aurora engines tie EXACTLY on total adjusted score for a heterogeneous source,

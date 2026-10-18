@@ -33,6 +33,9 @@ concerns = [
     "Fuzzy search performance depends on fuzziness parameter tuning.",
     "Trigram-based similarity may require custom tokenizer in OpenSearch.",
 ]
+# Wildcard or fuzzy matching: one bonus for a table showing either.
+bonus_group = "approximate-match"
+table_bonus = 10
 
 [engines.elasticache]
 kind = "penalized"

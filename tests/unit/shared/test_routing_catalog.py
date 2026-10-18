@@ -1,0 +1,516 @@
+"""The rule data #921 moved out of code into the catalog keeps its values (no routing change).
+
+Each constant below was a literal in code before #921 and is now built from
+``src/catalog/routing.toml``, ``gates.toml``, ``triage_signals.toml``, the engine files'
+new fields or the pattern files' table bonuses. The pins are the pre-move literals, so a
+catalog edit that changes routing fails here and has to say why; the loader tests check
+that a broken file fails at load time instead of reaching a run.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from src.agents.referee import (
+    aurora_choice,
+    cache_overlay,
+    consolidation_validator,
+    reality_check_floors,
+    reality_check_rules,
+    tie_break,
+    triage,
+)
+from src.agents.referee.assignment_resolver import (
+    JUSTIFICATION_GATED_OVERRIDE_ENGINES,
+    SIGNAL_ENGINE_OVERRIDES,
+    SIGNAL_OVERRIDE_REASON_CODES,
+)
+from src.agents.referee.capability_registry import (
+    CAPABILITY_FACTS,
+    ENGINE_CAPABILITIES,
+    SIGNAL_TO_CAPABILITY,
+)
+from src.agents.referee.engine_exclusions import EXCLUSION_RULES, check_all_exclusions
+from src.agents.referee.feasibility_review import _engine_role, _replication_recommendation
+from src.contracts.move_ledger import ReasonCode
+from src.shared import catalog
+from src.shared.cache_engines import HOT_READ_MIN_CALLS_PER_SECOND
+from src.shared.catalog import CatalogError
+from src.shared.catalog.engines import load_engine_catalog
+from src.shared.catalog.patterns import (
+    feature_complexity_bonus,
+    load_pattern_catalog,
+    patterns,
+    table_bonuses,
+)
+from src.shared.catalog.routing import load_gates_file, load_routing_file, load_triage_signals_file
+from src.shared.engine_capabilities import PATTERN_ONLY_ENGINES
+
+CATALOG = Path(__file__).resolve().parents[3] / "src" / "catalog"
+AURORA = ("aurora_postgresql", "aurora_mysql")
+
+
+class TestThresholdsKeepTheirValues:
+    def test_the_shared_thresholds(self) -> None:
+        got = {
+            "TARGET_ENGINE_COUNT": reality_check_rules.TARGET_ENGINE_COUNT,
+            "UNIQUE_DELTA_THRESHOLD": reality_check_rules.UNIQUE_DELTA_THRESHOLD,
+            "MANDATORY_ENGINE_COST_FLOOR": reality_check_floors.MANDATORY_ENGINE_COST_FLOOR,
+            "MANDATORY_ENGINE_MAX_QUERY_SHARE": (
+                reality_check_floors.MANDATORY_ENGINE_MAX_QUERY_SHARE
+            ),
+            "CHEAPER_ENGINE_MIN_SAVING_SHARE": tie_break.CHEAPER_ENGINE_MIN_SAVING_SHARE,
+            "CHEAPER_ENGINE_MIN_SAVING_MONTHLY": tie_break.CHEAPER_ENGINE_MIN_SAVING_MONTHLY,
+            "ORPHAN_ENGINE_THRESHOLD": consolidation_validator.ORPHAN_ENGINE_THRESHOLD,
+            "MARGIN_RATIO": aurora_choice.MARGIN_RATIO,
+        }
+        assert got == {
+            "TARGET_ENGINE_COUNT": 2,
+            "UNIQUE_DELTA_THRESHOLD": 15,
+            "MANDATORY_ENGINE_COST_FLOOR": 100,
+            "MANDATORY_ENGINE_MAX_QUERY_SHARE": 0.05,
+            "CHEAPER_ENGINE_MIN_SAVING_SHARE": 0.40,
+            "CHEAPER_ENGINE_MIN_SAVING_MONTHLY": 100.0,
+            "ORPHAN_ENGINE_THRESHOLD": 5,
+            "MARGIN_RATIO": 0.05,
+        }
+        # A count stays an int (it is compared with len() and printed with {}).
+        assert isinstance(reality_check_rules.TARGET_ENGINE_COUNT, int)
+        assert isinstance(consolidation_validator.ORPHAN_ENGINE_THRESHOLD, int)
+
+    def test_the_engine_thresholds(self) -> None:
+        assert (
+            reality_check_floors.OPENSEARCH_MIN_CALLS_PER_SECOND,
+            reality_check_floors.OPENSEARCH_NATIVE_OVERRIDE_MIN_CALLS_PER_SECOND,
+            reality_check_floors.OPENSEARCH_MIN_CORPUS_ROWS_AVG,
+        ) == (1.0, 10.0, 1000.0)
+        assert (
+            HOT_READ_MIN_CALLS_PER_SECOND,
+            cache_overlay.CACHE_MAX_ROWS_AVG,
+            cache_overlay.WRITE_HEAVY_TABLE_MIN_WRITE_SHARE,
+        ) == (1.0, 100.0, 0.5)
+
+    def test_an_unknown_threshold_is_a_key_error(self) -> None:
+        with pytest.raises(KeyError):
+            catalog.threshold("no_such_threshold")
+        with pytest.raises(KeyError):
+            catalog.engine_threshold("dynamodb", "min_calls_per_second")
+
+    def test_a_threshold_needs_a_number_and_a_reason(self, tmp_path: Path) -> None:
+        bad = tmp_path / "routing.toml"
+        bad.write_text('[thresholds.x]\nvalue = true\nwhy = "y"\n', encoding="utf-8")
+        with pytest.raises(CatalogError, match="number"):
+            load_routing_file(bad)
+        bad.write_text("[thresholds.x]\nvalue = 1\n", encoding="utf-8")
+        with pytest.raises(CatalogError):
+            load_routing_file(bad)
+
+
+class TestTheEngineFieldsKeepTheirValues:
+    def test_engine_sets(self) -> None:
+        assert PATTERN_ONLY_ENGINES == {"opensearch"}
+        assert aurora_choice.AURORA_ENGINES == set(AURORA)
+        assert reality_check_rules.AURORA_ENGINES == set(AURORA)
+        assert reality_check_rules.SPECIALIST_ABSORB_SIGNALS == {
+            "opensearch": {"text_search", "aggregations"}
+        }
+        assert reality_check_rules.SPECIALIST_ABSORB_CAPABILITIES == {
+            "opensearch": {"text_pattern_match"}
+        }
+
+    def test_triage_engines(self) -> None:
+        assert triage.ANALYSIS_AGENTS == {
+            "dynamodb",
+            "documentdb",
+            "opensearch",
+            "elasticache",
+            "aurora_postgresql",
+            "aurora_mysql",
+        }
+        assert triage.BASELINE == "aurora"
+        assert triage.DEFERRED == {"keyspaces", "neptune"}
+        assert triage.SOURCE_ENGINE_TO_AURORA == {
+            "mysql": "aurora_mysql",
+            "mariadb": "aurora_mysql",
+            "postgresql": "aurora_postgresql",
+            "postgres": "aurora_postgresql",
+        }
+
+    def test_a_source_engine_names_one_target(self, tmp_path: Path) -> None:
+        for path in sorted((CATALOG / "engines").glob("*.toml")):
+            text = path.read_text(encoding="utf-8")
+            if path.stem == "aurora_mysql":
+                text = text.replace('["mysql", "mariadb"]', '["mysql", "postgres"]')
+            (tmp_path / path.name).write_text(text, encoding="utf-8")
+        with pytest.raises(CatalogError, match="'postgres' is named by both"):
+            load_engine_catalog(tmp_path)
+
+
+class TestTheGatesKeepTheirValues:
+    def test_the_capability_matrix(self) -> None:
+        relational = {
+            "multi_doc_acid",
+            "strong_consistency",
+            "scan_engine",
+            "text_pattern_match",
+            "aggregation",
+            "complex_joins",
+            "sql_admin",
+            "computed_join",
+        }
+        assert ENGINE_CAPABILITIES == {
+            "dynamodb": {"multi_doc_acid", "strong_consistency"},
+            "documentdb": {
+                "multi_doc_acid",
+                "strong_consistency",
+                "aggregation",
+                "text_pattern_match",
+            },
+            "opensearch": {"text_pattern_match", "scan_engine", "aggregation"},
+            "aurora_postgresql": relational,
+            "aurora_mysql": relational,
+        }
+
+    def test_what_requires_a_capability(self) -> None:
+        assert {cap: facts for cap, facts in CAPABILITY_FACTS.items() if facts} == {
+            "text_pattern_match": ("text_search",),
+            "scan_engine": ("ranking_window_function", "offset_window_function", "recursive_cte"),
+            "aggregation": ("needs_aggregation",),
+            "computed_join": ("computed_join_key",),
+        }
+        assert SIGNAL_TO_CAPABILITY == {
+            "text_search": "text_pattern_match",
+            "aggregations": "aggregation",
+            "complex_joins": "complex_joins",
+        }
+
+    def test_the_exclusions_in_order(self) -> None:
+        assert [(r.engine, r.rule_id) for r in EXCLUSION_RULES] == [
+            ("dynamodb", "ddb-no-leading-wildcard"),
+            ("opensearch", "os-no-write-subquery"),
+            ("elasticache", "ec-no-complex-join"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("sql", "excluded"),
+        [
+            ("SELECT * FROM a WHERE x LIKE '%a'", {"dynamodb"}),
+            ("UPDATE t SET a = 1 WHERE id IN (SELECT id FROM u)", {"opensearch"}),
+            ("SELECT * FROM a JOIN b ON a.id = b.a_id JOIN c ON c.id = b.c_id", {"elasticache"}),
+            # One join is below the ElastiCache rule's min of 2.
+            ("SELECT * FROM a JOIN b ON a.id = b.a_id", set()),
+            ("SELECT * FROM a WHERE id = 1", set()),
+        ],
+    )
+    def test_each_exclusion_reads_its_fact(self, sql: str, excluded: set[str]) -> None:
+        assert {r.excluded_engine for r in check_all_exclusions("q1", sql, "mysql")} == excluded
+
+    def _gates_with(self, tmp_path: Path, old: str, new: str) -> Path:
+        path = tmp_path / "gates.toml"
+        text = (CATALOG / "gates.toml").read_text(encoding="utf-8")
+        assert old in text
+        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        return path
+
+    def test_a_gate_that_disagrees_with_its_pattern_files_fails(self, tmp_path: Path) -> None:
+        """The gate and the pattern files' supported flags are one fact (#921)."""
+        path = self._gates_with(
+            tmp_path,
+            'engines = ["documentdb", "opensearch", "aurora_postgresql", "aurora_mysql"]\n'
+            'facts = ["text_search"]',
+            'engines = ["opensearch", "aurora_postgresql", "aurora_mysql"]\n'
+            'facts = ["text_search"]',
+        )
+        with pytest.raises(CatalogError, match="documentdb lacks it"):
+            load_gates_file(path)
+
+    def test_a_gate_naming_a_non_target_fails(self, tmp_path: Path) -> None:
+        path = self._gates_with(
+            tmp_path,
+            'engines = ["aurora_postgresql", "aurora_mysql"]\nfacts = ["computed_join_key"]',
+            'engines = ["neptune", "aurora_postgresql", "aurora_mysql"]\n'
+            'facts = ["computed_join_key"]',
+        )
+        with pytest.raises(CatalogError, match="not routing targets"):
+            load_gates_file(path)
+
+    def test_a_signal_requires_one_capability(self, tmp_path: Path) -> None:
+        path = self._gates_with(
+            tmp_path,
+            'triage_signals = ["complex_joins"]',
+            'triage_signals = ["complex_joins", "aggregations"]',
+        )
+        with pytest.raises(CatalogError, match="'aggregations' requires both"):
+            load_gates_file(path)
+
+
+class TestTheTriageSignalsKeepTheirValues:
+    def test_the_overrides(self) -> None:
+        assert SIGNAL_ENGINE_OVERRIDES == {
+            "text_search": "opensearch",
+            "graph_traversal": "neptune",
+        }
+        assert JUSTIFICATION_GATED_OVERRIDE_ENGINES == {"opensearch"}
+        assert SIGNAL_OVERRIDE_REASON_CODES == {"text_search": ReasonCode.OVERRIDE_TEXT_SEARCH}
+
+    def test_every_signal_triage_builds_has_its_targets(self) -> None:
+        collector = {
+            "metadata": {"source_database": {"engine": "mysql"}},
+            "database_schema": {"tables": []},
+            "queries": {
+                "query_patterns": [
+                    {
+                        "query_id": "q1",
+                        "query_text": "SELECT * FROM posts WHERE title LIKE '%a%'",
+                        "query_type": "SELECT",
+                        "calls_per_second": 20,
+                        "rows_returned_avg": 1,
+                        "has_text_search": True,
+                    }
+                ]
+            },
+        }
+        result = triage.triage(collector)
+        assert result.signals
+        for sig in result.signals:
+            assert sig.targets == catalog.signal_targets(sig.signal), sig.signal
+        by_name = {s.signal: s.targets for s in result.signals}
+        assert by_name["text_search"] == ["opensearch"]
+        assert by_name["key_value_lookups"] == ["dynamodb", "elasticache", "documentdb"]
+
+    def test_a_reason_code_needs_an_override_engine(self, tmp_path: Path) -> None:
+        path = tmp_path / "triage_signals.toml"
+        path.write_text(
+            '[signals.x]\ntargets = []\noverride_reason_code = "override.text_search"\n',
+            encoding="utf-8",
+        )
+        with pytest.raises(CatalogError, match="needs an override_engine"):
+            load_triage_signals_file(path)
+
+    def test_an_unknown_target_fails(self, tmp_path: Path) -> None:
+        path = tmp_path / "triage_signals.toml"
+        path.write_text('[signals.x]\ntargets = ["newdb"]\n', encoding="utf-8")
+        with pytest.raises(CatalogError, match="newdb"):
+            load_triage_signals_file(path)
+
+
+# The pre-#921 in-code bonuses, per engine: pattern type -> (pattern points, complexity points)
+# for a table showing that pattern alone.
+PRE_921_BONUSES = {
+    "dynamodb": {
+        "key-value-lookup": (15, 0),
+        "range-query": (10, 0),
+        "metadata-config-store": (10, 0),
+        "session-store": (12, 0),
+        "time-series-event-log": (10, 0),
+        "write-heavy-ingestion": (8, 0),
+        "bounded-parent-child": (5, -10),
+        "many-to-many-junction": (5, -10),
+        "co-accessed-tables": (5, -10),
+        "adjacency-list": (5, -10),
+    },
+    "documentdb": {
+        "content-management": (12, 0),
+        "product-catalog": (10, 0),
+        "nested-document": (12, 0),
+        "write-time-aggregation": (15, 0),
+        "extended-reference": (10, 0),
+        "flexible-schema": (8, 0),
+        "aggregation-pipeline": (8, 0),
+    },
+    "opensearch": {
+        "full-text-search": (15, 0),
+        "wildcard-search": (10, 0),
+        "fuzzy-search": (10, 0),
+        "regex-search": (5, 0),
+        "time-aggregation": (15, 0),
+        "time-range-query": (10, 0),
+        "high-ingest": (15, 0),
+    },
+    "aurora_mysql": {
+        "cte-recursive": (15, 0),
+        "window-function": (10, 0),
+        "lateral-join": (10, 0),
+        "multi-table-update": (10, 0),
+        "group-concat-pivot": (5, 0),
+        "json-document-query": (10, 0),
+        "fulltext-search": (10, 0),
+        "upsert-duplicate-key": (5, 0),
+    },
+    "aurora_postgresql": {
+        "cte-recursive": (15, 0),
+        "window-function": (10, 0),
+        "lateral-join": (10, 0),
+        "multi-table-update": (10, 0),
+        "group-concat-pivot": (5, 0),
+        "jsonb-operations": (10, 0),
+        "upsert-conflict": (5, 0),
+    },
+}
+PRE_921_FEATURES = {
+    "aurora_mysql": {
+        "cte-recursive",
+        "window-function",
+        "lateral-join",
+        "multi-table-update",
+        "group-concat-pivot",
+        "stored-routine",
+        "json-document-query",
+        "fulltext-search",
+        "upsert-duplicate-key",
+    },
+    "aurora_postgresql": {
+        "cte-recursive",
+        "window-function",
+        "lateral-join",
+        "multi-table-update",
+        "group-concat-pivot",
+        "stored-routine",
+        "jsonb-operations",
+        "array-operations",
+    },
+    "documentdb": {"polymorphic-data", "flexible-schema"},
+}
+
+
+class TestTheTableBonusesKeepTheirValues:
+    def test_every_bonus_is_the_pre_move_value(self) -> None:
+        got: dict[str, dict[str, tuple[int, int]]] = {}
+        for entry in patterns():
+            for engine, support in entry.engines.items():
+                if support.table_bonus or support.complexity_bonus:
+                    got.setdefault(engine, {})[entry.id] = (
+                        support.table_bonus,
+                        support.complexity_bonus,
+                    )
+        assert got == PRE_921_BONUSES
+
+    def test_every_complexity_feature_is_the_pre_move_set(self) -> None:
+        got: dict[str, set[str]] = {}
+        for entry in patterns():
+            for engine, support in entry.engines.items():
+                if support.complexity_feature:
+                    got.setdefault(engine, set()).add(entry.id)
+        assert got == PRE_921_FEATURES
+
+    def test_a_group_counts_once(self) -> None:
+        denorm = ["bounded-parent-child", "many-to-many-junction", "adjacency-list"]
+        assert table_bonuses("dynamodb", denorm) == (5, -10)
+        assert table_bonuses("dynamodb", [*denorm, "key-value-lookup"]) == (20, -10)
+        assert table_bonuses("opensearch", ["wildcard-search", "fuzzy-search"], "search") == (
+            10,
+            0,
+        )
+
+    def test_an_opensearch_profile_reads_only_its_own_fits(self) -> None:
+        both = ["full-text-search", "time-aggregation"]
+        assert table_bonuses("opensearch", both, "search") == (15, 0)
+        assert table_bonuses("opensearch", both, "timeseries") == (15, 0)
+        assert table_bonuses("opensearch", ["time-range-query"], "search") == (0, 0)
+
+    def test_a_pattern_another_engine_owns_adds_nothing(self) -> None:
+        assert table_bonuses("dynamodb", ["full-text-search", "cte-recursive"]) == (0, 0)
+        assert table_bonuses("dynamodb", []) == (0, 0)
+
+    @pytest.mark.parametrize(
+        ("engine", "shown", "points"),
+        [
+            ("aurora_mysql", [], 0),
+            ("aurora_mysql", ["cte-recursive"], 10),
+            ("aurora_mysql", ["cte-recursive", "fulltext-search"], 15),
+            ("aurora_mysql", ["cte-recursive", "fulltext-search", "lateral-join"], 15),
+            ("aurora_postgresql", ["array-operations"], 10),
+            # upsert-conflict has a pattern bonus but is not a PostgreSQL complexity feature.
+            ("aurora_postgresql", ["upsert-conflict"], 0),
+            ("documentdb", ["polymorphic-data", "flexible-schema"], 10),
+            ("dynamodb", ["key-value-lookup"], 0),
+        ],
+    )
+    def test_the_feature_count_tiers(self, engine: str, shown: list[str], points: int) -> None:
+        assert feature_complexity_bonus(engine, shown) == points
+
+    def test_a_feature_both_aurora_engines_report_scores_the_same_on_both(self) -> None:
+        """#920: a shared SQL feature never favours one Aurora engine (Decision 6)."""
+        for entry in patterns():
+            pg, my = (entry.engines.get(e) for e in AURORA)
+            if pg is None or my is None or pg.kind != "fit" or my.kind != "fit":
+                continue
+            assert (pg.table_bonus, pg.complexity_feature) == (
+                my.table_bonus,
+                my.complexity_feature,
+            ), entry.id
+
+    def _catalog_with(self, tmp_path: Path, name: str, old: str, new: str) -> Path:
+        for path in sorted((CATALOG / "patterns").glob("*.toml")):
+            text = path.read_text(encoding="utf-8")
+            if path.stem == name:
+                assert old in text
+                text = text.replace(old, new, 1)
+            (tmp_path / path.name).write_text(text, encoding="utf-8")
+        return tmp_path
+
+    def test_a_group_whose_members_disagree_fails(self, tmp_path: Path) -> None:
+        directory = self._catalog_with(
+            tmp_path,
+            "adjacency-list",
+            'bonus_group = "denormalizable-join"\ntable_bonus = 5',
+            'bonus_group = "denormalizable-join"\ntable_bonus = 6',
+        )
+        with pytest.raises(CatalogError, match="bonus_group 'denormalizable-join'"):
+            load_pattern_catalog(directory)
+
+    def test_a_bonus_is_only_for_a_fit(self, tmp_path: Path) -> None:
+        directory = self._catalog_with(
+            tmp_path,
+            "adjacency-list",
+            '[engines.documentdb]\nkind = "unscored"\nsupported = true\n',
+            '[engines.documentdb]\nkind = "unscored"\nsupported = true\ntable_bonus = 5\n',
+        )
+        with pytest.raises(CatalogError, match="cannot carry"):
+            load_pattern_catalog(directory)
+
+    def test_a_feature_needs_the_engine_tiers(self, tmp_path: Path) -> None:
+        directory = self._catalog_with(
+            tmp_path,
+            "key-value-lookup",
+            "table_bonus = 15",
+            "table_bonus = 15\ncomplexity_feature = true",
+        )
+        with pytest.raises(CatalogError, match="complexity_by_feature_count"):
+            load_pattern_catalog(directory)
+
+
+class TestTheEngineRoleIsTheCatalogs:
+    def test_every_target_engine_reads_its_file(self) -> None:
+        assert {e: _engine_role(e) for e in sorted(triage.ANALYSIS_AGENTS)} == {
+            "aurora_mysql": "relational",
+            "aurora_postgresql": "relational",
+            "documentdb": "document",
+            "dynamodb": "key_value",
+            "elasticache": "cache",
+            "opensearch": "search",
+        }
+
+    def test_an_id_routing_cannot_target_is_other(self) -> None:
+        assert _engine_role("neptune") == "other"
+        assert _engine_role("aurora") == "other"
+        assert _engine_role("not_an_engine") == "other"
+
+    @pytest.mark.parametrize(
+        ("reads", "expected"),
+        [
+            ({"elasticache"}, "cache-aside or write-through caching"),
+            ({"opensearch"}, "CDC / zero-ETL replication into the search index"),
+            ({"documentdb"}, "a CQRS read model fed by a change stream"),
+            ({"dynamodb"}, "a CQRS read model fed by a change stream"),
+            ({"neptune"}, "a CDC or CQRS replication pattern from the write store"),
+        ],
+    )
+    def test_the_replication_pattern_follows_the_role(self, reads: set[str], expected: str):
+        assert expected in _replication_recommendation({"aurora_mysql"}, reads)
+
+    def test_a_cache_read_alone_is_not_a_second_owner(self) -> None:
+        text = _replication_recommendation({"aurora_mysql"}, {"elasticache", "opensearch"})
+        assert "CQRS read model" not in text

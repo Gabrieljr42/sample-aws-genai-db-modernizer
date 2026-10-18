@@ -31,6 +31,7 @@ concerns = [
     "Refresh interval tuning needed: increase to 30s–60s for high-ingest to reduce segment merge overhead.",
     "Shard sizing: aim for 10–50 GB per shard for balanced performance.",
 ]
+table_bonus = 15
 
 [engines.elasticache]
 kind = "unscored"

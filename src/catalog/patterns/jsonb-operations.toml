@@ -36,6 +36,8 @@ why = "JSONB operations (->>, @>, jsonb_agg, jsonb_build_object) for semi-struct
 concerns = [
     "Deeply nested JSONB paths may not be indexable; consider flattening hot paths.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.aurora_mysql]
 kind = "unscored"

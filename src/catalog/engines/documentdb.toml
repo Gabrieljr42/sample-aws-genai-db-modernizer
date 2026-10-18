@@ -6,6 +6,9 @@ ui_picker_order = 2
 status = "active"
 role = "document"
 system_of_record = true
+# Complexity points for a table showing a flexible-shape pattern (a complexity_feature
+# entry): schema flexibility reduces migration complexity (#921).
+complexity_by_feature_count = [10]
 
 [colors]
 ui = "#1d8102"

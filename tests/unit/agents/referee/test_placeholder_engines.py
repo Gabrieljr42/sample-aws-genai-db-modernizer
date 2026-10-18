@@ -69,23 +69,13 @@ NAMING_ALLOWLIST: dict[str, tuple[int, int, str]] = {
     "src/contracts/analysis_output.py": (2, 2, "TargetDatabase enum members"),
     "src/contracts/referee_output.py": (2, 2, "TargetEngine enum members"),
     "src/agents/entrypoint.py": (2, 0, "agent types the entrypoint accepts"),
-    "src/agents/referee/triage.py": (
-        8,
-        0,
-        "DEFERRED (2), the junction_tables / high_fk_density / self_referential_fk "
-        "targets (3) and the write_heavy / time_series / time_range_filters targets (3)",
-    ),
-    "src/agents/referee/assignment_resolver.py": (
-        1,
-        0,
-        "SIGNAL_ENGINE_OVERRIDES graph_traversal; filtered out by PLACEHOLDER_ENGINES",
-    ),
     "src/agents/referee/reality_check_summary.py": (4, 0, "engine-name patterns for summary prose"),
 }
 
 _NAMES = {"neptune", "keyspaces"}
 
-# The triage signals whose targets include a placeholder (checked against triage.py below).
+# The triage signals whose targets include a placeholder (src/catalog/triage_signals.toml,
+# whose graph_traversal override onto Neptune is filtered out by PLACEHOLDER_ENGINES).
 PLACEHOLDER_SIGNALS: dict[str, list[str]] = {
     "junction_tables": ["neptune", "dynamodb"],
     "high_fk_density": ["neptune"],
@@ -140,24 +130,13 @@ def _str_list(node: ast.AST) -> list[str] | None:
 
 
 def _triage_signals_targeting_a_placeholder() -> dict[str, list[str]]:
-    """``{signal: targets}`` for every signal triage.py builds that targets a placeholder."""
-    tree = ast.parse(Path(triage_module.__file__).read_text())
-    out: dict[str, list[str]] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name: str | None = None
-        targets: list[str] | None = None
-        if len(node.args) > 1:  # _signal("name", [targets], ...)
-            name, targets = _str(node.args[0]), _str_list(node.args[1])
-        for kw in node.keywords:  # TriageSignal / _build_signal(signal=..., targets=[...])
-            if kw.arg == "signal":
-                name = _str(kw.value)
-            if kw.arg == "targets":
-                targets = _str_list(kw.value)
-        if name and targets and set(targets) & PLACEHOLDERS:
-            out[name] = targets
-    return out
+    """``{signal: targets}`` for every triage signal that targets a placeholder
+    (``src/catalog/triage_signals.toml``, #921)."""
+    return {
+        name: list(signal.targets)
+        for name, signal in catalog.triage_signals().items()
+        if set(signal.targets) & PLACEHOLDERS
+    }
 
 
 def _make_collector(query_ids):

@@ -20,6 +20,10 @@ concerns = [
     "Requires GSI or adjacency list pattern for bidirectional access",
     "May need data duplication for efficient queries from both sides",
 ]
+# A denormalizable join: a moderate fit that needs design work (more migration effort).
+bonus_group = "denormalizable-join"
+table_bonus = 5
+complexity_bonus = -10
 
 [engines.documentdb]
 kind = "unscored"

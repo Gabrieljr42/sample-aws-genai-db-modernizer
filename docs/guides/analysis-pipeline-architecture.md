@@ -324,7 +324,7 @@ All results are clamped to [0, 100].
 When implementing a new analysis agent (e.g., DynamoDB):
 
 1. **Reuse `build_table_profiles()` and `compute_base_scores()`** — these are target-agnostic
-2. **Write `_apply_dynamodb_adjustments()`** with target-specific bonuses/penalties (e.g., +15 for key-value lookup patterns, -20 for heavy join workloads)
+2. **Write `_apply_dynamodb_adjustments()`** with target-specific structural bonuses/penalties (e.g., -20 for heavy join workloads); a bonus for a pattern (e.g., +15 for a key-value lookup) is the pattern file's `table_bonus`, read with `catalog.patterns.table_bonuses` (#921)
 3. **Reuse `compute_confidence()`** — same formula across all agents, accepts per-target weights
 4. **Reuse `identify_aggregates()` and `detect_co_access()`** — engine-agnostic aggregate identification from FK graphs and query co-access patterns
 5. **Write target-specific detection functions** — PK classification, GSI candidates, denormalization sub-types, secondary index dominance (these are DynamoDB-specific examples; other targets will have their own)

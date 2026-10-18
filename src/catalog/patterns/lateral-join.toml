@@ -37,6 +37,8 @@ why = "LATERAL joins for correlated subqueries in the FROM clause, each row from
 concerns = [
     "Large outer tables with expensive lateral subqueries may need index support.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.aurora_mysql]
 kind = "fit"
@@ -48,6 +50,8 @@ why = "LATERAL derived tables for correlated subqueries in the FROM clause (top-
 concerns = [
     "Large outer tables with expensive lateral subqueries may need index support.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

@@ -41,6 +41,7 @@ from src.agents.referee.utility_statements import is_utility_statement
 from src.agents.referee.write_groups import written_tables
 from src.contracts.assignment_models import Assignment
 from src.contracts.feasibility_models import FeasibilityFinding, FindingKind, FindingSeverity
+from src.shared import catalog
 from src.shared.engine_names import display_engine
 from src.shared.report_facts import REPLICA_READS_NAMED
 from src.tools.sql.query_facts import source_engine_of
@@ -48,20 +49,20 @@ from src.tools.sql.query_facts import source_engine_of
 # Engine -> architectural role, used to recommend the replication pattern that
 # makes an intended read/write split work. A polyglot target routing reads to a
 # cache or search engine while writes stay on the primary is the norm this tool
-# recommends, not an infeasibility — it just needs a replication pattern.
-_ENGINE_ROLE: dict[str, str] = {
-    "elasticache": "cache",
-    "opensearch": "search",
-    "aurora_postgresql": "relational",
-    "aurora_pg": "relational",
-    "aurora_mysql": "relational",
-    "dynamodb": "keyvalue",
-    "documentdb": "document",
-}
+# recommends, not an infeasibility — it just needs a replication pattern. The role
+# is the engine file's (``src/catalog/engines/<id>.toml``, ADR-031 Decision 8, #921);
+# only an engine routing can target has one here, any other id reads as "other".
 
 
 def _engine_role(engine: str) -> str:
-    return _ENGINE_ROLE.get(engine, "other")
+    for entry in catalog.engines():
+        if entry.id == engine and entry.status in catalog.ACTIVE:
+            return entry.role
+    return "other"
+
+
+def _is_system_of_record(engine: str) -> bool:
+    return engine in catalog.engine_ids(status=catalog.ACTIVE, system_of_record=True)
 
 
 def _replication_recommendation(write_engines: set[str], read_dests: set[str]) -> str:
@@ -74,6 +75,7 @@ def _replication_recommendation(write_engines: set[str], read_dests: set[str]) -
     """
     writers = _engine_names(write_engines)
     dest_roles = {_engine_role(e) for e in read_dests}
+    second_owner = any(_is_system_of_record(e) for e in read_dests)
     parts: list[str] = []
     if "cache" in dest_roles:
         parts.append(
@@ -85,7 +87,7 @@ def _replication_recommendation(write_engines: set[str], read_dests: set[str]) -
             "CDC / zero-ETL replication into the search index (DynamoDB zero-ETL to "
             "OpenSearch, or Aurora zero-ETL / AWS DMS CDC to OpenSearch)"
         )
-    if dest_roles & {"relational", "keyvalue", "document"}:
+    if second_owner:
         parts.append(
             "a CQRS read model fed by a change stream (DynamoDB Streams or Aurora "
             "logical replication via Kinesis / EventBridge); use the Saga pattern for "

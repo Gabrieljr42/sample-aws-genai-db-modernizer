@@ -100,6 +100,7 @@ from src.contracts.assignment_models import (
     QueryAssignment,
 )
 from src.contracts.move_ledger import GroupGate, MoveEvidence, MovePass, ReasonCode
+from src.shared import catalog
 from src.shared.engine_names import PLACEHOLDER_ENGINES, display_engine, without_placeholder_engines
 from src.shared.move_reasons import render_group_gates
 from src.shared.signal_labels import signal_noun
@@ -121,9 +122,12 @@ __all__ = [
 # Cache signals (leaderboard_pattern, session_store) are not here: ElastiCache
 # never owns a query, so they are only cache-overlay hints for hot reads (#296,
 # ``cache_overlay.CACHE_HINT_SIGNALS``).
+# The overrides are the triage signal files' ``override_engine``
+# (``src/catalog/triage_signals.toml``, ADR-031 Decision 8, #921).
 SIGNAL_ENGINE_OVERRIDES: dict[str, str] = {
-    "text_search": "opensearch",
-    "graph_traversal": "neptune",
+    name: signal.override_engine
+    for name, signal in catalog.triage_signals().items()
+    if signal.override_engine
 }
 
 # Engines excluded from the SIGNAL_ENGINE_OVERRIDES entry above unless the
@@ -135,14 +139,19 @@ SIGNAL_ENGINE_OVERRIDES: dict[str, str] = {
 # ``reality_check_floors.opensearch_justification`` keeps the override and the
 # reality-check floor applying the same rule, instead of two copies that can
 # drift. Scoped by override engine, not by signal name, so a future signal
-# that also maps to opensearch gets the same gate for free.
-JUSTIFICATION_GATED_OVERRIDE_ENGINES: frozenset[str] = frozenset({"opensearch"})
+# that also maps to opensearch gets the same gate for free: the engine file's
+# ``override_needs_justification`` (#921).
+JUSTIFICATION_GATED_OVERRIDE_ENGINES: frozenset[str] = frozenset(
+    e.id for e in catalog.engines() if e.override_needs_justification
+)
 
-# The move-ledger rule each signal override records (#616). ``graph_traversal``
-# has none: its engine (neptune) is a placeholder, never selected (ADR-031
-# Decision 9), so that override cannot fire.
+# The move-ledger rule each signal override records (#616): the signal file's
+# ``override_reason_code``. An override onto a placeholder engine (neptune) has
+# none: it is never selected (ADR-031 Decision 9), so that override cannot fire.
 SIGNAL_OVERRIDE_REASON_CODES: dict[str, ReasonCode] = {
-    "text_search": ReasonCode.OVERRIDE_TEXT_SEARCH,
+    name: ReasonCode(signal.override_reason_code)
+    for name, signal in catalog.triage_signals().items()
+    if signal.override_reason_code
 }
 
 

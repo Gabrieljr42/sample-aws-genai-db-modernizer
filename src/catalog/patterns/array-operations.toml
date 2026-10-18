@@ -36,6 +36,7 @@ why = "Array operations (ANY, array_agg, unnest) for multi-value attributes. Aur
 concerns = [
     "Very large arrays (>1000 elements) may degrade GIN index performance.",
 ]
+complexity_feature = true
 
 [engines.aurora_mysql]
 kind = "unscored"

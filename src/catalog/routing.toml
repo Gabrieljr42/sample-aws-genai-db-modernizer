@@ -1,0 +1,35 @@
+# Routing thresholds every engine shares (ADR-031 Decision 8, #921). A threshold that
+# applies to one engine alone lives in that engine's file ([thresholds.<name>]). Fields:
+# src/shared/catalog/routing.py.
+
+[thresholds.target_engine_count]
+value = 2
+why = "The reality check tries to stay at or below this many target engines; a third must provide unique, irreplaceable capabilities (ADR-031 Decision 7)."
+
+[thresholds.unique_delta_threshold]
+value = 15
+why = "Points by which an engine must beat the best alternative for a query to count as unique to it; within this margin the query is redundant (reality check differentiation)."
+
+[thresholds.mandatory_engine_cost_floor]
+value = 100
+why = "Fixed monthly cost (USD) an engine kept by a signal override must reach before its workload share is questioned: DynamoDB ($0) and ElastiCache ($50) are cheap enough that a small share is not disproportionate (#167)."
+
+[thresholds.mandatory_engine_max_query_share]
+value = 0.05
+why = "Share of in-scope queries below which a mandatory engine's fixed cost counts as disproportionate to the workload it serves (#167)."
+
+[thresholds.cheaper_engine_min_saving_share]
+value = 0.40
+why = "An engine that scores the source-compatible engine's queries no better replaces it only when at least this much cheaper in standing cost, as a share of the source-compatible engine's cost, inclusive (maintainer decision on #600, ADR-031 Decision 13)."
+
+[thresholds.cheaper_engine_min_saving_monthly]
+value = 100.0
+why = "... and only when it also saves at least this much a month (USD), inclusive (maintainer decision on #600, ADR-031 Decision 13)."
+
+[thresholds.orphan_engine_threshold]
+value = 5
+why = "An engine left with this many queries or fewer (and no hard capability requirement) is a candidate for the reality check's sanity sweep redirect."
+
+[thresholds.aurora_choice_margin_ratio]
+value = 0.05
+why = "For a heterogeneous source, Aurora totals within this share of the larger one are close enough for source features to decide; on the reference samples both Aurora engines scored byte-identically (#381, ADR-031 Decision 6)."

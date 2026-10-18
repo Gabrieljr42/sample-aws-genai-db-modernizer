@@ -15,6 +15,10 @@ catalog_id = "dynamodb-07c"
 score = 70
 why = "Tables frequently accessed together in the same queries (co-access frequency > 50 calls/hour). Strong signal for denormalization into one item collection that a single Query returns (Amazon DynamoDB Developer Guide, Best practices for modeling relational data)."
 concerns = ["Denormalization increases write amplification for updates"]
+# A denormalizable join: a moderate fit that needs design work (more migration effort).
+bonus_group = "denormalizable-join"
+table_bonus = 5
+complexity_bonus = -10
 
 [engines.documentdb]
 kind = "unscored"

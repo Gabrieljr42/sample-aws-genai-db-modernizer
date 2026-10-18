@@ -28,6 +28,7 @@ from src.contracts.analysis_output import (
     ScoreBreakdown,
 )
 from src.shared import catalog
+from src.shared.catalog import patterns as catalog_patterns
 from src.tools.analysis.aurora_common_pattern_catalog import (
     ANTI_PATTERN_BY_ID,
     CACHE_READ_CPS_THRESHOLD,
@@ -669,45 +670,28 @@ def analyze_aurora_common_use_cases(
 # ==========================================================================
 
 
-# SQL features both Aurora engines run natively (#920, catalog PR C): MySQL 8.0, which
-# Aurora MySQL version 3 is compatible with, and PostgreSQL both have window functions,
-# recursive CTEs, LATERAL, stored routines, a multi-table UPDATE/DELETE and a string
-# aggregate. Each engine's analysis reports the ones it sees, and the bonus for one is
-# the same on either engine, so it never favours the engine that used to be the only
-# one with the catalog row (ADR-031 Decision 6 compares the two engines' totals for a
-# heterogeneous source). Where one engine's documentation states more, its catalog fit
-# score says so (src/catalog/patterns/*.toml). The values are the ones each engine's
-# code gave its own rows; moving them into the catalog at the same values is #921.
-AURORA_SHARED_FEATURE_BONUSES: dict[str, int] = {
-    "cte-recursive": 15,
-    "window-function": 10,
-    "lateral-join": 10,
-    "multi-table-update": 10,
-    "group-concat-pivot": 5,
-}
-AURORA_SHARED_FEATURES: frozenset[str] = frozenset(
-    {*AURORA_SHARED_FEATURE_BONUSES, "stored-routine"}
-)
+# The bonus for each Aurora SQL feature a table's queries use is its fit entry's
+# ``table_bonus`` and ``complexity_feature`` in ``src/catalog/patterns/*.toml``, with the
+# engine file's ``complexity_by_feature_count`` (#921). A feature both engines run
+# natively (window functions, recursive CTEs, LATERAL, stored routines, a multi-table
+# UPDATE/DELETE, a string aggregate: MySQL 8.0, which Aurora MySQL version 3 is
+# compatible with, has them all) has the same values on either engine (#920, checked by
+# tests/unit/shared/test_pattern_catalog.py), so it never favours the engine that used to
+# be the only one with the catalog row: ADR-031 Decision 6 compares the two engines'
+# totals for a heterogeneous source. Where one engine's documentation states more, its
+# catalog fit score says so.
 
 
 def apply_aurora_feature_adjustments(
-    pattern: int,
-    complexity: int,
-    pattern_types: set[str],
-    own_bonuses: dict[str, int],
-    own_features: frozenset[str],
+    engine: str, pattern: int, complexity: int, pattern_types: set[str]
 ) -> tuple[int, int]:
     """The pattern and complexity bonuses for the Aurora SQL features a table's queries
-    use: the shared ones (:data:`AURORA_SHARED_FEATURE_BONUSES`) plus the engine's own
-    dialect-only ones (``own_bonuses``, ``own_features``)."""
-    for pattern_type, bonus in {**AURORA_SHARED_FEATURE_BONUSES, **own_bonuses}.items():
-        if pattern_type in pattern_types:
-            pattern += bonus
-    feature_count = len(pattern_types & (AURORA_SHARED_FEATURES | own_features))
-    if feature_count >= 2:
-        complexity += 15
-    elif feature_count >= 1:
-        complexity += 10
+    use on ``engine``, read from the catalog."""
+    bonus, complexity_bonus = catalog_patterns.table_bonuses(engine, pattern_types)
+    pattern += bonus
+    complexity += complexity_bonus + catalog_patterns.feature_complexity_bonus(
+        engine, pattern_types
+    )
     return pattern, complexity
 
 

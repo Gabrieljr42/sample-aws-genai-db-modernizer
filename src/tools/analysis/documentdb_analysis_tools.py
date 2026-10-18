@@ -24,6 +24,7 @@ from src.contracts.analysis_output import (
     WorkloadAnalysis,
 )
 from src.shared import catalog
+from src.shared.catalog import patterns as catalog_patterns
 from src.tools.analysis.documentdb_pattern_catalog import (
     DOCUMENTDB_ANTI_PATTERNS,
     DOCUMENTDB_PATTERNS,
@@ -644,25 +645,12 @@ def _apply_documentdb_adjustments(scores: ScoreBreakdown, profile: TableProfile)
     if profile.has_joins and profile.max_join_count <= 2:
         complexity += 5
 
-    # Strong pattern bonuses
-    if "content-management" in types:
-        pattern += 12
-    if "product-catalog" in types:
-        pattern += 10
-    if "nested-document" in types:
-        pattern += 12
-    if "write-time-aggregation" in types:
-        pattern += 15
-    if "extended-reference" in types:
-        pattern += 10
-    if "flexible-schema" in types:
-        pattern += 8
-    if "aggregation-pipeline" in types:
-        pattern += 8
-
-    # Schema flexibility reduces migration complexity
-    if "polymorphic-data" in types or "flexible-schema" in types:
-        complexity += 10
+    # The per-pattern bonuses, and schema flexibility's lower migration complexity, are
+    # the fit entries' table_bonus / complexity_feature in src/catalog/patterns/*.toml
+    # with the engine file's complexity_by_feature_count (#921).
+    bonus, complexity_bonus = catalog_patterns.table_bonuses("documentdb", types)
+    pattern += bonus
+    complexity += complexity_bonus + catalog_patterns.feature_complexity_bonus("documentdb", types)
 
     # Large tables are fine in DocumentDB (instance-based, not per-item pricing)
     if profile.size_mb > 1000:

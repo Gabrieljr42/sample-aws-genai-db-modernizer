@@ -35,6 +35,7 @@ from src.contracts.analysis_output import (
     TableRecommendation,
     WorkloadAnalysis,
 )
+from src.shared.catalog import patterns as catalog_patterns
 from src.tools.analysis.opensearch_pattern_catalog import (
     ANTI_PATTERN_BY_ID,
     OPENSEARCH_SEARCH_WEIGHTS,
@@ -531,13 +532,8 @@ def _apply_opensearch_search_adjustments(
 
     pattern_types = set(profile.pattern_types)
 
-    # pattern_match bonuses
-    if "full-text-search" in pattern_types:
-        pattern += 15
-    if "wildcard-search" in pattern_types or "fuzzy-search" in pattern_types:
-        pattern += 10
-    if "regex-search" in pattern_types:
-        pattern += 5
+    # pattern_match bonuses: the search fits' table_bonus (src/catalog/patterns, #921)
+    pattern += catalog_patterns.table_bonuses("opensearch", pattern_types, "search")[0]
 
     # complexity: text ratio >= 0.3 → +15
     text_ratio = _compute_text_ratio(table_schema)
@@ -576,13 +572,8 @@ def _apply_opensearch_timeseries_adjustments(
 
     pattern_types = set(profile.pattern_types)
 
-    # pattern_match bonuses
-    if "time-aggregation" in pattern_types:
-        pattern += 15
-    if "time-range-query" in pattern_types:
-        pattern += 10
-    if "high-ingest" in pattern_types:
-        pattern += 15
+    # pattern_match bonuses: the time-series fits' table_bonus (src/catalog/patterns, #921)
+    pattern += catalog_patterns.table_bonuses("opensearch", pattern_types, "timeseries")[0]
 
     # complexity: write ratio >= 0.7 (read_ratio <= 0.3) → +15
     write_ratio = 1.0 - profile.read_ratio

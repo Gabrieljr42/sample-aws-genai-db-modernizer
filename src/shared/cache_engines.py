@@ -18,7 +18,17 @@ from src.shared import catalog
 # The active engines whose catalog ``role`` is ``cache`` (src/catalog/engines, #492).
 CACHE_ENGINES: frozenset[str] = catalog.engine_ids(status=catalog.ACTIVE, role="cache")
 
+
+def cache_threshold(name: str) -> int | float:
+    """The cache layer's ``[thresholds.<name>]`` (its engine file, #921): the one value
+    every cache-layer engine gives it (a ``CatalogError`` if two disagree)."""
+    values = {catalog.engine_threshold(engine, name) for engine in sorted(CACHE_ENGINES)}
+    if len(values) != 1:
+        raise catalog.CatalogError(f"cache engines disagree on thresholds.{name}: {values}")
+    return values.pop()
+
+
 # Hot-read floor (calls/s), inclusive: a read at exactly this rate qualifies.
 # Starting value from #296; tune with data. On the two reference samples every
 # overlay candidate is either >= 1.26 calls/s or <= 0.95.
-HOT_READ_MIN_CALLS_PER_SECOND = 1.0
+HOT_READ_MIN_CALLS_PER_SECOND = cache_threshold("hot_read_min_calls_per_second")

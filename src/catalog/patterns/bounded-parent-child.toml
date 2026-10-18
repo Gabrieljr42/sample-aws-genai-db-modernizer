@@ -18,6 +18,10 @@ concerns = [
     "Requires access pattern analysis to determine embedding vs. item collection",
     "Large item collections need sort key design for efficient range queries",
 ]
+# A denormalizable join: a moderate fit that needs design work (more migration effort).
+bonus_group = "denormalizable-join"
+table_bonus = 5
+complexity_bonus = -10
 
 [engines.documentdb]
 kind = "unscored"

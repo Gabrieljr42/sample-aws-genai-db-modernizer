@@ -34,6 +34,7 @@ concerns = [
     "Complex regex patterns can be expensive even with inverted index.",
     "Requires custom analyzer configuration for optimal performance.",
 ]
+table_bonus = 5
 
 [engines.elasticache]
 kind = "penalized"

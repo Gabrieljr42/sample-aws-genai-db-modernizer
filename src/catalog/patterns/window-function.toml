@@ -37,6 +37,8 @@ why = "Window functions (OVER, PARTITION BY, ROW_NUMBER, RANK, LAG, LEAD) for ru
 concerns = [
     "Large partition sizes may increase memory usage during window computation.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.aurora_mysql]
 kind = "fit"
@@ -48,6 +50,8 @@ why = "Window functions (OVER, PARTITION BY, ROW_NUMBER, RANK, LAG, LEAD) for ru
 concerns = [
     "Large partition sizes may increase memory usage during window computation.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

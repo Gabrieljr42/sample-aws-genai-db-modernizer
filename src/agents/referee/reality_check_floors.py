@@ -32,6 +32,7 @@ from src.agents.referee.reality_check_rules import (
 )
 from src.agents.referee.tie_break import break_tie
 from src.contracts.move_ledger import EngineScore, MoveEvidence, MovePass, ReasonCode
+from src.shared import catalog
 from src.shared.engine_names import SOURCE_ENGINE_DISPLAY_NAMES, display_engine
 from src.tools.sql.query_facts import query_facts
 
@@ -51,11 +52,11 @@ if TYPE_CHECKING:
 # An engine's fixed monthly cost (ENGINE_BASE_COST) must be at least this much
 # to be worth questioning at all -- DynamoDB ($0) and ElastiCache ($50) are
 # cheap enough that a small share is not disproportionate.
-MANDATORY_ENGINE_COST_FLOOR = 100
+MANDATORY_ENGINE_COST_FLOOR = catalog.threshold("mandatory_engine_cost_floor")
 
 # Share of in-scope queries (0-1) below which a mandatory engine's fixed cost
 # counts as disproportionate to the workload it serves.
-MANDATORY_ENGINE_MAX_QUERY_SHARE = 0.05
+MANDATORY_ENGINE_MAX_QUERY_SHARE = catalog.threshold("mandatory_engine_max_query_share")
 
 
 def _mandatory_cost_share_reason(engine: str, qas: list[dict], total_queries: int) -> str | None:
@@ -97,7 +98,7 @@ def _mandatory_cost_share_reason(engine: str, qas: list[dict], total_queries: in
 # same cost as never having it, so one call/s is the lowest traffic worth a
 # dedicated store at all. On the wordpress reference sample, the 4 queries
 # OpenSearch was recommended for totalled well under 1 call/s combined.
-OPENSEARCH_MIN_CALLS_PER_SECOND = 1.0
+OPENSEARCH_MIN_CALLS_PER_SECOND = catalog.engine_threshold("opensearch", "min_calls_per_second")
 
 # Source database engines whose own text search (MySQL FULLTEXT via
 # MATCH...AGAINST, Postgres tsvector/pg_trgm) already covers these patterns
@@ -113,7 +114,9 @@ NATIVE_TEXT_SEARCH_SOURCE_ENGINES = frozenset({"mysql", "mariadb", "postgresql",
 # earns its $150+/mo on top of that if the traffic is an order of magnitude
 # higher, not merely above the floor that justifies a search engine starting
 # from nothing.
-OPENSEARCH_NATIVE_OVERRIDE_MIN_CALLS_PER_SECOND = 10.0
+OPENSEARCH_NATIVE_OVERRIDE_MIN_CALLS_PER_SECOND = catalog.engine_threshold(
+    "opensearch", "native_override_min_calls_per_second"
+)
 
 # A query returning this many rows on average, even below the traffic floor,
 # signals a corpus large enough that a dedicated index can still earn its
@@ -123,7 +126,7 @@ OPENSEARCH_NATIVE_OVERRIDE_MIN_CALLS_PER_SECOND = 10.0
 # a query's own result set averages), which is the only per-query signal
 # available -- a query that returns a small page from a huge corpus looks
 # the same as one that returns everything from a small one.
-OPENSEARCH_MIN_CORPUS_ROWS_AVG = 1000.0
+OPENSEARCH_MIN_CORPUS_ROWS_AVG = catalog.engine_threshold("opensearch", "min_corpus_rows_avg")
 
 
 def _query_has_search_depth(query_text: str | None, source_engine: str | None = None) -> bool:

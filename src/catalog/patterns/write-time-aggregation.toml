@@ -22,6 +22,7 @@ concerns = [
     "Requires CDC pipeline (DMS/Lambda) to maintain pre-aggregated documents",
     "Stale data window between write and CDC propagation",
 ]
+table_bonus = 15
 
 [engines.opensearch]
 kind = "unscored"

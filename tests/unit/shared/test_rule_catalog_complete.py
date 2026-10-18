@@ -12,7 +12,7 @@ generated constants are guarded by ``test_engine_catalog.py`` and
    a pattern cannot silently default to "unsupported": it fails here with the exact list
    of missing decisions.
 2. **No routing rule outside the catalog.** The constants already moved (slices 1 and 2
-   of #492) hold no engine or pattern literal any more. Everything that still could encode
+   of #492, then #1002 and #921) hold no engine or pattern literal any more. Everything that still could encode
    a rule is listed below, by file, with the reason it is still there: every module-level
    constant (any name case) or class attribute that names an engine id or a pattern type
    in a literal (enum members excepted: they are the contract vocabularies, pinned to the
@@ -143,17 +143,23 @@ NUMERIC_DIRS = (
 CATALOG_ACCESSORS = {
     "_guidance",
     "_hint",
+    "apply_aurora_feature_adjustments",
+    "cache_threshold",
     "capability_engines",
     "catalog_anti_patterns",
     "catalog_entries",
     "catalog_patterns",
     "engine_ids",
+    "engine_threshold",
+    "feature_complexity_bonus",
     "pattern",
     "profile_pattern_types",
     "score_weights",
+    "signal_targets",
+    "table_bonuses",
+    "threshold",
 }
 
-_ROUTING = "routing rule still in code (#492: moves into the catalog)"
 _PINNED = (
     "engine list pinned to the catalog's active engines by "
     "test_engine_catalog.TestEveryKnownEngineHasACatalogFile"
@@ -167,56 +173,13 @@ _CONTRACT = (
 # Module-level constants (tables and single values) that name an engine id or a pattern
 # type in a literal.   path: (names, why it is still there)
 ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
-    "src/agents/referee/assignment_resolver.py": (
-        frozenset(
-            {
-                "SIGNAL_ENGINE_OVERRIDES",
-                "JUSTIFICATION_GATED_OVERRIDE_ENGINES",
-                "SIGNAL_OVERRIDE_REASON_CODES",
-            }
-        ),
-        _ROUTING + ": triage signal overrides (the triage-targets step)",
-    ),
     "src/agents/referee/aurora_choice.py": (
-        frozenset({"AURORA_ENGINES", "EXACT_TIE_RULE_REASON"}),
-        _ROUTING + ": the heterogeneous Aurora choice",
-    ),
-    "src/tools/analysis/aurora_common_analysis_tools.py": (
-        frozenset({"AURORA_SHARED_FEATURES", "AURORA_SHARED_FEATURE_BONUSES"}),
-        _ROUTING + ": the bonus for a SQL feature both Aurora engines have, one table both apply "
-        "(#920, was one row per engine in each engine's code); into the catalog at the same "
-        "values with the other in-code bonuses (#921)",
-    ),
-    "src/agents/referee/capability_registry.py": (
-        frozenset({"ENGINE_CAPABILITIES", "SIGNAL_TO_CAPABILITY", "CAPABILITY_FACTS"}),
-        _ROUTING + ": the hard capability gate (collapses into the pattern files' supported flags);"
-        " CAPABILITY_FACTS names the text_search query fact, which shares the pattern's name",
+        frozenset({"EXACT_TIE_RULE_REASON"}),
+        _WORDING + ": the reason text an exact Aurora tie records (ADR-031 Decision 6)",
     ),
     "src/shared/capability_labels.py": (
         frozenset({"CAPABILITY_REDESIGN_HINTS"}),
         _WORDING + ": how to redesign a query a fallback rule placed (#729)",
-    ),
-    "src/agents/referee/engine_exclusions.py": (
-        frozenset({"EXCLUSION_RULES"}),
-        _ROUTING + ": hard exclusions",
-    ),
-    "src/agents/referee/reality_check_rules.py": (
-        frozenset(
-            {
-                "AURORA_ENGINES",
-                "SPECIALIST_ABSORB_SIGNALS",
-                "SPECIALIST_ABSORB_CAPABILITIES",
-            }
-        ),
-        _ROUTING + ": reality-check absorption",
-    ),
-    "src/agents/referee/triage.py": (
-        frozenset({"ANALYSIS_AGENTS", "BASELINE", "SOURCE_ENGINE_TO_AURORA", "DEFERRED"}),
-        _ROUTING + ": triage candidates; ANALYSIS_AGENTS and DEFERRED are also " + _PINNED,
-    ),
-    "src/shared/engine_capabilities.py": (
-        frozenset({"PATTERN_ONLY_ENGINES"}),
-        _ROUTING + ": an engine-wide scoring property (an engine-file field)",
     ),
     "src/agents/entrypoint.py": (
         frozenset({"ANALYSIS_AGENTS"}),
@@ -291,11 +254,6 @@ ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
         _PLUMBING,
     ),
     "src/tools/schema/design_metrics.py": (frozenset({"METRIC_ENGINES"}), _PLUMBING),
-    "src/agents/referee/feasibility_review.py": (
-        frozenset({"_ENGINE_ROLE"}),
-        _ROUTING + ": a hand-kept engine-to-family table that duplicates the engine "
-        "files' role (and the wave engine sets built from it); derive it from the catalog",
-    ),
     "src/agents/referee/migration_wave_builders.py": (frozenset({"_ALREADY_AURORA"}), _WORDING),
     "src/agents/referee/reality_check_summary.py": (frozenset({"_ENGINE_ALIASES"}), _WORDING),
     "src/agents/referee/synthesis_grounding.py": (frozenset({"_ENGINE_PATTERNS"}), _WORDING),
@@ -324,7 +282,6 @@ ENGINE_OR_PATTERN_TABLES: dict[str, tuple[frozenset[str], str]] = {
 # weights are the engine files' [score_weights] since #1002, so a new table fails here.
 SCORE_WEIGHT_TABLES: dict[str, tuple[frozenset[str], str]] = {}
 
-_THRESHOLD = _ROUTING + ": a threshold or floor (engine files' floors, sizing)"
 _DETECTION = "a detector threshold: detection stays in code (#491 facts module)"
 _BUDGET = "an output or model budget, not a routing rule"
 # Module-level numeric constants in the routing directories.
@@ -335,52 +292,25 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
         "the most rows a small reference table holds (#920, shared with DynamoDB's "
         "metadata-config-store detector)",
     ),
-    "src/agents/referee/aurora_choice.py": (frozenset({"MARGIN_RATIO"}), _THRESHOLD),
-    "src/agents/referee/cache_overlay.py": (
-        frozenset({"CACHE_MAX_ROWS_AVG", "WRITE_HEAVY_TABLE_MIN_WRITE_SHARE"}),
-        _THRESHOLD,
-    ),
     "src/agents/referee/consolidation_validator.py": (
-        frozenset({"MAX_QUERIES_PER_CALL", "ORPHAN_ENGINE_THRESHOLD"}),
-        _THRESHOLD + "; MAX_QUERIES_PER_CALL is a model batch size",
-    ),
-    "src/agents/referee/reality_check_floors.py": (
-        frozenset(
-            {
-                "MANDATORY_ENGINE_COST_FLOOR",
-                "MANDATORY_ENGINE_MAX_QUERY_SHARE",
-                "OPENSEARCH_MIN_CALLS_PER_SECOND",
-                "OPENSEARCH_NATIVE_OVERRIDE_MIN_CALLS_PER_SECOND",
-                "OPENSEARCH_MIN_CORPUS_ROWS_AVG",
-            }
-        ),
-        _THRESHOLD,
-    ),
-    "src/agents/referee/reality_check_rules.py": (
-        frozenset({"TARGET_ENGINE_COUNT", "UNIQUE_DELTA_THRESHOLD"}),
-        _THRESHOLD,
-    ),
-    "src/agents/referee/tie_break.py": (
-        frozenset({"CHEAPER_ENGINE_MIN_SAVING_SHARE", "CHEAPER_ENGINE_MIN_SAVING_MONTHLY"}),
-        _THRESHOLD,
+        frozenset({"MAX_QUERIES_PER_CALL"}),
+        _BUDGET + ": the model batch size of a consolidation validation call",
     ),
     "src/agents/referee/transaction_shape.py": (
         frozenset({"TRANSACTION_MAX_ITEMS"}),
         _DETECTION + ": DynamoDB's 100-item transaction quota bounds the shape (#493)",
     ),
-    "src/shared/cache_engines.py": (frozenset({"HOT_READ_MIN_CALLS_PER_SECOND"}), _THRESHOLD),
     "src/tools/analysis/aurora_common_pattern_catalog.py": (
         frozenset(
             {
                 "STANDARD_CRUD_MIN_CPS",
-                "BASELINE_PATTERN_MATCH_FLOOR",
                 "HIGH_FREQUENCY_PK_LOOKUP_CPS",
                 "CACHE_READ_CPS_THRESHOLD",
                 "HIGH_VOLUME_TEXT_SEARCH_CPS",
                 "TEXT_COLUMN_RATIO_THRESHOLD",
             }
         ),
-        _DETECTION + "; BASELINE_PATTERN_MATCH_FLOOR is a score floor (engine file)",
+        _DETECTION,
     ),
     "src/tools/analysis/dynamodb_analysis_tools.py": (
         frozenset(
@@ -479,24 +409,28 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
     ),
 }
 
-_INLINE_DETECTION = (
-    "per-pattern detection and score adjustments inline in the analysis code "
-    "(#491 facts module, then the catalog's per-engine score)"
+_INLINE_DETECTION = "per-pattern detection inline in the analysis code (#491 facts module)"
+# The per-pattern score adjustments are the pattern files' table_bonus (#921); what is left
+# counts a table's join and multi-table-write queries for the relational baseline.
+_JOIN_COUNTS = (
+    _INLINE_DETECTION + ": the join and multi-table-write query counts the relational "
+    "baseline score reads"
 )
 # String literals naming a pattern type inside function bodies (not in a module-level
 # constant or a docstring), counted per file. path: (count, why)
 INLINE_PATTERN_LITERALS: dict[str, tuple[int, str]] = {
     "src/tools/analysis/aurora_common_analysis_tools.py": (1, _INLINE_DETECTION),
-    "src/tools/analysis/aurora_mysql_analysis_tools.py": (9, _INLINE_DETECTION),
-    "src/tools/analysis/aurora_pg_analysis_tools.py": (7, _INLINE_DETECTION),
-    "src/tools/analysis/documentdb_analysis_tools.py": (9, _INLINE_DETECTION),
-    "src/tools/analysis/dynamodb_analysis_tools.py": (10, _INLINE_DETECTION),
+    "src/tools/analysis/aurora_mysql_analysis_tools.py": (3, _JOIN_COUNTS),
+    "src/tools/analysis/aurora_pg_analysis_tools.py": (3, _JOIN_COUNTS),
     "src/contracts/dynamodb_decision_trace.py": (
         4,
         "the DynamoDB denormalization subtypes the decision trace contract publishes "
         "(moved from the analysis tools, #973)",
     ),
-    "src/tools/analysis/opensearch_analysis_tools.py": (13, _INLINE_DETECTION),
+    "src/tools/analysis/opensearch_analysis_tools.py": (
+        6,
+        _INLINE_DETECTION + ": the time-series classification's timestamp patterns, read twice",
+    ),
     "src/tools/analysis/redis_analysis_tools.py": (
         11,
         "ElastiCache builds its patterns inline; test_pattern_catalog checks them against "
@@ -512,18 +446,14 @@ INLINE_PATTERN_LITERALS: dict[str, tuple[int, str]] = {
 
 
 _INLINE_ENGINE_ROUTING = (
-    "engine-specific branches inside routing code (#492: becomes catalog lookups, "
-    "engine-file fields or #491 facts)"
+    "engine-specific branches inside routing code: behaviour, not data, so #921 left them; "
+    "each becomes an engine-file field or a role lookup in its own step (#1081)"
 )
 # Engine-id string literals inside function bodies (not a module constant, class
 # attribute, docstring or catalog lookup key), counted per file in NUMERIC_DIRS: the
 # shape of a hard-coded routing branch (``if engine == "dynamodb": ...``).
 # path: (count, why)
 INLINE_ENGINE_LITERALS: dict[str, tuple[int, str]] = {
-    "src/agents/referee/triage.py": (
-        47,
-        "triage signal targets=[...] lists and agent selection (the triage-targets step)",
-    ),
     "src/agents/referee/aurora_choice.py": (10, _INLINE_ENGINE_ROUTING + ": the Aurora choice"),
     "src/agents/referee/reality_check_floors.py": (
         7,

@@ -34,6 +34,9 @@ concerns = [
     "Leading wildcard queries (LIKE '%term') are expensive in both SQL and OpenSearch.",
     "For prefix queries, consider edge-ngram tokenizer for better performance.",
 ]
+# Wildcard or fuzzy matching: one bonus for a table showing either.
+bonus_group = "approximate-match"
+table_bonus = 10
 
 [engines.elasticache]
 kind = "penalized"

@@ -54,35 +54,25 @@ from src.agents.referee.capability_registry import (
     requires_aggregation_capability,
 )
 from src.agents.referee.table_resolution import SourceScope
+from src.shared import catalog
 from src.tools.analysis.key_access import KeyAccessReader
 from src.tools.sql.query_facts import ColumnTypes, query_facts, source_engine_of
 
 logger = logging.getLogger(__name__)
 
-# Agents that run as ECS analysis tasks
-ANALYSIS_AGENTS = frozenset(
-    {
-        "dynamodb",
-        "documentdb",
-        "opensearch",
-        "elasticache",
-        "aurora_postgresql",
-        "aurora_mysql",
-    }
-)
+# Agents that run as ECS analysis tasks: every engine routing can target (the catalog's
+# active engines, ADR-031 Decision 8).
+ANALYSIS_AGENTS = catalog.engine_ids(status=catalog.ACTIVE)
 
 # Aurora is the relational baseline — always selected based on source engine.
 # The specific agent (aurora_postgresql or aurora_mysql) competes alongside
-# NoSQL agents to score queries for relational fitness.
-BASELINE = "aurora"
+# NoSQL agents to score queries for relational fitness. The id is the catalog's one
+# legacy relational engine (the generic id older reports carry).
+(BASELINE,) = catalog.engine_ids(status="legacy", role="relational")
 
-# Map source engine to the matching Aurora analysis agent
-SOURCE_ENGINE_TO_AURORA: dict[str, str] = {
-    "mysql": "aurora_mysql",
-    "mariadb": "aurora_mysql",
-    "postgresql": "aurora_postgresql",
-    "postgres": "aurora_postgresql",
-}
+# Map source engine to the matching Aurora analysis agent: each Aurora engine file's
+# ``source_engines`` (#921).
+SOURCE_ENGINE_TO_AURORA: dict[str, str] = catalog.source_engine_dialects()
 
 # Relational source engines with no Aurora dialect of their own (#381). Neither
 # Aurora engine is a native match, so instead of skipping both (the pre-#381
@@ -94,8 +84,8 @@ SOURCE_ENGINE_TO_AURORA: dict[str, str] = {
 HETEROGENEOUS_SOURCE_ENGINES = frozenset({"sqlserver", "oracle", "db2"})
 
 # Agents deferred to Phase 1 — signals tracked for Synthesis reporting
-# but not dispatched as ECS tasks.
-DEFERRED = frozenset({"keyspaces", "neptune"})
+# but not dispatched as ECS tasks: the catalog's future placeholders (Decision 9).
+DEFERRED = catalog.engine_ids(status="future")
 
 ALL_AGENTS = ANALYSIS_AGENTS | {BASELINE} | DEFERRED
 
@@ -179,7 +169,7 @@ def _detect_schema_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             TriageSignal(
                 signal="json_columns",
-                targets=["documentdb"],
+                targets=catalog.signal_targets("json_columns"),
                 evidence=f"JSON columns in: {', '.join(json_tables[:5])}",
                 table_ids=json_tables,
             )
@@ -194,7 +184,7 @@ def _detect_schema_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             TriageSignal(
                 signal="junction_tables",
-                targets=["neptune", "dynamodb"],
+                targets=catalog.signal_targets("junction_tables"),
                 evidence=f"{len(junction)} junction tables: {', '.join(junction[:5])}",
                 table_ids=junction,
             )
@@ -207,7 +197,7 @@ def _detect_schema_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             TriageSignal(
                 signal="high_fk_density",
-                targets=["neptune"],
+                targets=catalog.signal_targets("high_fk_density"),
                 evidence=f"{total_fks} FKs across {len(tables)} tables (avg {avg_fks:.1f}/table)",
             )
         )
@@ -226,7 +216,7 @@ def _detect_schema_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             TriageSignal(
                 signal="self_referential_fk",
-                targets=["neptune", "dynamodb"],
+                targets=catalog.signal_targets("self_referential_fk"),
                 evidence=f"Self-referential FK in: {', '.join(self_ref[:5])}",
                 table_ids=self_ref,
             )
@@ -238,7 +228,7 @@ def _detect_schema_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             TriageSignal(
                 signal="eav_pattern",
-                targets=["dynamodb", "documentdb"],
+                targets=catalog.signal_targets("eav_pattern"),
                 evidence=f"EAV tables: {', '.join(eav_tables[:5])}",
                 table_ids=eav_tables,
             )
@@ -422,7 +412,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "key_value_lookups",
-                ["dynamodb", "elasticache", "documentdb"],
                 "key-value lookup queries (PK reads, ≤5 rows, MAX/MIN)",
                 kv_lookups,
             )
@@ -431,7 +420,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "range_queries",
-                ["dynamodb", "documentdb"],
                 "range queries (PK + sort key range with ORDER BY)",
                 range_queries,
             )
@@ -440,7 +428,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "status_filters",
-                ["aurora", "documentdb"],
                 "status-based filter queries (WHERE status=?, EXISTS, IS NULL)",
                 status_filters,
             )
@@ -449,7 +436,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "write_heavy",
-                ["dynamodb", "keyspaces", "documentdb"],
                 "high-frequency write queries (≥5 cps)",
                 write_heavy,
             )
@@ -458,7 +444,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "low_frequency_writes",
-                ["dynamodb", "documentdb"],
                 "low-frequency write queries (<5 cps) — infrequent but may be business-critical",
                 low_freq_writes,
             )
@@ -467,7 +452,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "low_frequency_reads",
-                ["dynamodb", "documentdb"],
                 "low-frequency read queries (<0.1 cps) — admin, reporting, or health checks",
                 low_freq_reads,
             )
@@ -476,7 +460,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "complex_joins",
-                ["documentdb", "aurora"],
                 "complex join queries (3+ tables)",
                 complex_joins,
             )
@@ -485,7 +468,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "aggregations",
-                ["documentdb", "opensearch"],
                 "aggregation queries (SUM/COUNT/AVG with GROUP BY or JOINs)",
                 aggregations,
             )
@@ -494,7 +476,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "large_scans",
-                ["aurora", "opensearch"],
                 "large scan / bulk count queries",
                 large_scans,
             )
@@ -502,7 +483,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
     if timeseries:
         time_series = _signal(
             "time_series",
-            ["dynamodb", "keyspaces", "documentdb", "opensearch"],
             "time-series / event log queries (timestamp in WHERE/ORDER BY)",
             timeseries,
         )
@@ -516,7 +496,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "session_store",
-                ["dynamodb", "elasticache", "documentdb"],
                 "session store queries (session/token keywords)",
                 session_store,
             )
@@ -525,7 +504,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "metadata_config",
-                ["dynamodb", "documentdb"],
                 "metadata/config store queries (small result, high reads)",
                 metadata_config,
             )
@@ -534,7 +512,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "text_search",
-                ["opensearch"],
                 "text search queries (LIKE, MATCH, tsvector)",
                 text_searches,
             )
@@ -543,7 +520,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "time_range_filters",
-                ["dynamodb", "keyspaces", "opensearch", "documentdb"],
                 "time-range filter queries",
                 time_ranges,
             )
@@ -552,7 +528,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "leaderboard_pattern",
-                ["elasticache"],
                 f"hot leaderboard / top-N queries (ORDER BY + LIMIT, TOP or FETCH, "
                 f"≥{HOT_READ_MIN_CALLS_PER_SECOND:g} calls/s)",
                 leaderboards,
@@ -562,7 +537,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "subqueries",
-                ["aurora"],
                 "queries with subqueries (correlated or EXISTS)",
                 subqueries,
             )
@@ -571,7 +545,6 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
         signals.append(
             _signal(
                 "high_frequency_reads",
-                ["dynamodb", "elasticache", "documentdb"],
                 "high-frequency read queries (≥10 cps)",
                 high_freq_reads,
             )
@@ -580,13 +553,13 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
     return signals
 
 
-def _build_signal(
-    signal: str, targets: list[str], description: str, query_ids: list[str]
-) -> TriageSignal:
+def _build_signal(signal: str, description: str, query_ids: list[str]) -> TriageSignal:
+    """The ``signal`` built from ``query_ids``, its targets read from the catalog
+    (``src/catalog/triage_signals.toml``, #921)."""
     deduped = list(dict.fromkeys(query_ids))
     return TriageSignal(
         signal=signal,
-        targets=targets,
+        targets=catalog.signal_targets(signal),
         evidence=f"{len(deduped)} {description}",
         query_ids=deduped,
         query_count=len(deduped),

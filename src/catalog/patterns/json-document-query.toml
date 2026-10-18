@@ -41,6 +41,8 @@ why = "JSON document queries using JSON_EXTRACT, JSON_CONTAINS, or ->> operator.
 concerns = [
     "JSON column indexes require generated columns or multi-valued index syntax.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

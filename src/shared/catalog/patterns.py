@@ -92,6 +92,13 @@ Engine entry fields (``[engines.<engine_id>]``, one per engine):
   alternative-engine suggestion as a whole.
 - ``concerns``: the fit's known caveats; ``profile``: OpenSearch's weight profile
   (``search`` or ``timeseries``).
+- ``table_bonus`` / ``complexity_bonus`` (``fit`` only, #921): the points the engine's
+  table-level score adds to the pattern-match and complexity dimensions when a table
+  shows the pattern (the engine's analysis adjustments, before the 0-100 clamp).
+  ``bonus_group``: the engine's entries that share a group give their bonuses once for
+  a table showing any of them, and must agree on both values (a DynamoDB denormalizable
+  join; OpenSearch's wildcard or fuzzy match). ``complexity_feature``: the pattern counts
+  toward the engine file's ``complexity_by_feature_count`` (the Aurora SQL features).
 """
 
 from __future__ import annotations
@@ -105,7 +112,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.shared.catalog.engines import CatalogError, engine_ids
+from src.shared.catalog.engines import CatalogError, engine_entry, engine_ids, engines
 
 PATTERNS_DIR = Path(__file__).resolve().parents[2] / "catalog" / "patterns"
 
@@ -170,7 +177,20 @@ _KIND_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     # kind: (required, allowed beyond kind/supported/why)
     "fit": (
         frozenset({"catalog", "catalog_id"}),
-        frozenset({"catalog", "catalog_id", "score", "confidence", "concerns", "profile"}),
+        frozenset(
+            {
+                "catalog",
+                "catalog_id",
+                "score",
+                "confidence",
+                "concerns",
+                "profile",
+                "table_bonus",
+                "complexity_bonus",
+                "bonus_group",
+                "complexity_feature",
+            }
+        ),
     ),
     "anti_pattern": (
         frozenset({"catalog", "catalog_id", "severity"}),
@@ -215,6 +235,10 @@ class EngineSupport(BaseModel):
     concerns: tuple[str, ...] = ()
     guidance: str = ""
     guidance_names_engine: bool = False
+    table_bonus: int = 0
+    complexity_bonus: int = 0
+    bonus_group: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9-]*$")
+    complexity_feature: bool = False
 
     @model_validator(mode="after")
     def _fields_match_the_kind(self) -> EngineSupport:
@@ -236,6 +260,8 @@ class EngineSupport(BaseModel):
             raise ValueError("profile is required on an OpenSearch fit and allowed nowhere else")
         if self.guidance_names_engine and not self.guidance:
             raise ValueError("guidance_names_engine needs a guidance")
+        if self.bonus_group and not (self.table_bonus or self.complexity_bonus):
+            raise ValueError("a bonus_group entry carries a table_bonus or complexity_bonus")
         if self.parity_anchor is not None:
             if self.class_score is None:
                 raise ValueError("a parity_anchor entry needs the class_score it borrows")
@@ -258,6 +284,10 @@ _ALL_OPTIONAL = (
     "concerns",
     "guidance",
     "guidance_names_engine",
+    "table_bonus",
+    "complexity_bonus",
+    "bonus_group",
+    "complexity_feature",
 )
 
 
@@ -402,9 +432,34 @@ def _check_parity_anchors(entries: tuple[PatternEntry, ...]) -> None:
                 raise CatalogError(f"{where}: why cites ({source.id}, {support.class_score})")
 
 
+def _check_bonus_groups(entries: tuple[PatternEntry, ...]) -> None:
+    """An engine's entries in one ``bonus_group`` agree on its bonuses (#921)."""
+    seen: dict[tuple[str, str], tuple[str, int, int]] = {}
+    for entry in entries:
+        for engine, support in entry.engines.items():
+            if not support.bonus_group:
+                continue
+            values = (support.table_bonus, support.complexity_bonus)
+            first = seen.setdefault((engine, support.bonus_group), (entry.id, *values))
+            if first[1:] != values:
+                raise CatalogError(
+                    f"{entry.id}.toml [engines.{engine}]: bonus_group {support.bonus_group!r} "
+                    f"gives {values}, but {first[0]}.toml gives {first[1:]}"
+                )
+
+
 def _check_across_files(entries: Iterable[PatternEntry]) -> None:
     entries = tuple(entries)
     _check_parity_anchors(entries)
+    _check_bonus_groups(entries)
+    tiered = {engine.id for engine in engines() if engine.complexity_by_feature_count}
+    for entry in entries:
+        for engine_id, support in entry.engines.items():
+            if support.complexity_feature and engine_id not in tiered:
+                raise CatalogError(
+                    f"{entry.id}.toml [engines.{engine_id}]: a complexity_feature needs the "
+                    "engine file's complexity_by_feature_count"
+                )
     # Every engine except a legacy id may (and, by the completeness test, must) have an
     # entry; stated by exclusion so a status added later is covered.
     decided = engine_ids() - engine_ids(status="legacy")
@@ -550,6 +605,52 @@ def profile_pattern_types(profile: Profile) -> frozenset[str]:
         for support in entry.engines.values()
         if support.kind == "fit" and support.profile == profile
     )
+
+
+def table_bonuses(
+    engine: str, pattern_types: Iterable[str], profile: Profile | None = None
+) -> tuple[int, int]:
+    """``(pattern_match, complexity)`` points ``engine``'s table score adds for a table
+    showing ``pattern_types`` (each fit entry's ``table_bonus`` / ``complexity_bonus``, a
+    ``bonus_group`` counted once), limited to the fits of one OpenSearch ``profile`` when
+    given (#921)."""
+    shown = set(pattern_types)
+    pattern_points = complexity_points = 0
+    groups: set[str] = set()
+    for entry in patterns():
+        support = entry.engines.get(engine)
+        if support is None or support.kind != "fit" or entry.id not in shown:
+            continue
+        if profile is not None and support.profile != profile:
+            continue
+        if support.bonus_group:
+            if support.bonus_group in groups:
+                continue
+            groups.add(support.bonus_group)
+        pattern_points += support.table_bonus
+        complexity_points += support.complexity_bonus
+    return pattern_points, complexity_points
+
+
+def complexity_features(engine: str) -> frozenset[str]:
+    """The pattern types whose fit entry on ``engine`` is a ``complexity_feature``."""
+    return frozenset(
+        entry.id
+        for entry in patterns()
+        if (support := entry.engines.get(engine)) is not None
+        and support.kind == "fit"
+        and support.complexity_feature
+    )
+
+
+def feature_complexity_bonus(engine: str, pattern_types: Iterable[str]) -> int:
+    """The complexity points for the ``complexity_feature`` patterns a table shows on
+    ``engine``: the engine file's ``complexity_by_feature_count`` for that count (its last
+    value for any higher count), 0 for none (#921)."""
+    entry = engine_entry(engine)
+    tiers = entry.complexity_by_feature_count if entry else ()
+    count = len(set(pattern_types) & complexity_features(engine))
+    return tiers[min(count, len(tiers)) - 1] if count and tiers else 0
 
 
 def missing_engine_entries(entries: Iterable[PatternEntry], engines: Iterable[str]) -> list[str]:

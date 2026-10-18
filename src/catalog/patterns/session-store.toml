@@ -20,6 +20,7 @@ why = "User session data read and written by its session or user key at high thr
 concerns = [
     "Without TTL, application must manage session cleanup to avoid unbounded growth",
 ]
+table_bonus = 12
 
 [engines.documentdb]
 kind = "unscored"

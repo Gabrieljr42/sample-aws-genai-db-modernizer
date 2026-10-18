@@ -182,27 +182,18 @@ class TestEveryKnownEngineHasACatalogFile:
 
 
 def _triage_signal_targets() -> set[str]:
-    """Every engine a triage signal in triage.py targets.
+    """Every engine a triage signal targets: ``src/catalog/triage_signals.toml`` (#921).
 
-    Signals are built as ``TriageSignal(..., targets=[...])`` or ``_signal("name", [...])``.
+    triage.py builds no ``targets=[...]`` list of its own any more; the AST check keeps
+    one from coming back.
     """
     tree = ast.parse(Path(triage.__file__).read_text(encoding="utf-8"))
-    lists: list[ast.List] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        lists += [
-            k.value for k in node.keywords if k.arg == "targets" and isinstance(k.value, ast.List)
-        ]
-        if len(node.args) > 1 and isinstance(node.args[0], ast.Constant):
-            if isinstance(node.args[1], ast.List):
-                lists.append(node.args[1])
-    found = {
-        e.value
-        for lst in lists
-        for e in lst.elts
-        if isinstance(e, ast.Constant) and isinstance(e.value, str)
-    }
+        if isinstance(node, ast.Call):
+            assert not any(
+                k.arg == "targets" and isinstance(k.value, ast.List) for k in node.keywords
+            ), "triage.py lists signal targets in code: put them in triage_signals.toml"
+    found = {t for signal in catalog.triage_signals().values() for t in signal.targets}
     assert found, "parsed no triage signal targets"
     return found
 

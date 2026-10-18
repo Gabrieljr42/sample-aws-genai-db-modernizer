@@ -42,6 +42,8 @@ concerns = [
     "High-volume search workloads may still benefit from dedicated OpenSearch.",
     "InnoDB FULLTEXT indexes have higher write overhead than MyISAM.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

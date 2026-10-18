@@ -35,11 +35,7 @@ from src.agents.referee.move_ledger import (
     group_key,
     ledger_for,
 )
-from src.agents.referee.query_scoring import (
-    GATE_KIND_WRITE,
-    ScoringContext,
-    score_query_for_engine,
-)
+from src.agents.referee.query_scoring import GATE_KIND_WRITE, ScoringContext, score_query_for_engine
 from src.agents.referee.reality_check import (
     _current_for_eligibility,
     _group_eligible_engines,
@@ -49,12 +45,7 @@ from src.agents.referee.reality_check import (
 from src.agents.referee.reality_check_records import sweep_outcome
 from src.agents.referee.reality_check_request import moved_queries, moved_query_record
 from src.agents.referee.reality_check_rules import _move_scores_text, tie_reason_code
-from src.agents.referee.tie_break import (
-    break_tie,
-    group_tie,
-    settled_counts,
-    tied_survivors_first,
-)
+from src.agents.referee.tie_break import break_tie, group_tie, settled_counts, tied_survivors_first
 from src.agents.referee.triage import SOURCE_ENGINE_TO_AURORA
 from src.contracts.model_flag import ModelFlag, parse_model_flags
 from src.contracts.move_ledger import CandidateScore, MoveEvidence, MovePass, ReasonCode
@@ -62,6 +53,7 @@ from src.contracts.reality_check_model_response import (
     RealityCheckModelResponse,
     parse_reality_check_response,
 )
+from src.shared import catalog
 from src.shared.bedrock_guardrail import (
     GuardrailConfigError,
     GuardrailIntervened,
@@ -303,7 +295,7 @@ def validate_consolidations(
 
 # Engines with this many or fewer queries (and no hard capability requirements)
 # are candidates for the sanity sweep redirect.
-ORPHAN_ENGINE_THRESHOLD = 5
+ORPHAN_ENGINE_THRESHOLD = catalog.threshold("orphan_engine_threshold")
 
 
 def _format_gate(engine: str, gate_kind: str | None, required_capabilities: Iterable[str]) -> str:

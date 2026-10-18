@@ -52,6 +52,7 @@ from src.contracts.dynamodb_decision_trace import (
     TransactionShapeTrace,
 )
 from src.shared import catalog
+from src.shared.catalog import patterns as catalog_patterns
 from src.tools.analysis.dynamodb_pattern_catalog import (
     ANTI_PATTERN_BY_ID,
     DYNAMODB_ANTI_PATTERNS,
@@ -1256,30 +1257,12 @@ def _apply_dynamodb_adjustments(scores: ScoreBreakdown, profile: TableProfile) -
 
     types = set(profile.pattern_types)
 
-    # Strong bonuses for DynamoDB sweet spots
-    if "key-value-lookup" in types:
-        pattern += 15
-    if "range-query" in types:
-        pattern += 10
-    if "metadata-config-store" in types:
-        pattern += 10
-    if "session-store" in types:
-        pattern += 12
-    if "time-series-event-log" in types:
-        pattern += 10
-    if "write-heavy-ingestion" in types:
-        pattern += 8
-
-    # Denormalizable joins — moderate bonus (needs design work)
-    denorm_types = {
-        "bounded-parent-child",
-        "many-to-many-junction",
-        "co-accessed-tables",
-        "adjacency-list",
-    }
-    if types & denorm_types:
-        pattern += 5
-        complexity -= 10  # More migration effort
+    # The per-pattern bonuses (DynamoDB's sweet spots, and a denormalizable join's
+    # moderate bonus and migration effort) are each fit entry's table_bonus /
+    # complexity_bonus in src/catalog/patterns/*.toml (#921).
+    bonus, complexity_bonus = catalog_patterns.table_bonuses("dynamodb", types)
+    pattern += bonus
+    complexity += complexity_bonus
 
     # DynamoDB loves simple PKs
     if profile.has_primary_key and profile.column_count <= 10:

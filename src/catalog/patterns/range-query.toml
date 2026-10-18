@@ -21,6 +21,7 @@ concerns = [
     "Result sets exceeding 1MB require pagination, which is not the same as SQL",
     "Complex filter expressions evaluated after read (consume RCUs)",
 ]
+table_bonus = 10
 
 [engines.documentdb]
 kind = "unscored"

@@ -39,6 +39,8 @@ why = "A write whose rows come from a join with another table (UPDATE ... FROM, 
 concerns = [
     "Large multi-table updates may hold locks for extended periods.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 # Detection signals: UPDATE t1 JOIN t2 SET ... (MySQL multi-table syntax)
 [engines.aurora_mysql]
@@ -51,6 +53,8 @@ why = "A write whose rows come from a join with another table (UPDATE t1 JOIN t2
 concerns = [
     "Large multi-table updates may hold locks for extended periods.",
 ]
+table_bonus = 10
+complexity_feature = true
 
 [engines.neptune]
 kind = "future"

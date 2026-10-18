@@ -28,7 +28,7 @@ from src.shared.engine_names import display_engine
 
 # Target engine count — the reality check tries to stay at or below this.
 # A third engine must provide genuinely unique, irreplaceable capabilities.
-TARGET_ENGINE_COUNT = 2
+TARGET_ENGINE_COUNT = catalog.threshold("target_engine_count")
 
 # Per-engine operational overhead (monthly base cost + ops burden), read from each
 # engine's ``[pricing]`` table in ``src/catalog/engines/*.toml`` (#494). It is not just
@@ -60,8 +60,8 @@ def max_burden_per_unique_query(engine: str) -> float:
     return catalog.pricing(engine).max_burden_per_unique_query
 
 
-# Set of Aurora engine identifiers
-AURORA_ENGINES = {"aurora_postgresql", "aurora_mysql"}
+# Set of Aurora engine identifiers: the active relational engines (catalog role).
+AURORA_ENGINES = set(catalog.engine_ids(status=catalog.ACTIVE, role="relational"))
 
 
 def _query_has_join(query: dict) -> bool:
@@ -75,16 +75,17 @@ def _query_has_join(query: dict) -> bool:
 
 # Minimum confidence delta for a query to be "unique" to an engine.
 # If the best alternative is within this many points, the query is redundant.
-UNIQUE_DELTA_THRESHOLD = 15
+UNIQUE_DELTA_THRESHOLD = catalog.threshold("unique_delta_threshold")
 
 # Engines that may absorb only the queries their specialty serves (#296): an
 # engine of this kind is a search/analytics read model, not a general owner, so
-# consolidation never routes plain lookups or writes to it. Signals by query.
+# consolidation never routes plain lookups or writes to it. Signals by query. From
+# each engine file's ``[absorbs_only]`` (#921).
 SPECIALIST_ABSORB_SIGNALS: dict[str, frozenset[str]] = {
-    "opensearch": frozenset({"text_search", "aggregations"}),
+    e.id: frozenset(e.absorbs_only.signals) for e in catalog.engines() if e.absorbs_only
 }
 SPECIALIST_ABSORB_CAPABILITIES: dict[str, frozenset[str]] = {
-    "opensearch": frozenset({"text_pattern_match"}),
+    e.id: frozenset(e.absorbs_only.capabilities) for e in catalog.engines() if e.absorbs_only
 }
 
 

@@ -273,13 +273,17 @@ def analyze_<target>_patterns(collector_output, workload_analysis):
 
 ### Writing your adjustment function
 
-Pattern match bonuses come from the catalog base scores. The adjustment function adds target-specific structural bonuses/penalties:
+Pattern match bonuses come from the catalog base scores. A bonus for a pattern the target excels at is catalog data too: the pattern file's fit entry for the engine carries `table_bonus` (and `complexity_bonus`, `bonus_group`, `complexity_feature`; see `src/shared/catalog/patterns.py`), and the adjustment function reads it with `table_bonuses`. The function itself adds only the structural bonuses/penalties that no one pattern explains:
 
 ```python
+from src.shared.catalog import patterns as catalog_patterns
+
+
 def _apply_<target>_adjustments(scores, profile):
-    # Bonuses for patterns this target excels at
-    if "key-value-lookup" in profile.pattern_types:
-        scores.pattern_match_score += 15
+    # Bonuses for patterns this target excels at: the pattern files' table_bonus
+    bonus, complexity_bonus = catalog_patterns.table_bonuses("<target>", profile.pattern_types)
+    scores.pattern_match_score += bonus
+    scores.complexity_score += complexity_bonus
 
     # Structural adjustments
     if profile.foreign_key_count > 3:

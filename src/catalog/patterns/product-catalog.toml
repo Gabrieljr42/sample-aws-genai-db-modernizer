@@ -24,6 +24,7 @@ why = "A typed entity (category or type) whose variable attributes are a JSON co
 concerns = [
     "Wildcard indexes ($**) not supported — create targeted indexes per queryable attribute",
 ]
+table_bonus = 10
 
 [engines.opensearch]
 kind = "unscored"
