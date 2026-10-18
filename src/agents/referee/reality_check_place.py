@@ -26,7 +26,13 @@ from src.agents.referee.reality_check_rules import (
     _trace_ladder,
     tie_reason_code,
 )
-from src.agents.referee.tie_break import group_tie, tied_survivors_first
+from src.agents.referee.tie_break import (
+    TIE_KIND_SOURCE_COMPATIBLE,
+    TIE_KIND_STABILITY,
+    TIE_KIND_UNRESOLVED,
+    group_tie,
+    tied_survivors_first,
+)
 from src.contracts.move_ledger import MoveEvidence, MovePass, ReasonCode
 from src.shared.engine_names import display_engine
 
@@ -56,7 +62,10 @@ def _phase2_reason(
     (the engines this query was tied between before this phase ran) names
     why a now-cleared tie cleared, when it did -- which of those engines
     this phase removed from consideration -- rather than a generic "is now
-    resolved" with no reason given."""
+    resolved" with no reason given. For a co-dependency group member kept on
+    its engine (``group``), the reason also names the rule that decided the
+    group, the way a group move does (#878): its scores, or, when they tie,
+    the tie rule (:func:`_group_kept_rule`)."""
     winner_name = display_engine(winner)
     if moved:
         scores_text = _move_scores_text(
@@ -65,30 +74,55 @@ def _phase2_reason(
         basis = f"co-dependency group moves together; {scores_text}" if group else scores_text
         tie_note = (
             _tie_unresolved_note(_top_scorers(eligible_scores), winner)
-            if tie_kind == "tie_unresolved"
+            if tie_kind == TIE_KIND_UNRESOLVED
             else ""
         )
         return (
             f"reality check: consolidated from {display_engine(current_engine)} → "
             f"{winner_name} (no unique value — {basis}{tie_note})"
         )
-    if tie_kind == "tie_unresolved":
+    if tie_kind == TIE_KIND_UNRESOLVED:
         return (
             "reality check: no unique value elsewhere"
             f"{_tie_unresolved_note(_top_scorers(eligible_scores), winner)}"
         )
+    decided = _group_kept_rule(tie_kind) if group else ""
     removed = sorted(e for e in (original_tied or []) if e != winner and e not in eligible_scores)
     if removed:
         removed_text = ", ".join(display_engine(e) for e in removed)
         verb = "no longer qualifies" if len(removed) == 1 else "no longer qualify"
+        if group and tie_kind in _GROUP_TIE_RULES:
+            # The removal left a tie; the tie rule, not the removal, settled it.
+            return (
+                f"reality check: {winner_name} is kept -- {removed_text} {verb} for this "
+                f"query; the co-dependency group's scores still tie, so "
+                f"{_GROUP_TIE_RULES[tie_kind]}"
+            )
         return (
             f"reality check: {winner_name} is kept -- {removed_text} {verb} for this "
-            "query, so the earlier scores tie is resolved"
+            f"query, so the earlier scores tie is resolved{decided}"
         )
     return (
         f"reality check: {winner_name} is kept -- the earlier scores tie between "
-        "engines is now resolved"
+        f"engines is now resolved{decided}"
     )
+
+
+# What each tie rule ``break_tie`` applies to a co-dependency group's tied scores
+# does, in a kept member's reason (#878).
+_GROUP_TIE_RULES = {
+    TIE_KIND_SOURCE_COMPATIBLE: "the source-compatible engine is kept",
+    TIE_KIND_STABILITY: "the group stays where it is",
+}
+
+
+def _group_kept_rule(tie_kind: str | None) -> str:
+    """The rule that kept a co-dependency group on its engine, as a reason suffix
+    (#878): the group's scores when one engine scores the group highest, else the
+    tie rule ``break_tie`` applied to the group's tied scores."""
+    if tie_kind in _GROUP_TIE_RULES:
+        return f" (the co-dependency group's scores tie; {_GROUP_TIE_RULES[tie_kind]})"
+    return " (the co-dependency group's scores decide)"
 
 
 def _place_settled_queries(
@@ -206,7 +240,9 @@ def _place_settled_queries(
         """
         current = qa["assigned_engine"]
         new_tied = (
-            (_top_scorers(scores) if tie_kind == "tie_unresolved" else []) if tie_relevant else None
+            (_top_scorers(scores) if tie_kind == TIE_KIND_UNRESOLVED else [])
+            if tie_relevant
+            else None
         )
         if winner == current and (
             new_tied is None or new_tied == list(qa.get("tied_engines") or [])
@@ -279,7 +315,7 @@ def _place_settled_queries(
         winner, tie_kind = _pick_winner(
             eligible_scores, stability_candidates, source_compatible_engine, settled_counts, qid
         )
-        tie_relevant = bool(original_tied) or tie_kind == "tie_unresolved"
+        tie_relevant = bool(original_tied) or tie_kind == TIE_KIND_UNRESOLVED
         _record(
             qa,
             winner,
@@ -404,7 +440,7 @@ def _place_settled_queries(
             winner, tie_kind = _pick_winner(
                 eligible, current_engines, source_compatible_engine, settled_counts, group_seed
             )
-            group_tie_relevant = bool(group_original_tied) or tie_kind == "tie_unresolved"
+            group_tie_relevant = bool(group_original_tied) or tie_kind == TIE_KIND_UNRESOLVED
             for member_qid, member_engine in members:
                 member_qa = revised_by_id[member_qid]
                 # The group's verdict placed every member (#845): a member that
@@ -413,6 +449,11 @@ def _place_settled_queries(
                 # member had no tie.
                 member_tied = list(member_qa.get("tied_engines") or [])
                 member_tie_relevant = group_tie_relevant or bool(member_tied)
+                # The reason speaks of a tie only for a member that had one, or for
+                # every member when the group's tie stays unresolved (each one
+                # receives it): an untied member never reads that an earlier tie
+                # was resolved (#878).
+                reason_tie_relevant = bool(member_tied) or tie_kind == TIE_KIND_UNRESOLVED
                 _record(
                     member_qa,
                     winner,
@@ -424,7 +465,7 @@ def _place_settled_queries(
                     group=group_info,
                 )
                 if member_engine == winner:
-                    if member_tie_relevant:
+                    if reason_tie_relevant:
                         member_qa["assignment_reason"] = _phase2_reason(
                             member_engine,
                             winner,

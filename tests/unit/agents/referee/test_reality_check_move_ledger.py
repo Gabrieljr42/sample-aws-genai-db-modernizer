@@ -1035,3 +1035,171 @@ class TestAGroupPlacedByScoreClearsEveryMembersTie:
         for qa in revised:
             assert qa["tied_engines"] == ["aurora_mysql", "dynamodb"]
         _assert_replays(qas, revised, ledger)
+
+
+class TestAGroupMembersReasonNamesItsOwnTie:
+    """#878: a co-dependency group's member reasons. A member kept on its engine
+    whose tie the group's score settled says the group's scores decided, the way a
+    group move says the group moves together; a member that never had a tie never
+    reads that an earlier tie was resolved, whichever member carried the tie."""
+
+    def _group_trace(self, scores: dict[str, float]) -> dict:
+        group = {"key": "abc123abc123", "scores": dict(scores)}
+        return _trace({"m1": dict(scores), "m2": dict(scores)}, {"m1": group, "m2": group})
+
+    def _qas(self, engine: str, tied: list[str], tied_member: str = "m2") -> list[dict]:
+        qas: list[dict[str, Any]] = [
+            {
+                "query_id": "m1",
+                "assigned_engine": engine,
+                "assignment_reason": "co-dependency group",
+            },
+            {
+                "query_id": "m2",
+                "assigned_engine": engine,
+                "assignment_reason": "co-dependency group",
+            },
+        ]
+        next(qa for qa in qas if qa["query_id"] == tied_member)["tied_engines"] = tied
+        return qas
+
+    @pytest.mark.parametrize("tied_member", ["m1", "m2"])
+    def test_a_member_kept_by_the_groups_score_says_the_group_decided(
+        self, tied_member: str
+    ) -> None:
+        # Both tied engines are kept; the group's scores put DynamoDB ahead.
+        qas = self._qas("dynamodb", ["aurora_mysql", "dynamodb"], tied_member)
+        trace = self._group_trace({"aurora_mysql": 70, "dynamodb": 80})
+
+        revised, ledger = _place(qas, {"dynamodb", "aurora_mysql"}, trace)
+
+        by_id = {qa["query_id"]: qa for qa in revised}
+        assert by_id[tied_member]["assignment_reason"] == (
+            "reality check: DynamoDB is kept -- the earlier scores tie between "
+            "engines is now resolved (the co-dependency group's scores decide)"
+        )
+        _assert_replays(qas, revised, ledger)
+
+    @pytest.mark.parametrize("tied_member", ["m1", "m2"])
+    def test_an_untied_member_never_reads_that_a_tie_was_resolved(self, tied_member: str) -> None:
+        qas = self._qas("dynamodb", ["aurora_mysql", "dynamodb"], tied_member)
+        trace = self._group_trace({"aurora_mysql": 70, "dynamodb": 80})
+
+        revised, ledger = _place(qas, {"dynamodb", "aurora_mysql"}, trace)
+
+        untied = next(qa for qa in revised if qa["query_id"] != tied_member)
+        assert untied["assigned_engine"] == "dynamodb"
+        assert untied["assignment_reason"] == "co-dependency group"
+        assert not [m for m in ledger.moves if m.query_id == untied["query_id"]]
+        _assert_replays(qas, revised, ledger)
+
+    def test_a_removed_tied_engine_is_named_and_the_group_decided(self) -> None:
+        qas = self._qas("dynamodb", ["documentdb", "dynamodb"])
+        trace = self._group_trace({"documentdb": 60, "dynamodb": 80, "aurora_mysql": 70})
+
+        revised, _ = _place(qas, {"dynamodb", "aurora_mysql"}, trace)
+
+        by_id = {qa["query_id"]: qa for qa in revised}
+        assert by_id["m2"]["assignment_reason"] == (
+            "reality check: DynamoDB is kept -- DocumentDB no longer qualifies "
+            "for this query, so the earlier scores tie is resolved (the co-dependency "
+            "group's scores decide)"
+        )
+        assert by_id["m1"]["assignment_reason"] == "co-dependency group"
+
+    def test_a_group_moved_by_score_names_no_tie_on_any_member(self) -> None:
+        qas = self._qas("documentdb", ["documentdb", "dynamodb"])
+        trace = self._group_trace({"documentdb": 60, "dynamodb": 80, "aurora_mysql": 70})
+
+        revised, _ = _place(qas, {"dynamodb", "aurora_mysql"}, trace)
+
+        for qa in revised:
+            assert qa["assigned_engine"] == "dynamodb"
+            assert "co-dependency group moves together" in qa["assignment_reason"]
+            assert "tie" not in qa["assignment_reason"]
+
+    def test_an_unresolved_group_tie_is_every_members_tie_in_its_reason(self) -> None:
+        # The group's tie stays unresolved: every member receives it, so every
+        # member's reason names it, the untied one included. The untied member sits
+        # on DocumentDB, which the check removed, so no tied engine earns
+        # stability credit.
+        qas = self._qas("dynamodb", ["aurora_mysql", "documentdb", "dynamodb"])
+        qas[0]["assigned_engine"] = "documentdb"
+        trace = self._group_trace({"documentdb": 60, "dynamodb": 80, "aurora_mysql": 80})
+
+        revised, _ = _place(qas, {"dynamodb", "aurora_mysql"}, trace)
+
+        by_id = {qa["query_id"]: qa for qa in revised}
+        for qa in revised:
+            assert qa["tied_engines"] == ["aurora_mysql", "dynamodb"]
+            assert "pending your choice" in qa["assignment_reason"]
+        assert by_id["m2"]["assignment_reason"].startswith(
+            "reality check: no unique value elsewhere"
+        )
+
+    def test_an_individual_query_kept_names_no_group(self) -> None:
+        qas = [
+            {
+                "query_id": "q1",
+                "assigned_engine": "dynamodb",
+                "tied_engines": ["aurora_mysql", "dynamodb"],
+            }
+        ]
+        trace = _trace({"q1": {"aurora_mysql": 70, "dynamodb": 80}})
+
+        revised, _ = _place(qas, {"dynamodb", "aurora_mysql"}, trace)
+
+        assert revised[0]["assignment_reason"] == (
+            "reality check: DynamoDB is kept -- the earlier scores tie between "
+            "engines is now resolved"
+        )
+
+    def test_a_group_tie_broken_by_stability_says_so_not_scores(self) -> None:
+        # The group's scores tie (80/80); the untied member's engine earns the
+        # stability credit, so the group stays: the scores did not decide.
+        qas = self._qas("dynamodb", ["aurora_mysql", "documentdb", "dynamodb"])
+        trace = self._group_trace({"documentdb": 60, "dynamodb": 80, "aurora_mysql": 80})
+
+        revised, _ = _place(qas, {"dynamodb", "aurora_mysql"}, trace)
+
+        by_id = {qa["query_id"]: qa for qa in revised}
+        assert by_id["m2"]["tied_engines"] == []
+        assert by_id["m2"]["assignment_reason"] == (
+            "reality check: DynamoDB is kept -- DocumentDB no longer qualifies for this "
+            "query; the co-dependency group's scores still tie, so the group stays where it is"
+        )
+        assert by_id["m1"]["assignment_reason"] == "co-dependency group"
+
+    def test_a_group_tie_broken_by_source_compatibility_says_so(self) -> None:
+        from src.agents.referee.reality_check_place import _place_settled_queries
+
+        qas = self._qas("aurora_mysql", ["aurora_mysql", "dynamodb"])
+        trace = self._group_trace({"aurora_mysql": 80, "dynamodb": 80})
+        ledger = ledger_for(qas)
+        revised, _ = _place_settled_queries(
+            qas,
+            {"aurora_mysql", "dynamodb"},
+            set(),
+            {qa["query_id"]: qa["assigned_engine"] for qa in qas},
+            {},
+            {qa["query_id"]: {"query_id": qa["query_id"], "query_type": "SELECT"} for qa in qas},
+            None,
+            trace,
+            "aurora_mysql",
+            {},
+            {"m2"},
+            {},
+            {"m2": ["aurora_mysql", "dynamodb"]},
+            ledger=ledger,
+        )
+
+        by_id = {qa["query_id"]: qa for qa in revised}
+        assert by_id["m2"]["assigned_engine"] == "aurora_mysql"
+        assert by_id["m2"]["tied_engines"] == []
+        assert by_id["m2"]["assignment_reason"] == (
+            "reality check: Aurora MySQL is kept -- the earlier scores tie between engines "
+            "is now resolved (the co-dependency group's scores tie; the source-compatible "
+            "engine is kept)"
+        )
+        assert by_id["m1"]["assignment_reason"] == "co-dependency group"
+        _assert_replays(qas, revised, ledger)
