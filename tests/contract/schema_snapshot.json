@@ -18922,6 +18922,16 @@
           ]
         }
       },
+      "prose_style_rejections": {
+        "required": false,
+        "schema": {
+          "items": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "kind": "array"
+        }
+      },
       "query_groups": {
         "required": true,
         "schema": {
@@ -21406,8 +21416,8 @@
         }
       }
     },
-    "schema_hash": "4eba17fcc4e341a2933204056483a2134d26c80a74e6d1cd11eddc3430a00b15",
-    "version": "1.27"
+    "schema_hash": "154697e5983829b901b76efc730de74dd02d89675012324108e503b8f6a68cef",
+    "version": "1.28"
   },
   "triage_output.TriageOutputContract": {
     "fields": {

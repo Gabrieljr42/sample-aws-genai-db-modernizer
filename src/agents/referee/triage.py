@@ -459,7 +459,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
             _signal(
                 "low_frequency_writes",
                 ["dynamodb", "documentdb"],
-                "low-frequency write queries (<5 cps) — infrequent but may be business-critical",
+                "low-frequency write queries (<5 cps): infrequent, and possibly business-critical",
                 low_freq_writes,
             )
         )
@@ -468,7 +468,7 @@ def _detect_query_signals(co: dict) -> list[TriageSignal]:
             _signal(
                 "low_frequency_reads",
                 ["dynamodb", "documentdb"],
-                "low-frequency read queries (<0.1 cps) — admin, reporting, or health checks",
+                "low-frequency read queries (<0.1 cps): admin, reporting, or health checks",
                 low_freq_reads,
             )
         )
@@ -669,7 +669,7 @@ def _select_agents(
     result = TriageResult(signals=signals)
 
     # Aurora baseline — always present, signals accumulated for Synthesis
-    result.baseline[BASELINE] = ["Relational baseline — tables not claimed by purpose-built agents"]
+    result.baseline[BASELINE] = ["Relational baseline: tables not claimed by purpose-built agents"]
 
     aurora_agents = aurora_agents or []
     owning = ANALYSIS_AGENTS - AURORA_ENGINES - CACHE_OVERLAY_ENGINES
@@ -697,17 +697,17 @@ def _select_agents(
             if len(aurora_agents) > 1 and no_source_engine:
                 reasons.insert(
                     0,
-                    "No source engine recorded — both Aurora engines compete on " "workload fit",
+                    "No source engine recorded, so both Aurora engines compete on workload fit",
                 )
             elif len(aurora_agents) > 1:
                 reasons.insert(
                     0,
-                    "Source engine has no Aurora dialect of its own — both Aurora "
+                    "Source engine has no Aurora dialect of its own, so both Aurora "
                     "engines compete on workload fit",
                 )
             else:
                 reasons.insert(
-                    0, "Source engine is relational — Aurora analysis provides baseline scoring"
+                    0, "Source engine is relational; Aurora analysis provides baseline scoring"
                 )
         result.selected[agent] = reasons or [UNNAMED_ENGINE_REASON]
 

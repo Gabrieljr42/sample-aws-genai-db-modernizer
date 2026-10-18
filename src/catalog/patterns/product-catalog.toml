@@ -22,7 +22,7 @@ catalog_id = "documentdb-02"
 score = 85
 why = "A typed entity (category or type) whose variable attributes are a JSON column, read by its key: DocumentDB stores each entity as one flexible document of up to 16 MB with only its own fields; it has no wildcard index, so each queried attribute needs its own index (Amazon DocumentDB Developer Guide, Quotas and limits; Functional differences)."
 concerns = [
-    "Wildcard indexes ($**) not supported — create targeted indexes per queryable attribute",
+    "Wildcard indexes ($**) not supported: create targeted indexes per queryable attribute",
 ]
 
 [engines.opensearch]

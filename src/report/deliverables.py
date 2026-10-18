@@ -65,7 +65,7 @@ class Deliverable:
     name: str  # stable id, e.g. "engineering-report"
     content: bytes
     file_type: FileType
-    label: str  # human title, e.g. "Engineering Report — discourse"
+    label: str  # human title, e.g. "Engineering Report: discourse"
     filename: str  # download filename on the delivery channel
     publish: bool  # hand to the delivery channel
 
@@ -252,7 +252,7 @@ def render_deliverables(
             "engineering-report",
             renderers.render_engineering_report_md(report, prov=engineering).encode("utf-8"),
             "MARKDOWN",
-            f"Engineering Report — {database_name}",
+            f"Engineering Report: {database_name}",
             engineering["filename"],
             publish=True,
         ),
@@ -264,7 +264,7 @@ def render_deliverables(
             "assessment-data",
             json.dumps({"_artifact": data, **report}, indent=2).encode("utf-8"),
             "JSON",
-            f"Assessment Data (raw) — {database_name}",
+            f"Assessment Data (raw): {database_name}",
             data["filename"],
             publish=True,
         ),
@@ -282,7 +282,7 @@ def render_deliverables(
                 "executive-summary-pdf",
                 pdf,
                 "PDF",
-                f"Executive Summary Report — {database_name} (v{assignment_version})",
+                f"Executive Summary Report: {database_name} (v{assignment_version})",
                 pdf_report.FILENAME,
                 publish=True,
             )

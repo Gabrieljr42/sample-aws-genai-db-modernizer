@@ -18,7 +18,7 @@ supported = true
 catalog = "documentdb"
 catalog_id = "documentdb-06"
 score = 80
-why = "Tables with JSON/JSONB columns or high column count with many nullable fields — data is already semi-structured and maps directly to documents."
+why = "Tables with JSON/JSONB columns or high column count with many nullable fields: data is already semi-structured and maps directly to documents."
 concerns = [
     "JSON_EXTRACT at query time should be replaced by top-level fields at write time",
 ]

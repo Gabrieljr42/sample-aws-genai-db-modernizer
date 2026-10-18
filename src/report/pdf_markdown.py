@@ -242,7 +242,7 @@ def to_flowables(
                 Paragraph(
                     inline(b.group(2), styles, glyphs),
                     styles.bullets[level],
-                    bulletText="•" if level == 0 else "–",
+                    bulletText="•" if level == 0 else "-",
                 )
             )
             i += 1

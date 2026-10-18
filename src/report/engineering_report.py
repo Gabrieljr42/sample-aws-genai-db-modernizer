@@ -106,7 +106,7 @@ def _unsupported_pattern_md(u: dict[str, Any]) -> str:
     body = escaping.md_text(unsupported_pattern_text(u))
 
     if head and body:
-        return f"{head} \u2014 {body}"
+        return f"{head}: {body}"
     return head or body or "(no detail provided)"
 
 
@@ -135,7 +135,7 @@ def _migration_note_md(mn: dict[str, Any]) -> str:
     body = escaping.md_text(logic)
 
     if head and body:
-        return f"{head} \u2014 {body}"
+        return f"{head}: {body}"
     return head or body or "(no detail provided)"
 
 
@@ -334,7 +334,7 @@ def _trade_offs_md(report: dict[str, Any], facts: dict[str, Any]) -> list[str]:
                 impact = str(t.get("impact", "")).strip()
                 line = f"- **{escaping.md_text(desc)}**"
                 if impact and impact != desc:  # reality-check items repeat their title
-                    line += f" \u2014 {escaping.md_text(impact)}"
+                    line += f": {escaping.md_text(impact)}"
                 out.append(line)
                 aff = list(t.get("source_tables") or [])
                 if aff:
@@ -475,7 +475,7 @@ def _risk_register_md(report: dict[str, Any]) -> list[str]:
                 rid = r.get("risk_id", "-")
                 out.append(
                     f"- **{escaping.md_text(rid)}** \u00b7 {escaping.md_text(sev)} \u00b7 "
-                    f"{escaping.md_text(rtype)} \u2014 {escaping.md_text(body)}"
+                    f"{escaping.md_text(rtype)} \u00b7 {escaping.md_text(body)}"
                 )
                 if r.get("mitigation") and not _repeats(r.get("mitigation"), body):
                     out.append(f"  - Mitigation: {escaping.md_text(r.get('mitigation'))}")
@@ -496,7 +496,7 @@ def _risk_register_md(report: dict[str, Any]) -> list[str]:
             where = resolved_risk_label(r)
             out.append(
                 f"- {escaping.md_text(r.get('severity', '-'))} \u00b7 "
-                f"{escaping.md_text(where)} \u2014 {escaping.md_text(body)}"
+                f"{escaping.md_text(where)} \u00b7 {escaping.md_text(body)}"
             )
             if r.get("reason"):
                 out.append(f"  - Resolved because {escaping.md_text(r['reason'])}.")
@@ -519,7 +519,7 @@ def render_engineering_report_md(report: dict[str, Any], prov: dict[str, str] | 
         out += [f'{k}: "{escaping.md_yaml_value(v)}"' for k, v in prov.items() if v]
         out += ["---", ""]
     out += [
-        "# Database Modernization \u2014 Engineering Report",
+        "# Database Modernization: Engineering Report",
         "",
         f"Source database: `{escaping.md_code(db)}`. This is the build companion to the "  # nosemgrep: string-concat-in-list -- intentional multi-line string
         "PDF report: "

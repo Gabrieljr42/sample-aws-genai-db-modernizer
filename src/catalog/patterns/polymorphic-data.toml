@@ -22,7 +22,7 @@ catalog_id = "documentdb-03"
 score = 80
 why = "One entity's attribute rows (an entity-attribute-value table) read by the entity's key: DocumentDB stores the attributes as fields of the entity's own document, up to 16 MB, with only the fields it has; it has no wildcard index, so each queried attribute needs its own index (Amazon DocumentDB Developer Guide, Quotas and limits; Functional differences)."
 concerns = [
-    "Wildcard indexes ($**) not supported in any DocumentDB version — flatten queryable attributes to top-level with targeted compound indexes",
+    "Wildcard indexes ($**) not supported in any DocumentDB version: flatten queryable attributes to top-level with targeted compound indexes",
 ]
 
 [engines.opensearch]

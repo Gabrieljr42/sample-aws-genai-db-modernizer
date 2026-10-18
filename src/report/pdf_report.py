@@ -91,7 +91,7 @@ FOOTER = f"{COPYRIGHT} For informational purposes only."
 SEE_ALSO_NOTE = "Full detail in the deliverables folder: engineering-report.md."
 # Stated once, after the summary: the retired decision report's closing words (#987).
 NO_MODEL_DECIDES_NOTE = (
-    "Engine and query assignments are produced deterministically \u2014 no language model "
+    "Engine and query assignments are produced deterministically. No language model "
     "decides which engine a table or query goes to. The executive summary is written over "
     "already-computed results and cannot change a recommendation."
 )
@@ -568,10 +568,10 @@ def render_executive_summary_pdf(
         rightMargin=margin,
         topMargin=0.85 * inch,
         bottomMargin=0.85 * inch,
-        title=f"{PRODUCT_NAME} — {db}",
+        title=f"{PRODUCT_NAME}: {db}",
         author=PRODUCT_NAME,
         creator=PRODUCT_NAME,
-        subject=f"{REPORT_NAME} — job {report.get('job_id') or 'unknown'}",
+        subject=f"{REPORT_NAME}, job {report.get('job_id') or 'unknown'}",
         invariant=1,
         pageCompression=1,
     )

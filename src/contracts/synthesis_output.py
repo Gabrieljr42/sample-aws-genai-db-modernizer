@@ -322,6 +322,11 @@ Version History:
   rejects parts that do not. ``gate`` itself is unchanged, and the Markdown and
   PDF reports keep printing it. Backward compatible: ``None`` for a wave written
   before 1.27, which shows its gate string as it is.
+- 1.28 (2026-10-17, #1034): ``prose_style_rejections``: the model-written
+  schema-design fields synthesis sent back to deterministic text because they
+  used an item of the plain-prose style list (``src.shared.prose_style``), one
+  line each, for the audit trail; no deliverable renders it. Backward
+  compatible: empty for a report written before 1.28.
 """
 
 from datetime import datetime
@@ -1212,7 +1217,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.27",
+        default="1.28",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )
@@ -1242,6 +1247,13 @@ class SynthesisOutputContract(BaseModel):
     summary_validation_warnings: list[str] = Field(
         default_factory=list,
         description="Post-check findings: summary sentences naming a table under the wrong engine",
+    )
+    prose_style_rejections: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Model-written schema-design fields replaced by deterministic text because "
+            "they used an item of the plain-prose style list (#1034); audit only"
+        ),
     )
     recommended_architecture: dict[str, Any] = Field(
         ..., description="Architecture recommendation with type, databases, integrations"
