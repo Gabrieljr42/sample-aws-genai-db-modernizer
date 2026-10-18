@@ -19,7 +19,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 from strands import Agent, tool
-from strands.models.bedrock import BedrockModel
 
 from src.agents.prompt_framing import (
     SYSTEM_PROMPT_DATA_DIRECTIVE,
@@ -33,8 +32,10 @@ from src.contracts.model_flag import RoutingFlagEntry
 from src.contracts.opensearch_model_output import OpenSearchModelOutputContract
 from src.contracts.schema_design_input import project_schema_design_input
 from src.contracts.schema_design_output import TradeOff
+from src.shared.bedrock_guardrail import GuardrailConfigError, GuardrailIntervened
 from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
+from src.shared.role_bedrock_model import RoleBedrockModel
 from src.tools.schema.base_schema_agent import enforce_design_numbers
 from src.tools.schema.design_metrics import (
     check_design_numbers,
@@ -177,8 +178,8 @@ def _load_skill(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def _build_model() -> BedrockModel:
-    """Build the shared BedrockModel for both designer and PE agents (role SCHEMA_DESIGN)."""
+def _build_model() -> RoleBedrockModel:
+    """Build the shared RoleBedrockModel for both designer and PE agents (role SCHEMA_DESIGN)."""
     from botocore.config import Config
 
     return build_bedrock_model(
@@ -260,7 +261,7 @@ def _invoke_designer(
 
 
 def _invoke_pe_reviewer(
-    model: BedrockModel,
+    model: RoleBedrockModel,
     design_output: OpenSearchModelOutputContract,
     agent_input_summary: dict,
     pe_skill_path: str | None = None,
@@ -438,6 +439,8 @@ def run_opensearch_schema_agent(
             elapsed = time.time() - t0
             trace.log_pe_review(iteration, elapsed, review)
             routing_flags = [dict(f) for f in review.routing_flags]
+        except (GuardrailIntervened, GuardrailConfigError):
+            raise  # a guardrail block or bad guardrail setting is final, not "accept the design"
         except Exception as exc:
             # The PE reviewer's error can carry a pydantic ValidationError's
             # input_value fragments (the model's own generated output), so the

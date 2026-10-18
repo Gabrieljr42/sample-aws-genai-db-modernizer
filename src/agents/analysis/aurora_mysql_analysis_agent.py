@@ -15,6 +15,7 @@ from datetime import datetime
 
 from src.contracts.analysis_input import AnalysisInput
 from src.contracts.analysis_output import AgentMetadata, AnalysisOutputContract, TargetDatabase
+from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.tools.analysis.aurora_common_analysis_tools import estimate_aurora_costs
 from src.tools.analysis.aurora_mysql_analysis_tools import (
     analyze_aurora_mysql_patterns,
@@ -131,6 +132,8 @@ def analyze_for_aurora_mysql(
         Tuple of (AnalysisOutputContract, decision_trace_dict, "").
         Third element is empty string — no Mermaid ER diagram for Aurora MySQL.
     """
+    if llm_mode == "bedrock":
+        require_valid_guardrail_config()
     if llm_mode == "none":
         return analyze_for_aurora_mysql_deterministic(analysis_input)
 

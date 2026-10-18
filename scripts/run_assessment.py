@@ -50,6 +50,10 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts._compact_output import CompactConsole, display_path, want_verbose  # noqa: E402
+from src.shared.bedrock_guardrail import (  # noqa: E402
+    describe_active_guardrail,
+    exit_on_invalid_guardrail_config,
+)
 from src.shared.database_name import (  # noqa: E402
     DERIVED_DATABASE_NAME_ERROR,
     validate_database_name,
@@ -995,6 +999,8 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    if args.llm_mode == "bedrock":
+        exit_on_invalid_guardrail_config()
 
     if _want_verbose(args.verbose):
         sys.stdout = _ColorizedStream(sys.stdout)  # type: ignore[assignment]
@@ -1087,6 +1093,8 @@ def _run(args) -> None:  # type: ignore[no-untyped-def]
     if args.db:
         print(f"  Database:  {args.db}", file=sys.stderr)
     print(f"  LLM mode:  {args.llm_mode}", file=sys.stderr)
+    if args.llm_mode == "bedrock" and (guardrail := describe_active_guardrail()):
+        print(f"  Guardrail: {guardrail}", file=sys.stderr)
     print("  Artifacts: ./artifacts/", file=sys.stderr)
     print(f"{'='*60}\n", file=sys.stderr, flush=True)
 

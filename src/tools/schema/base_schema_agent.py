@@ -38,10 +38,11 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 from strands import Agent
-from strands.models.bedrock import BedrockModel
 
 from src.agents.prompt_framing import frame_untrusted
 from src.contracts.schema_design_output import TradeOff
+from src.shared.bedrock_guardrail import GuardrailConfigError, GuardrailIntervened
+from src.shared.role_bedrock_model import RoleBedrockModel
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ class SchemaDesignRunner:
         self,
         target_type: str,
         output_model: type[T],
-        model: BedrockModel,
+        model: RoleBedrockModel,
         designer_agent: Agent,
         pe_skill_path: str | None = None,
         pe_reviewer_fn=None,
@@ -300,6 +301,8 @@ class SchemaDesignRunner:
                     for f in getattr(review, "routing_flags", None) or []
                 ]
                 print(f"{prefix} PE review {iteration + 1} complete in {elapsed:.0f}s")
+            except (GuardrailIntervened, GuardrailConfigError):
+                raise
             except Exception as exc:
                 # The PE reviewer's error can carry a pydantic ValidationError's
                 # input_value fragments (the model's own generated output), so
@@ -460,6 +463,8 @@ class SchemaDesignRunner:
                 print(f"{prefix} Parsed from text")
                 return validated  # type: ignore[return-value]
 
+            except (GuardrailIntervened, GuardrailConfigError):
+                raise  # a guardrail block is final: the same prompt is blocked again
             except Exception as exc:
                 last_error = exc
                 if _is_throttle_error(exc):

@@ -22,6 +22,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
+from src.shared.bedrock_guardrail import GuardrailConfigError, GuardrailIntervened
 from src.shared.models import Role, build_bedrock_model
 
 logger = logging.getLogger(__name__)
@@ -120,10 +121,14 @@ class LlmAdvisorBase(ABC):
 
         self.attempts_made = 0
 
-        if len(queries) > self.MAX_LLM_QUERIES:
-            return self._advise_grouped(schema, queries, **kwargs)
-
-        return self._advise_single(schema, queries, **kwargs)
+        try:
+            if len(queries) > self.MAX_LLM_QUERIES:
+                return self._advise_grouped(schema, queries, **kwargs)
+            return self._advise_single(schema, queries, **kwargs)
+        except GuardrailIntervened as exc:
+            # Not retried; the deterministic analysis stands without advice.
+            logger.error("%s", exc)
+            return None
 
     def _advise_single(self, schema: dict, queries: list[dict], **kwargs) -> BaseModel | None:
         """Call LLM once for a small workload, with retry."""
@@ -133,6 +138,8 @@ class LlmAdvisorBase(ABC):
                 time.sleep(self.BASE_BACKOFF_SECONDS * (2 ** (attempt - 1)))
             try:
                 return self._call_llm(schema, queries, **kwargs)
+            except (GuardrailIntervened, GuardrailConfigError):
+                raise  # final, never retried
             except Exception as exc:  # noqa: B112
                 # The LLM-call error can carry prompt/response fragments
                 # (#143): full text at DEBUG only, WARNING keeps the type.
@@ -192,6 +199,8 @@ class LlmAdvisorBase(ABC):
                 try:
                     group_result = self._call_llm(group_schema, group_queries, **group_kwargs)
                     break
+                except (GuardrailIntervened, GuardrailConfigError):
+                    raise  # final, never retried
                 except Exception as exc:  # noqa: B112
                     # The LLM-call error can carry prompt/response fragments
                     # (#143): full text at DEBUG only, WARNING keeps the type.

@@ -21,6 +21,7 @@ from src.contracts.analysis_output import (
     AnalysisOutputContract,
     TargetDatabase,
 )
+from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.tools.analysis.dynamodb_analysis_tools import (
     LlmAdvisor,
     analyze_dynamodb_patterns,
@@ -226,6 +227,8 @@ def analyze_for_dynamodb(
     Handles partial collector output gracefully — zero queries produces
     structure-only recommendations, zero tables produces empty results.
     """
+    if llm_mode == "bedrock":
+        require_valid_guardrail_config()
     if llm_mode == "none":
         return analyze_for_dynamodb_deterministic(analysis_input)
 

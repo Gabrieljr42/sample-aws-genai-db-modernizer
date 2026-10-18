@@ -63,6 +63,12 @@ from src.contracts.reality_check_model_response import (
     RealityCheckModelResponse,
     parse_reality_check_response,
 )
+from src.shared.bedrock_guardrail import (
+    GuardrailConfigError,
+    GuardrailIntervened,
+    check_converse_response,
+    guard_messages,
+)
 from src.shared.engine_names import display_engine
 from src.shared.models import (
     ROLE_SPECS,
@@ -224,7 +230,7 @@ def validate_consolidations(
                     queries=batch,
                     batch=(batch_range, total),
                 )
-            except ValidationFailed as exc:
+            except (ValidationFailed, GuardrailIntervened) as exc:
                 logger.warning(
                     "Consolidation %s -> %s: validation of queries %s of %d failed (%s); "
                     "those moves stand unreviewed",
@@ -941,6 +947,8 @@ def _call_llm_validator(
     for attempt in (_try_strands_validator, _try_boto3_validator):
         try:
             result = attempt(from_engine, to_engine, queries, batch)
+        # A GuardrailIntervened is not a ValidationFailed: it propagates, so the
+        # other transport is not tried with the input the guardrail just blocked.
         except ValidationFailed as exc:
             errors.append(str(exc))
             continue
@@ -1116,6 +1124,8 @@ def _try_strands_validator(
         response_text = (
             "" if isinstance(structured, RealityCheckModelResponse) else str(result).strip()
         )
+    except (GuardrailIntervened, GuardrailConfigError):
+        raise
     except Exception as exc:
         # The underlying error from an LLM call can carry prompt/response
         # fragments (#143): full text at DEBUG only. The ValidationFailed
@@ -1159,13 +1169,16 @@ def _try_boto3_validator(
         client = boto3.client("bedrock-runtime")
         response = client.converse(
             **converse_request_fields(Role.VALIDATOR, model_id=_validator_model_id()),
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            messages=guard_messages([{"role": "user", "content": [{"text": prompt}]}]),
             system=[{"text": validator_system_prompt()}],
         )
+        check_converse_response(response, "validator")
         # Newer models may lead with a reasoning block; take the first text block.
         response_text = next(
             block["text"] for block in response["output"]["message"]["content"] if "text" in block
         )
+    except (GuardrailIntervened, GuardrailConfigError):
+        raise
     except Exception as exc:
         # Same reasoning as the Strands branch above: full text at DEBUG only.
         logger.debug("boto3 validation failed: %s", exc)

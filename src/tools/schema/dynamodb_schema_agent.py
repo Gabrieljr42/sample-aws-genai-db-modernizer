@@ -24,7 +24,6 @@ import time
 from pathlib import Path
 
 from strands import Agent, tool
-from strands.models.bedrock import BedrockModel
 
 from src.agents.prompt_framing import (
     SYSTEM_PROMPT_DATA_DIRECTIVE,
@@ -38,6 +37,7 @@ from src.contracts.dynamodb_pe_review import PEReviewResult, ReviewVerdict  # no
 from src.contracts.schema_design_input import project_schema_design_input
 from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
+from src.shared.role_bedrock_model import RoleBedrockModel
 from src.tools.schema.base_schema_agent import SchemaDesignRunner
 from src.tools.schema.design_metrics import (
     check_design_numbers,
@@ -173,8 +173,8 @@ def compute_performances_and_costs(
 # ---------------------------------------------------------------------------
 
 
-def _build_model() -> BedrockModel:
-    """Build the shared BedrockModel for both designer and PE agents (role SCHEMA_DESIGN)."""
+def _build_model() -> RoleBedrockModel:
+    """Build the shared RoleBedrockModel for both designer and PE agents (role SCHEMA_DESIGN)."""
     from botocore.config import Config
 
     return build_bedrock_model(
@@ -191,7 +191,7 @@ MAX_ATTRS_PER_ENTITY = 10
 
 
 def _invoke_pe_reviewer(
-    model: BedrockModel,
+    model: RoleBedrockModel,
     design_output: DynamoDBModelOutputContract,
     agent_input_summary: dict,
     pe_skill_path: str | None = None,

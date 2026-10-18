@@ -59,6 +59,7 @@ from src.contracts.executive_summary_response import (
     parse_executive_summary_response,
 )
 from src.contracts.synthesis_output import SynthesisOutputContract
+from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.shared.contract_versioning import stamp_artifact_version
 from src.shared.engine_names import display_engine
 from src.shared.engines_in_use import engines_in_use
@@ -903,6 +904,7 @@ def run_synthesis(
         return
 
     if llm_mode == "bedrock":
+        require_valid_guardrail_config()
         # Payload parity (#628): Bedrock reasons over exactly the request the
         # external (Claude Code) path writes to llm_input.json, and its answer
         # goes through the same contract and the same post-checks.

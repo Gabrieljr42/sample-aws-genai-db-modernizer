@@ -153,6 +153,13 @@ def main() -> None:
     if agent_type not in _AGENTS:
         _fail(f"AGENT_TYPE={agent_type!r} is not recognised.")
 
+    from src.shared.bedrock_guardrail import GuardrailConfigError, require_valid_guardrail_config
+
+    try:
+        require_valid_guardrail_config()
+    except GuardrailConfigError as exc:
+        _fail(str(exc))
+
     storage_dir = _AGENTS[agent_type]
     logger.info("Resolving agent: AGENT_TYPE=%s storage_dir=%s", agent_type, storage_dir)
 

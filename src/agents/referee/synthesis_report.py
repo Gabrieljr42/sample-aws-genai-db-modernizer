@@ -42,6 +42,7 @@ from src.contracts.executive_summary_response import (
     parse_executive_summary_response,
 )
 from src.contracts.model_flag import validation_error_note
+from src.shared.bedrock_guardrail import GuardrailConfigError, GuardrailIntervened
 from src.shared.capability_labels import CAPABILITY_DISPLAY_NAMES
 from src.shared.engine_names import SOURCE_ENGINE_DISPLAY_NAMES, heterogeneous_source_clause
 from src.shared.migration_wave_engines import cache_front_description
@@ -3386,6 +3387,12 @@ def generate_executive_summary(llm_input: dict) -> ExecutiveSummaryResponse | No
         )
         return response
 
+    except GuardrailConfigError:
+        raise
+    except GuardrailIntervened as exc:
+        # Not retried: the deterministic summary stands.
+        logger.error("%s", exc)
+        print(f"[synthesis] ERROR: {exc} Falling back to the deterministic summary.")
     except ValidationError as exc:
         logger.error(
             "LLM executive summary is off the contract (%s) — using deterministic",

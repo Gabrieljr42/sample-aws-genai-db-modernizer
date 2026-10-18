@@ -19,7 +19,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 from strands import Agent
-from strands.models.bedrock import BedrockModel
 
 from src.agents.prompt_framing import (
     SYSTEM_PROMPT_DATA_DIRECTIVE,
@@ -34,6 +33,7 @@ from src.contracts.model_flag import RoutingFlagEntry
 from src.contracts.schema_design_input import project_schema_design_input
 from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
+from src.shared.role_bedrock_model import RoleBedrockModel
 from src.tools.analysis.documentdb_analysis_tools import (
     DOCUMENTDB_TARGET_CLUSTER,
     DOCUMENTDB_TARGET_VERSION,
@@ -183,8 +183,8 @@ def _load_skill(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def _build_model() -> BedrockModel:
-    """Build the shared BedrockModel for both designer and PE agents (role SCHEMA_DESIGN)."""
+def _build_model() -> RoleBedrockModel:
+    """Build the shared RoleBedrockModel for both designer and PE agents (role SCHEMA_DESIGN)."""
     from botocore.config import Config
 
     return build_bedrock_model(
@@ -306,7 +306,7 @@ def target_engine_label(decision_trace: dict | None) -> str:
 
 
 def _invoke_pe_reviewer(
-    model: BedrockModel,
+    model: RoleBedrockModel,
     design_output: DocumentDBModelOutputContract,
     agent_input_summary: dict,
     pe_skill_path: str | None = None,

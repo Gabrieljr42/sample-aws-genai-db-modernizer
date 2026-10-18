@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.shared.contract_versioning import ContractVersionError
 from src.shared.package_version import get_package_version
 
@@ -22,6 +23,8 @@ redaction_thread: threading.Thread | None = None
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     global redaction_thread
+    # A partial guardrail setting stops the API at start, never at the first model call.
+    require_valid_guardrail_config()
     # In the background, after start-up: it can never delay or stop the API.
     redaction_thread = threading.Thread(
         target=_redact_stored_inputs, name="stored-input-redaction", daemon=True

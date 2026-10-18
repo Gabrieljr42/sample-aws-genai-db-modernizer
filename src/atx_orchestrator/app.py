@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 
+from src.shared.bedrock_guardrail import require_valid_guardrail_config
 from src.shared.models import Role, resolve_model_id
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ logger = logging.getLogger(__name__)
 def build_agent_factory():
     """Return an agent_factory function for AgentRuntimeServer."""
     from src.atx_orchestrator.orchestrator import DBModernizationOrchestrator
+
+    require_valid_guardrail_config()
 
     # Model ID (role ATX_AGENT) — must use a cross-region inference profile.
     # Override via the MODEL_ID env var if needed.
