@@ -339,6 +339,9 @@ def run_synthesis_deterministic(
             # and any other report.json reader can show the full record, not
             # just the trade-off text derived from it below.
             "sweep_decisions": reality_check_output.get("sweep_decisions", []),
+            # #746: the consolidation-review batches that got no model verdict
+            # (their moves stand unreviewed), for facts.unreviewed_move_count.
+            "validation_incomplete": reality_check_output.get("validation_incomplete", []),
         }
         reality_check_summary = recompute_reality_check_patterns(
             reality_check_summary, (data.assignment or {}).get("query_assignments", [])

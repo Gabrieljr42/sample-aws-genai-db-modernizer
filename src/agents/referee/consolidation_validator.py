@@ -15,7 +15,6 @@ Architecture:
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -76,6 +75,7 @@ from src.shared.models import (
     Role,
     build_bedrock_model,
     converse_request_fields,
+    profile_for,
     resolve_model_id,
 )
 from src.shared.skill_sections import skill_sections, skill_subsections
@@ -114,6 +114,10 @@ BLOCKING_RULES: tuple[str, ...] = (
 # depends on the prompt file.
 CONSOLIDATION_REVIEW_SKILL = "consolidation-review.md"
 
+# The validator answers through one tool, the response contract by name: a
+# structured answer, never text to parse (#746 item 5).
+RESPONSE_TOOL = "RealityCheckModelResponse"
+
 
 @cache
 def engine_context() -> dict[str, str]:
@@ -134,7 +138,7 @@ def validator_system_prompt() -> str:
         + review["Do Not Flag"]
         + "\n\nRESPONSE:\n"
         + review["Response"]
-        + "\n\nRespond with JSON only.\n\n"
+        + f"\n\nAnswer only by calling the {RESPONSE_TOOL} tool, never in text.\n\n"
         + SYSTEM_PROMPT_DATA_DIRECTIVE
     )
 
@@ -152,7 +156,7 @@ def __getattr__(name: str) -> object:
 MAX_QUERIES_PER_CALL = 30
 
 # Output budget for one validation call: room for every query of a batch to be
-# flagged with a short reason, in compact JSON. Owned by the VALIDATOR role
+# flagged with a short reason, in its structured answer. Owned by the VALIDATOR role
 # (src/shared/models.py), which raises it on families that think by default.
 VALIDATOR_MAX_TOKENS = ROLE_SPECS[Role.VALIDATOR].max_tokens
 
@@ -956,7 +960,7 @@ def _call_llm_validator(
 
     Returns the model's raw flag entries (validated by the caller). Raises
     :class:`ValidationFailed` when no LLM gave a usable verdict (none available,
-    a call error, or a response that is not the JSON array asked for).
+    a call error, or no structured answer matching the contract).
     """
     errors: list[str] = []
     # Try Strands (production), fall back to boto3 (local)
@@ -1008,60 +1012,84 @@ def _build_validation_prompt(
         f"QUERIES BEING MOVED:\n" + frame_untrusted(queries_block, label="moved queries") + "\n\n"
         f"TASK: For each query above, decide whether {to_engine} can serve it, "
         f"following the instruction and the flag criteria you were given.\n\n"
-        f"Respond with ONLY a compact JSON object (no indentation) in the response "
-        f'format you were given, with "flagged_engine" set to "{to_engine}" and no '
-        f'"executive_summary" (the summary is a separate call). '
-        f'If all queries are fine, respond with {{"consolidation_corrections": []}}.\n\n'
-        f"JSON response:"
+        f'Answer by calling the {RESPONSE_TOOL} tool, with "flagged_engine" set to '
+        f'"{to_engine}" in every flag and no "executive_summary" (the summary is a '
+        f"separate call). If all queries are fine, call it with an empty "
+        f'"consolidation_corrections".'
     )
 
 
-def _parse_llm_response(response_text: str) -> list[ModelFlag]:
-    """Parse the LLM's JSON response into valid flags (invalid entries dropped).
+def _structured_flags(answer: object) -> list[object] | None:
+    """The raw flag entries of a structured answer, or None when it is not the contract.
 
-    Returns [] for a response that is not the ``RealityCheckModelResponse``
-    shape; see :func:`_parse_flagged`.
+    ``answer`` is the validator's structured output: Strands' built response,
+    or the input of the boto3 call's ``RealityCheckModelResponse`` tool use.
+    It must be a :class:`RealityCheckModelResponse` -- the same contract the
+    headless ``llm_responses/reality_check.json`` is validated against
+    (``parse_reality_check_response``, #628). There is no text to parse (#746
+    item 5): a plain-text answer is no answer. Entries are not validated here:
+    :func:`validate_consolidations` validates each one against ``ModelFlag``
+    (``parse_model_flags``), so one bad entry is dropped and counted while the
+    valid flags beside it are kept -- the same handling the headless response
+    gets.
     """
-    return parse_model_flags(_parse_flagged(response_text) or [])[0]
-
-
-def _parse_flagged(response_text: str) -> list[object] | None:
-    """The raw flag entries in a response, or None when it is not the contract's shape.
-
-    The response must be a :class:`RealityCheckModelResponse` -- the same
-    contract the headless ``llm_responses/reality_check.json`` is validated
-    against (``parse_reality_check_response``, #628). Entries are not validated
-    here: :func:`validate_consolidations` validates each one against
-    ``ModelFlag`` (``parse_model_flags``), so one bad entry is dropped and
-    counted while the valid flags beside it are kept -- the same handling the
-    headless response gets.
-    """
-    text = response_text.strip()
-
-    # Strip markdown code fences if present
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        text = "\n".join(lines).strip()
-
     try:
-        result = json.loads(text)
-    except json.JSONDecodeError:
-        # The raw LLM response text is DEBUG only -- it is model output, which
-        # must stay out of INFO and above (#143). WARNING keeps only the length.
-        logger.debug("Failed to parse LLM validation response: %s", text[:200])
-        logger.warning("Failed to parse LLM validation response (length=%d)", len(text))
-        return None
-    try:
-        response = parse_reality_check_response(result)
+        response = parse_reality_check_response(answer)
     except ValidationError:
-        logger.debug("LLM validation response is off the contract: %s", text[:200])
+        # Model output stays out of INFO and above (#143): the type only.
+        logger.debug("LLM validation answer is off the contract: %s", str(answer)[:200])
         logger.warning(
-            "LLM validation response does not match RealityCheckModelResponse (type=%s)",
-            type(result).__name__,
+            "LLM validation answer does not match RealityCheckModelResponse (type=%s)",
+            type(answer).__name__,
         )
         return None
     return list(response.consolidation_corrections)
+
+
+def _response_tool_request(model_id: str) -> dict:
+    """The boto3 ``converse`` fields that ask for the answer as a tool call.
+
+    One tool, the :class:`RealityCheckModelResponse` schema (each flag entry
+    advertises ``ModelFlag``'s). The choice is forced where the model family
+    accepts it, with thinking disabled where Bedrock needs that for a forced
+    choice, and ``auto`` (plus the prompt's "call the tool") where a forced
+    choice is rejected: the rule ``RoleBedrockModel`` applies to the Strands
+    path (``src.shared.models.profile_for``). Under ``auto`` the tool is strict
+    (the validator role's ``strict_tools``), so its input matches the schema.
+    """
+    profile = profile_for(model_id)
+    forced = profile.accepts_forced_tool_choice
+    # Strict where the family rejects a forced choice, as the role's Strands
+    # model does (``build_bedrock_model``'s ``strict_tools``).
+    strict = ROLE_SPECS[Role.VALIDATOR].strict_tools and not forced
+    request: dict = {
+        "toolConfig": {
+            "tools": [
+                {
+                    "toolSpec": {
+                        "name": RESPONSE_TOOL,
+                        "description": "Record the flags on the moved queries (empty when none).",
+                        "inputSchema": {"json": RealityCheckModelResponse.model_json_schema()},
+                        **({"strict": True} if strict else {}),
+                    }
+                }
+            ],
+            "toolChoice": {"tool": {"name": RESPONSE_TOOL}} if forced else {"auto": {}},
+        }
+    }
+    if forced and profile.forced_tool_choice == "needs_thinking_disabled":
+        request["additionalModelRequestFields"] = {"thinking": {"type": "disabled"}}
+    return request
+
+
+def _tool_answer(response: Mapping) -> object | None:
+    """The input of the ``RealityCheckModelResponse`` tool use in a converse response."""
+    for block in response.get("output", {}).get("message", {}).get("content", []) or []:
+        use = block.get("toolUse") if isinstance(block, Mapping) else None
+        if isinstance(use, Mapping) and use.get("name") == RESPONSE_TOOL:
+            answer: object = use.get("input")
+            return answer
+    return None
 
 
 def _report(from_engine: str, to_engine: str, queries: list[dict], flagged: list) -> None:
@@ -1137,9 +1165,6 @@ def _try_strands_validator(
         )
         result = agent(prompt)
         structured = getattr(result, "structured_output", None)
-        response_text = (
-            "" if isinstance(structured, RealityCheckModelResponse) else str(result).strip()
-        )
     except (GuardrailIntervened, GuardrailConfigError):
         raise
     except Exception as exc:
@@ -1151,15 +1176,9 @@ def _try_strands_validator(
         logger.error("Strands validation failed (%s)", _error_label(exc))
         raise ValidationFailed(f"strands: {_error_label(exc)}") from exc
 
-    flagged: list | None = (
-        list(structured.consolidation_corrections)
-        if isinstance(structured, RealityCheckModelResponse)
-        else None
-    )
+    flagged = None if structured is None else _structured_flags(structured)
     if flagged is None:
-        flagged = _parse_flagged(response_text)
-    if flagged is None:
-        raise ValidationFailed("strands: response does not match the flag contract")
+        raise ValidationFailed("strands: no structured answer matching the flag contract")
     _report(from_engine, to_engine, queries, flagged)
     return flagged
 
@@ -1181,18 +1200,18 @@ def _try_boto3_validator(
 
     prompt = _build_validation_prompt(from_engine, to_engine, queries, batch)
 
+    model_id = _validator_model_id()
+    tool_request = _response_tool_request(model_id)
+    extra = tool_request.pop("additionalModelRequestFields", None)
     try:
         client = boto3.client("bedrock-runtime")
         response = client.converse(
-            **converse_request_fields(Role.VALIDATOR, model_id=_validator_model_id()),
+            **converse_request_fields(Role.VALIDATOR, model_id=model_id, extra_model_fields=extra),
+            **tool_request,
             messages=guard_messages([{"role": "user", "content": [{"text": prompt}]}]),
             system=[{"text": validator_system_prompt()}],
         )
         check_converse_response(response, "validator")
-        # Newer models may lead with a reasoning block; take the first text block.
-        response_text = next(
-            block["text"] for block in response["output"]["message"]["content"] if "text" in block
-        )
     except (GuardrailIntervened, GuardrailConfigError):
         raise
     except Exception as exc:
@@ -1202,8 +1221,9 @@ def _try_boto3_validator(
         raise ValidationFailed(f"boto3: {_error_label(exc)}") from exc
 
     print(f"[reality-check] Validating {len(queries)} queries moved {from_engine} → {to_engine}...")
-    flagged = _parse_flagged(response_text)
+    answer = _tool_answer(response)
+    flagged = None if answer is None else _structured_flags(answer)
     if flagged is None:
-        raise ValidationFailed("boto3: response does not match the flag contract")
+        raise ValidationFailed("boto3: no structured answer matching the flag contract")
     _report(from_engine, to_engine, queries, flagged)
     return flagged

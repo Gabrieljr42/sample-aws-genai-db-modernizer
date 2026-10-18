@@ -515,6 +515,8 @@
   "analysis-results.close-calls.open-label": "Open the decision trace for query {{id}}",
   "analysis-results.close-calls.override": "To move any of them, change its engine in the assignment review (a query in a co-dependency group moves with its group); that writes a new assignment version and redesigns only the engines it touches. Select a query to see both scores in its Why this engine trace.",
   "analysis-results.close-calls.assignment-link": "Open the assignment review",
+  "analysis-results.unreviewed-moves_one": "{{count}} reality-check move was not reviewed by the model: its review of that move failed, so it stands as the routing rules placed it.",
+  "analysis-results.unreviewed-moves_other": "{{count}} reality-check moves were not reviewed by the model: its review of those moves failed, so they stand as the routing rules placed them.",
   "analysis-results.unservable.header_one": "{{count}} query on a fallback engine",
   "analysis-results.unservable.header_other": "{{count}} queries on a fallback engine",
   "analysis-results.unservable.intro": "No analyzed engine could take these queries, so a routing rule placed each one on the engine shown: it runs the query, but no analysis scored it there and no design covers it. The assessment does not bring back an engine it removed. Keep each query where it landed, or redesign it for the engines that ruled it out, then re-run.",

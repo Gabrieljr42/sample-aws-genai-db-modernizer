@@ -1290,6 +1290,28 @@ def projected_monthly_cost(report: dict[str, Any]) -> float:
     return round(sum(c for e, c in engine_costs(report).items() if e in kept), 2)
 
 
+def unreviewed_move_count(report: dict[str, Any]) -> int:
+    """How many reality-check moves no model reviewed (#746).
+
+    The consolidation validator reviews each consolidation's moved queries in
+    batches; a batch that got no usable verdict (a call error, or no
+    structured answer) keeps its moves unreviewed and is recorded in the
+    reality check's ``validation_incomplete`` (``batch`` is ``"start-end"``, 1-based).
+    The moves of every such batch, counted once.
+    """
+    rows = (report.get("reality_check") or {}).get("validation_incomplete") or []
+    total = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        start, _, end = str(row.get("batch") or "").partition("-")
+        try:
+            total += max(int(end) - int(start) + 1, 0)
+        except ValueError:
+            continue
+    return total
+
+
 def compute_report_facts(
     report: dict[str, Any],
     waves: list[dict[str, Any]] | None = None,
@@ -1379,6 +1401,8 @@ def compute_report_facts(
         "post_schema_reroute_count": sum(
             1 for r in report.get("post_schema_reroutes") or [] if isinstance(r, dict)
         ),
+        # #746: reality-check moves no model reviewed (a failed review batch).
+        "unreviewed_move_count": unreviewed_move_count(report),
         # #339: the per-query decision traces' figures.
         "query_trace": query_trace_facts(report),
         # #730: the queries a kept engine could serve almost as well.

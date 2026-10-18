@@ -4,11 +4,12 @@ import json
 
 from src.agents.referee.consolidation_validator import (
     _build_validation_prompt,
-    _parse_flagged,
-    _parse_llm_response,
+    _structured_flags,
     sanity_sweep,
 )
 from src.agents.referee.query_scoring import ScoringContext
+from src.contracts.model_flag import parse_model_flags
+from src.contracts.reality_check_model_response import RealityCheckModelResponse
 
 
 def _query(query_id: str, table: str | None = None) -> dict:
@@ -49,45 +50,44 @@ def _flag(qid: str, engine: str = "dynamodb", **extra) -> dict:
     }
 
 
-class TestParseResponse:
-    """_parse_llm_response() validates against the ModelFlag contract (#647),
-    inside the response contract both modes share (RealityCheckModelResponse, #628)."""
+class TestStructuredAnswer:
+    """_structured_flags() reads the validator's structured answer (#746 item 5):
+    the RealityCheckModelResponse contract both modes share (#628), with each
+    entry validated later against ModelFlag (#647). There is no text to parse."""
 
-    def test_parses_no_flags(self):
-        assert _parse_llm_response('{"consolidation_corrections": []}') == []
+    def test_reads_no_flags(self):
+        assert _structured_flags({"consolidation_corrections": []}) == []
 
-    def test_parses_flagged_queries(self):
-        response = json.dumps({"consolidation_corrections": [_flag("q-1"), _flag("q-2")]})
-        result = _parse_llm_response(response)
-        assert [f.query_ids for f in result] == [["q-1"], ["q-2"]]
-        assert result[0].reason_category.value == "full_scan"
+    def test_reads_the_raw_flag_entries(self):
+        answer = {"consolidation_corrections": [_flag("q-1"), _flag("q-2")]}
+        assert _structured_flags(answer) == [_flag("q-1"), _flag("q-2")]
 
-    def test_handles_markdown_code_fences(self):
-        response = "```json\n" + json.dumps({"consolidation_corrections": [_flag("q-1")]}) + "\n```"
-        assert [f.query_ids for f in _parse_llm_response(response)] == [["q-1"]]
+    def test_reads_a_built_response(self):
+        built = RealityCheckModelResponse(consolidation_corrections=[_flag("q-1")])
+        assert _structured_flags(built) == [_flag("q-1")]
 
-    def test_handles_invalid_json(self):
-        assert _parse_llm_response("This is not JSON at all") == []
-        assert _parse_flagged("This is not JSON at all") is None
+    def test_a_text_answer_is_no_answer(self):
+        """The old fence stripping and JSON parsing are gone: text is never read."""
+        text = "```json\n" + json.dumps({"consolidation_corrections": [_flag("q-1")]}) + "\n```"
+        assert _structured_flags(text) is None
+        assert _structured_flags(json.dumps({"consolidation_corrections": []})) is None
 
     def test_the_old_array_shape_is_not_the_contract(self):
-        response = json.dumps([{"query_id": "q-1", "reason": "bad fit"}])
-        assert _parse_flagged(response) is None
+        assert _structured_flags([{"query_id": "q-1", "reason": "bad fit"}]) is None
 
     def test_the_old_bedrock_only_wrapper_is_not_the_contract(self):
         """``{"flags": [...]}`` was Bedrock's own shape; both modes now share one."""
-        assert _parse_flagged(json.dumps({"flags": [_flag("q-1")]})) is None
+        assert _structured_flags({"flags": [_flag("q-1")]}) is None
 
-    def test_a_bad_entry_is_dropped_and_the_valid_flags_kept(self):
+    def test_a_bad_entry_is_kept_raw_for_the_per_entry_check(self):
         """#712 review: the same per-entry handling as the headless response."""
-        response = json.dumps(
-            {"consolidation_corrections": [_flag("q-1"), _flag("q-2", target_engine="documentdb")]}
-        )
-        assert len(_parse_flagged(response) or []) == 2  # raw, not yet validated
-        assert [f.query_ids for f in _parse_llm_response(response)] == [["q-1"]]
-
-    def test_handles_whitespace(self):
-        assert _parse_llm_response('  \n  {"consolidation_corrections": []}  \n  ') == []
+        answer = {
+            "consolidation_corrections": [_flag("q-1"), _flag("q-2", target_engine="documentdb")]
+        }
+        raw = _structured_flags(answer) or []
+        assert len(raw) == 2  # raw, not yet validated
+        flags, rejected = parse_model_flags(raw)
+        assert [f.query_ids for f in flags] == [["q-1"]] and len(rejected) == 1
 
 
 class TestBuildPrompt:
@@ -133,11 +133,13 @@ class TestBuildPrompt:
         assert "q-42" in prompt
         assert "users" in prompt
         assert "10.0 cps" in prompt
-        assert "JSON" in prompt
-        # The format asks for the shared contract on the engine under review;
-        # the system prompt (the skill) says a flag never names a destination.
+        # The answer is the shared contract's tool, on the engine under review
+        # (#746 item 5); the system prompt (the skill) says a flag never names
+        # a destination. No JSON text is asked for any more.
+        assert "calling the RealityCheckModelResponse tool" in prompt
         assert '"flagged_engine" set to "dynamodb"' in prompt
-        assert '{"consolidation_corrections": []}' in prompt
+        assert 'an empty "consolidation_corrections"' in prompt
+        assert "JSON" not in prompt and "compact" not in prompt
 
 
 class TestSanitySweepOrphanRemoval:

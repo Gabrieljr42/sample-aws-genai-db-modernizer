@@ -168,3 +168,10 @@ export function accessPatternTotals(synthesis, shownOwned, shownCacheLayer) {
   }
   return { owned: shownOwned || 0, cacheLayer: shownCacheLayer || 0, listed: (shownOwned || 0) + (shownCacheLayer || 0) };
 }
+
+// #746: the reality-check moves no model reviewed (facts.unreviewed_move_count);
+// 0 when none, or for a report written before the figure.
+export function unreviewedMoveCountOf(synthesis) {
+  const n = factsOf(synthesis) && factsOf(synthesis).unreviewed_move_count;
+  return typeof n === 'number' ? n : 0;
+}

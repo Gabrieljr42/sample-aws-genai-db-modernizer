@@ -177,7 +177,8 @@ class TestMigrationWaves:
         report = store.read_json(f"{DB}/{JOB}/synthesis/v2/report.json")
         # #1020: facts.in_scope_query_count, facts.moving_query_count and
         # facts.resolved_risks_by_severity added
-        assert report["contract_version"] == "1.28"
+        # #746: facts.unreviewed_move_count added
+        assert report["contract_version"] == "1.31"
         assert len(report["migration_waves"]) == 3
         assert report["migration_waves"][2]["engines"] == ["dynamodb"]
 

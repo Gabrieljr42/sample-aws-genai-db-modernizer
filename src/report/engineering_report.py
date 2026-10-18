@@ -48,6 +48,7 @@ from .risks import (
     resolved_risks,
 )
 from .roadmap import _roadmap_md
+from .unreviewed import unreviewed_moves_md
 from .unservable import unservable_md
 
 # Stated once, after the summary: the retired decision report's closing words (#987).
@@ -724,6 +725,7 @@ def render_engineering_report_md(
             )
         out.append("")
 
+    out += unreviewed_moves_md(report)
     out += _tied_queries_md(report)
     out += unservable_md(report)
     out += close_calls_md(report)

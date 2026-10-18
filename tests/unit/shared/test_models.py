@@ -455,6 +455,7 @@ def test_default_requests_exactly():
         "model_id": "us.anthropic.claude-sonnet-5-5",
         "max_tokens": ADAPTIVE_MAX_TOKENS_FLOOR,
         "additional_request_fields": {"output_config": {"effort": "medium"}},
+        "strict_tools": True,  # #746: Bedrock accepted the validator schema in strict mode
     }
     assert converse_request_fields(Role.VALIDATOR) == {
         "modelId": "us.anthropic.claude-sonnet-5-5",
@@ -747,7 +748,13 @@ def test_summaries_and_validator_use_their_roles(monkeypatch):
                 "message": {
                     "content": [
                         {"reasoningContent": {}},
-                        {"text": '{"consolidation_corrections": []}'},
+                        {
+                            "toolUse": {
+                                "toolUseId": "t1",
+                                "name": "RealityCheckModelResponse",
+                                "input": {"consolidation_corrections": []},
+                            }
+                        },
                     ]
                 }
             }
@@ -757,6 +764,8 @@ def test_summaries_and_validator_use_their_roles(monkeypatch):
     assert kwargs["modelId"] == MODEL_IDS["sonnet-5.5"]
     assert "temperature" not in kwargs["inferenceConfig"]
     assert kwargs["additionalModelRequestFields"] == {"output_config": {"effort": "medium"}}
+    # Sonnet 5.5 rejects a forced tool_choice, so the answer tool goes out as auto (#746).
+    assert kwargs["toolConfig"]["toolChoice"] == {"auto": {}}
 
 
 def test_light_check_reads_the_text_block(monkeypatch):

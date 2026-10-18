@@ -18237,6 +18237,14 @@
                     "type": "integer"
                   }
                 },
+                "unreviewed_move_count": {
+                  "required": false,
+                  "schema": {
+                    "kind": "scalar",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
                 "unservable": {
                   "required": false,
                   "schema": {
@@ -21589,8 +21597,8 @@
         }
       }
     },
-    "schema_hash": "0e9d8f92428b12eeadfcb13295b8203f0bacdc1d290c26692655f88451d88c9c",
-    "version": "1.28"
+    "schema_hash": "d7b7f8a1009e55bfbb01d471c50caa8c927ef814b3a9d5d8753034bfc6410f4b",
+    "version": "1.31"
   },
   "triage_output.TriageOutputContract": {
     "fields": {

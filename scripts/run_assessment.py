@@ -899,7 +899,17 @@ def _synthesis_status(store, job_id: str, db: str) -> dict:
         if store.exists(key):
             artifact = _path(store, key)
             _log_artifact("synthesis", artifact)
-            return {"status": "complete", "assignment_version": version, "artifact": artifact}
+            status: dict = {
+                "status": "complete",
+                "assignment_version": version,
+                "artifact": artifact,
+            }
+            # #746: reality-check moves no model reviewed, stated in every
+            # deliverable; on the status line too, so a run never hides them.
+            facts = (store.read_json(key) or {}).get("facts") or {}
+            if facts.get("unreviewed_move_count"):
+                status["unreviewed_moves"] = facts["unreviewed_move_count"]
+            return status
     return {
         "status": "error",
         "assignment_version": version,

@@ -91,6 +91,7 @@ from .risks import (
 )
 from .roadmap import _SUGGESTED_PATH_NOTE, _moves_from_label, _wave_headline_stats
 from .roadmap import resolve_migration_waves as _resolve_waves
+from .unreviewed import unreviewed_moves_line
 from .unservable import UNSERVABLE_INTRO, UNSERVABLE_RERUN_TEXT, unservable_title
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ L_DECISIONS_REALITY = "Reality-check decisions"
 L_COST_BREAKDOWN = "Cost by engine"
 L_ASSUMPTIONS = "Assumptions"
 L_TIED_BETWEEN = "Tied between"
+L_NOT_REVIEWED = "Not reviewed"
 
 # ---------------------------------------------------------------------------
 # design: the retired deck's own values (13.33 x 7.5 in, Amazon Ember, dark theme)
@@ -1032,6 +1034,11 @@ def _decisions(report: dict[str, Any], st: dict[str, ParagraphStyle], names: Any
     facts = report_facts(report)
     flow: list[Flowable] = [_Section(H_DECISIONS)]
     cards: list[_Panel] = []
+    unreviewed = unreviewed_moves_line(report)
+    if unreviewed:
+        cards.append(
+            _Panel([_para(L_NOT_REVIEWED, st["card_title"]), _para(unreviewed, st["body"])], YELLOW)
+        )
     tied = [t for t in (report.get("tied_queries") or []) if isinstance(t, dict)]
     if tied:
         n = int(facts.get("tied_query_count") or 0)

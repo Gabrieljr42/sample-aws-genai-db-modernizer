@@ -331,6 +331,12 @@ Version History:
   empty, and a facts block written before 1.28 gains them from ``ranking`` and
   ``risk_assessment.resolved_risks`` when read (``src.report.facts.report_facts``
   and the results API).
+- 1.31 (2026-10-18, #746): ``facts.unreviewed_move_count``: the reality-check
+  moves no model reviewed (the moved queries of each consolidation review
+  batch that got no verdict), from ``reality_check.validation_incomplete``,
+  which synthesis now copies from the reality-check output. Every deliverable
+  states it when it is not zero. Backward compatible: 0 for a report written
+  before 1.31.
 """
 
 from datetime import datetime
@@ -1161,6 +1167,14 @@ class ReportFacts(BaseModel):
         description="The resolved risks by severity (#1020), as open_risks_by_severity",
     )
     tied_query_count: int = Field(0, ge=0)
+    unreviewed_move_count: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Reality-check moves no model reviewed: the moved queries of every consolidation "
+            "review batch that got no verdict (reality_check.validation_incomplete, #746)"
+        ),
+    )
     post_schema_reroute_count: int = Field(
         0, ge=0, description="Queries moved after approval (#629, post_schema_reroutes)"
     )
@@ -1236,7 +1250,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.28",
+        default="1.31",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

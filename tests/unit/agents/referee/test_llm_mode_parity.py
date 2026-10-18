@@ -323,11 +323,11 @@ class TestRealityCheckResponseContract:
         with pytest.raises(ValidationError):
             apply_reality_check_llm_output({}, {"consolidation_corrections": "not a list"})
 
-    def test_the_bedrock_text_fallback_parses_the_same_shape(self):
-        from src.agents.referee.consolidation_validator import _parse_flagged
+    def test_the_bedrock_structured_answer_reads_the_same_shape(self):
+        from src.agents.referee.consolidation_validator import _structured_flags
 
-        assert _parse_flagged(json.dumps({"consolidation_corrections": [FLAG]})) == [FLAG]
-        assert _parse_flagged(json.dumps({"flags": [FLAG]})) is None
+        assert _structured_flags({"consolidation_corrections": [FLAG]}) == [FLAG]
+        assert _structured_flags({"flags": [FLAG]}) is None
 
 
 # ---------------------------------------------------------------------------
