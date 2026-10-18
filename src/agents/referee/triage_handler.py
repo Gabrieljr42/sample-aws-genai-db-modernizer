@@ -77,13 +77,14 @@ def run_triage(job_id: str, database_name: str, store: ArtifactStore) -> None:
 
 
 def _compute_triage_confidence(result) -> int:
-    """Compute triage confidence (0-100) based on signal coverage.
+    """Triage confidence (0-100) from evidence: the workload signals that fired.
 
-    More signals with evidence = higher confidence in agent selection.
-    Base confidence is 50 (we always have some basis for selection).
-    Each signal adds up to 5 points, capped at 100.
+    Base confidence is 50 (the schema and query statistics are always some basis
+    for selection); each signal that fired adds 5 points, capped at 50, so ten
+    signals reach 100. How many engines are selected is not evidence (#927): every
+    query-owning engine is analysed whatever the workload shows (#922), so a
+    workload with no signals stays at the base.
     """
     base = 50
-    signal_bonus = min(len(result.signals) * 5, 40)
-    selection_bonus = min(len(result.selected) * 3, 10)
-    return min(base + signal_bonus + selection_bonus, 100)
+    signal_bonus = min(len(result.signals) * 5, 50)
+    return min(base + signal_bonus, 100)

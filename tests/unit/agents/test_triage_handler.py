@@ -717,3 +717,47 @@ def _has_reason(result, agent: str, keyword: str) -> bool:
 
 def _has_reason_deferred(result, agent: str, keyword: str) -> bool:
     return any(keyword in r for r in result.deferred.get(agent, []))
+
+
+class TestTriageConfidenceIsEvidence:
+    """#927: triage confidence counts the signals that fired, never how many engines
+    are selected (since #922 every query-owning engine always is)."""
+
+    @staticmethod
+    def _result(signals: int, selected: int):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            signals=[object()] * signals,
+            selected={f"engine-{i}": ["reason"] for i in range(selected)},
+        )
+
+    def test_no_signals_is_the_base_whatever_is_selected(self):
+        from src.agents.referee.triage_handler import _compute_triage_confidence
+
+        assert {_compute_triage_confidence(self._result(0, n)) for n in (0, 1, 3, 6)} == {50}
+
+    def test_more_selected_engines_add_nothing(self):
+        from src.agents.referee.triage_handler import _compute_triage_confidence
+
+        assert _compute_triage_confidence(self._result(3, 1)) == _compute_triage_confidence(
+            self._result(3, 6)
+        )
+
+    def test_each_signal_adds_five_up_to_one_hundred(self):
+        from src.agents.referee.triage_handler import _compute_triage_confidence
+
+        assert [_compute_triage_confidence(self._result(n, 5)) for n in (1, 4, 9, 10, 14)] == [
+            55,
+            70,
+            95,
+            100,
+            100,
+        ]
+
+    def test_a_collection_with_no_signals_reads_the_base(self):
+        from src.agents.referee.triage_handler import _compute_triage_confidence
+
+        result = triage(_co(queries=[], tables=[]))
+        assert result.signals == []
+        assert _compute_triage_confidence(result) == 50
