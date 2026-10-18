@@ -17,7 +17,7 @@ under the names the analysis tools import. Edit the TOML file, not this module.
 """
 
 from src.shared.catalog import score_weights
-from src.shared.catalog.patterns import catalog_entries
+from src.shared.catalog.patterns import catalog_entries, pattern
 from src.tools.analysis.pattern_catalog_base import (
     CatalogAntiPattern,
     CatalogPattern,
@@ -74,6 +74,11 @@ HIGH_FREQUENCY_PK_LOOKUP_GUIDANCE = _guidance("high-frequency-pk-lookup")
 SIMPLE_CACHE_READ_GUIDANCE = _guidance("simple-cache-read")
 FULL_TEXT_SEARCH_GUIDANCE = _guidance("full-text-search-candidate")
 TIME_SERIES_INGEST_GUIDANCE = _guidance("unbounded-time-series-ingest")
+# Reads below this share of a table's calls are negligible for aurora-anti-04: the
+# pattern file's ``negligible_read_share`` (maintainer decision on #904).
+TIME_SERIES_INGEST_NEGLIGIBLE_READ_SHARE: float = (
+    pattern("unbounded-time-series-ingest").negligible_read_share or 0.0
+)
 NO_RELATIONAL_NEED_GUIDANCE = _guidance("no-relational-need")
 SINGLE_ACCESS_PATTERN_GUIDANCE = _guidance("single-access-pattern-table")
 HIGH_VOLUME_TEXT_SEARCH_GUIDANCE = _guidance("high-volume-text-search")
