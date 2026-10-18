@@ -396,6 +396,18 @@ obvious entries lives here instead:
 - `Edit`/`Write` of `.local-ui/**` (and the old `artifacts/.local-ui/**`) are
   denied: that is `scripts/start_local_ui.py`'s pid file, and `--stop` signals
   the pids it lists.
+- `Bash(uv run python scripts/run_pe_review.py *)` and
+  `Bash(uv run python scripts/run_post_schema_routing.py *)` (#1059): the
+  headless schema-design PE review and post-schema reroute, the steps Bedrock
+  mode runs inside schema design. `run_pe_review.py` writes one review request
+  per design (per group for DynamoDB) under `artifacts/` and, with
+  `--finalize`, records the review subagent's answer in the design trace;
+  `run_post_schema_routing.py` runs the shared router one pass per call
+  (`--rollback` after a failed redesign). Both only read and write the job's
+  own artifacts and print one JSON line.
+- `Skill(review-schema)`: the PE review subagent `/modernize` Phase 6c
+  dispatches, one per design (#1059), allowed by exact name like the others
+  below.
 - `Skill(reality-check)`, `Skill(synthesize)`, `Skill(design-schema-*)` plus
   each `Skill(design-schema-<engine>)` by exact name: the sub-commands
   `/modernize` dispatches to subagents. The prefix form is documented, but

@@ -50,10 +50,18 @@ Nesting is one level deep: only the top-level session dispatches subagents, beca
    ```
 
    - `"status": "drafts_pending"`: `drafts_missing` lists the groups without a draft and `drafts_invalid` those whose draft is not a readable JSON object. Redo the Group draft task for each of them (one fresh subagent each, or yourself if you are a subagent), **at most once** per run. If `--status` still prints `drafts_pending` after that redo, stop: set `phase_status.schema_design_dynamodb` = "failed" and return `failed` with the missing and invalid groups as your result.
-   - `"status": "merge_pending"`: go to Step 5.
+   - `"status": "merge_pending"`: run the PE review (below), then go to Step 5.
    - `"status": "merged"`: the last `--merge` ran on exactly these drafts and passed; go to Step 6.
    - `"status": "merge_failed"`: the last `--merge` ran on these drafts and failed (`errors`). Treat it as a `--merge` attempt that printed `validation_failed` (Step 5).
    - Any other output or a non-zero exit: set `phase_status.schema_design_dynamodb` = "failed" and return `failed` with that output.
+
+   **PE review of the group drafts**, the review Bedrock mode runs on every group, before the merge (the merge records each group's review in the design trace):
+
+   ```bash
+   uv run python scripts/run_pe_review.py --job-id {job_id} --db {database_name} --engine dynamodb
+   ```
+
+   If it prints `"status": "awaiting_llm"`, its `reviews` list one review per group draft. Run on your own, dispatch one subagent per review, all in a single message, with the `/modernize` 6c task text (`Follow /review-schema ...`), and wait for them all. If you are yourself a subagent, follow `/review-schema` for each review yourself, one after another. A review that fails leaves its group with no routing flags; it never fails the phase.
 
 5. **Merge group drafts**
 

@@ -109,7 +109,7 @@ Only proceed to schema design after user approval (unless `--auto`).
 
 Design exactly the engines in `schema_design_engines` from the `reality_check` status line (or the `engine_choices` line, when you settled pending engine choices) — never re-derive the list from `after_distribution` (it lists owners only, so the cache-layer engine would be dropped). The skill name replaces every `_` in the engine id with `-`: `aurora_mysql` → `/design-schema-aurora-mysql`.
 
-DynamoDB is always designed as split → one subagent per group → merge, and **the orchestrator runs that flow itself** (6a-6c): never dispatch `/design-schema-dynamodb` as one subagent, because its group subagents would report to you, not to it.
+DynamoDB is always designed as split → one subagent per group → merge, and **the orchestrator runs that flow itself** (6a-6d): never dispatch `/design-schema-dynamodb` as one subagent, because its group subagents would report to you, not to it.
 
 **6a. Split DynamoDB** (only if `dynamodb` is in `schema_design_engines`):
 
@@ -135,13 +135,33 @@ It prints one JSON line with `assignment_version` (`{N}` below) and `groups`: pe
 
 Wait for all of them to report (see Waiting Rule). A non-DynamoDB subagent that returns `failed` (it set `phase_status.schema_design_<engine>` = "failed" after its 3 attempts) is a phase failure for `schema_design_<engine>`: see Error Handling.
 
-**6c. Merge DynamoDB** once every group subagent has reported. First check which drafts exist:
+**6c. PE review** once every schema subagent from 6b has reported: the review Bedrock mode runs after every design. Its routing flags are what the post-schema reroute (6e) reads.
+
+```bash
+uv run python scripts/run_pe_review.py --job-id {job_id} --db {database_name}
+```
+
+It prints one JSON line. `"status": "complete"`: there is nothing to review; go on. `"status": "awaiting_llm"`: `reviews` lists one review per design that has none recorded yet (one per group for DynamoDB), each with `engine`, `group` (`null` except for DynamoDB), `request`, `response` and `finalize`; `skipped` names the engines with nothing to review and why (an Aurora or ElastiCache review carries no routing flags). Launch one review subagent per entry, all in a SINGLE message, with this task text (`{ENGINE}`, `{GROUP}`, `{REQUEST}`, `{RESPONSE}` and `{FINALIZE}` = that entry's `engine`, `group`, `request`, `response` and `finalize`):
+
+```text
+Follow /review-schema for job_id={job_id} db={database_name} engine={ENGINE} group={GROUP}. Request: {REQUEST}. Write only {RESPONSE}, then run exactly: {FINALIZE}. Do not update .modernizer-state.json. Unattended: do not ask the user anything. Do not dispatch subagents yourself. Read files with the Read tool (use `offset`/`limit` for large files). Search file contents with `uv run python scripts/search_artifacts.py <regex> <path>` (or the Grep tool if this session has one). Use Bash only for the documented `uv run python scripts/…` commands; never use `cat`, `jq`, `python3 -c`, `sed`, `ls`, `cd` chains, heredocs or `grep`. Use a search's output as is: never pipe, chain or post-process it.
+```
+
+Wait for all of them to report (see Waiting Rule). A review subagent that returns `failed` is not a phase failure: that design keeps no routing flags, as when a Bedrock review errors. If it did not record that itself, record it with that entry's `finalize` command plus `--failed` (DynamoDB adds `--group {G}`), so 6e does not wait for it:
+
+```bash
+uv run python scripts/run_pe_review.py --job-id {job_id} --db {database_name} --engine {ENGINE} --finalize --failed
+```
+
+Run this step once per design round; one review per design is the whole budget.
+
+**6d. Merge DynamoDB** once every group subagent has reported. First check which drafts exist:
 
 ```bash
 uv run python scripts/run_schema_design.py --job-id {job_id} --db {database_name} --engine dynamodb --status
 ```
 
-- `"status": "drafts_pending"`: the groups in `drafts_missing` wrote no draft, and those in `drafts_invalid` wrote one that is not a readable JSON object. That is a phase failure for `schema_design_dynamodb` with reason `group drafts missing or invalid: <groups>` (see Error Handling: the retry is one fresh group subagent, same task text, per listed group). Never run `--merge` while drafts are missing or invalid.
+- `"status": "drafts_pending"`: the groups in `drafts_missing` wrote no draft, and those in `drafts_invalid` wrote one that is not a readable JSON object. That is a phase failure for `schema_design_dynamodb` with reason `group drafts missing or invalid: <groups>` (see Error Handling: the retry is one fresh group subagent, same task text, per listed group). Never run `--merge` while drafts are missing or invalid. After a redone group draft, run 6c again before `--merge` (it lists only the reviews not yet recorded).
 - `"status": "merged"`: the last `--merge` ran on exactly these drafts and passed. Set `phase_status.schema_design_dynamodb` = "complete".
 - `"status": "merge_failed"`: the last `--merge` ran on exactly these drafts and printed `validation_failed` (the same verdict; a group draft's own `validation_passed: false` does not make a merge fail). Treat it as a `--merge` attempt that printed `validation_failed` with these `errors` (below).
 - `"status": "merge_pending"`: run the merge:
@@ -165,7 +185,25 @@ Make **at most 3 `--merge` attempts in total**:
 
 Any other output or a non-zero exit is a phase failure for `schema_design_dynamodb` (from `--status` that includes `not_split`). Never run `--finalize` for DynamoDB; `--merge` is its final step.
 
-Unless `{experience_mode}` is `ui`, tell the user schema design is complete. Unless `{experience_mode}` is `chat`, add: table definitions, access patterns and GSIs are in the UI.
+**6e. Post-schema reroute** once every engine is designed and reviewed (after 6d, or after 6c without DynamoDB). It runs the router Bedrock mode runs after schema design: each flagged query (a review's routing flag or a designer's unsupported pattern) moves, with its co-dependency group, to its best-scoring engine among those the assignment keeps. The scorer decides, never the review.
+
+```bash
+uv run python scripts/run_post_schema_routing.py --job-id {job_id} --db {database_name}
+```
+
+It prints one JSON line:
+
+- `"status": "complete"`: nothing (more) to move. Set `phase_status.post_schema_routing` = "complete" and go on. `rerouted` counts the queries moved after approval in this run.
+- `"status": "awaiting_redesign"`: the router moved `pass_rerouted` queries and wrote them as assignment version `assignment_version` (`rerouted_after_approval`). Design again exactly the engines in `missing_designs`, the way 6a-6d design them: DynamoDB split → group drafts → reviews → merge, every other engine one `/design-schema-<engine>` subagent (6b task text) and then its review (6c). Launch the design subagents in a single message; the scripts pick the new version themselves. Then run this command again. While `missing_reviews` lists a design (its review is not recorded yet), no pass runs either: run 6c for it (and `--merge` again for a DynamoDB group), then run this command again. It prints `awaiting_redesign` at most twice in a run: the same cascade bound as Bedrock mode.
+- A redesign that fails (its phase failure, after the one retry under `--auto`): run the rollback once, which writes a version restating the one the reroute started from, with its designs (as Bedrock mode does), then end as that `schema_design_<engine>` phase failure (see Error Handling):
+
+  ```bash
+  uv run python scripts/run_post_schema_routing.py --job-id {job_id} --db {database_name} --rollback
+  ```
+
+- `"status": "error"` or a non-zero exit is a phase failure for `post_schema_routing`.
+
+Unless `{experience_mode}` is `ui`, tell the user schema design is complete, with the count of queries moved after approval when 6e's `rerouted` is not 0. Unless `{experience_mode}` is `chat`, add: table definitions, access patterns and GSIs are in the UI.
 
 ### Phase 7: Synthesis
 
@@ -187,7 +225,7 @@ End the run with exactly one line `MODERNIZE_RESULT: complete job_id=<id> db=<db
 
 This applies headless and interactive. Never end a turn waiting unless a dispatched subagent is still running: a headless run ends as soon as a turn ends with nothing running.
 
-When every subagent you dispatched has reported, do not wait for anything else. Read `phase_status` in `.modernizer-state.json` (and, for DynamoDB, the `--status` line from 6c), then either finish the phase yourself (for example, run `--merge` when `--status` prints `merge_pending`, or set the phase complete and dispatch the next phase) or end with `MODERNIZE_RESULT: failed phase=<phase> reason=<one line>`. A subagent's completion notification is its final report: nobody else will run the next step for you.
+When every subagent you dispatched has reported, do not wait for anything else. Read `phase_status` in `.modernizer-state.json` (and, for DynamoDB, the `--status` line from 6d), then either finish the phase yourself (for example, run `--merge` when `--status` prints `merge_pending`, or set the phase complete and dispatch the next phase) or end with `MODERNIZE_RESULT: failed phase=<phase> reason=<one line>`. A subagent's completion notification is its final report: nobody else will run the next step for you.
 
 ## Subagent Dispatch Rules
 
@@ -210,5 +248,5 @@ If any phase fails:
 - If skip: mark phase as "skipped" in state, continue
 - If abort: stop pipeline, preserve all artifacts produced so far
 - **With `--auto`:** do not ask. Retry the failed phase once with a fresh subagent; if it fails again, stop the pipeline, preserve artifacts, and end with the line `MODERNIZE_RESULT: failed phase=<phase> reason=<one line>`.
-- **DynamoDB under `--auto`:** the retry for `schema_design_dynamodb` is one fresh group subagent per missing or invalid group (`drafts_pending`), or one more 6c round with a fresh fix subagent and a new budget of 3 `--merge` attempts (merge still `validation_failed` / `merge_failed`). The phase gets one retry in total. It gets no second one if a different failure follows the first. Set `phase_status.schema_design_dynamodb` = "failed" before retrying. If it fails again, end with `MODERNIZE_RESULT: failed phase=schema_design_dynamodb reason=<first error>`.
+- **DynamoDB under `--auto`:** the retry for `schema_design_dynamodb` is one fresh group subagent per missing or invalid group (`drafts_pending`), or one more 6d round with a fresh fix subagent and a new budget of 3 `--merge` attempts (merge still `validation_failed` / `merge_failed`). The phase gets one retry in total. It gets no second one if a different failure follows the first. Set `phase_status.schema_design_dynamodb` = "failed" before retrying. If it fails again, end with `MODERNIZE_RESULT: failed phase=schema_design_dynamodb reason=<first error>`.
 - **Schema design under `--auto`:** a `/design-schema-<engine>` subagent returning `failed` (still failing after its 3 `--finalize`/`--merge` attempts) is a phase failure like any other. Retry it once with a fresh subagent; if it fails again, end with `MODERNIZE_RESULT: failed phase=schema_design_<engine> reason=<first validation error>`. Never mark that engine's schema design complete.

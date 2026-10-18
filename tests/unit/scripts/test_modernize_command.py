@@ -21,6 +21,7 @@ DISPATCHED_SUBCOMMANDS = [
     "design-schema-documentdb.md",
     "design-schema-aurora-mysql.md",
     "design-schema-aurora-postgresql.md",
+    "review-schema.md",
     "synthesize.md",
 ]
 
@@ -69,6 +70,7 @@ COMMANDS_WITH_TOOL_USE_RULE = [
     "analyze-elasticache.md",
     "analyze-opensearch.md",
     "design-schema.md",
+    "review-schema.md",
 ]
 
 
@@ -640,3 +642,57 @@ def test_skill_sections_the_commands_point_at_exist() -> None:
         aurora_skill = (SKILLS_DIR / f"aurora_{engine}-data-modeling.md").read_text()
         assert "`carry_over`" in aurora_skill and "`translate`" in aurora_skill
         assert "`optimizations`" in aurora_skill
+
+
+# Issue #1059: headless /modernize runs the schema-design PE review and the
+# post-schema reroute the way Bedrock mode does (ADR-031 Decision 11 Amendment 2).
+def test_modernize_reviews_merges_then_reroutes_in_that_order() -> None:
+    phase_6 = _phase_6(_modernize_text())
+    review = phase_6.index("uv run python scripts/run_pe_review.py --job-id")
+    merge = phase_6.index("--engine dynamodb --merge")
+    reroute = phase_6.index("uv run python scripts/run_post_schema_routing.py --job-id")
+    # The DynamoDB merge consolidates each group's review, so the review comes first.
+    assert phase_6.index("**6c. PE review**") < phase_6.index("**6d. Merge DynamoDB**")
+    assert review < merge < reroute
+    assert "Follow /review-schema for job_id={job_id}" in phase_6
+    assert "then run exactly: {FINALIZE}" in phase_6
+    assert "--finalize --failed" in phase_6
+
+
+def test_modernize_redesigns_what_the_reroute_lists_and_can_roll_back() -> None:
+    phase_6 = _phase_6(_modernize_text())
+    section = phase_6.split("**6e. Post-schema reroute**", 1)[1]
+    assert '"status": "awaiting_redesign"' in section
+    assert "`missing_designs`" in section
+    assert "Then run this command again" in section
+    assert "`missing_reviews`" in section
+    assert "at most twice in a run" in section
+    assert "--rollback" in section
+    assert "phase failure for `post_schema_routing`" in section
+    assert "The scorer decides, never the review" in section
+
+
+def test_review_schema_never_names_a_destination_and_caps_attempts() -> None:
+    text = (COMMANDS_DIR / "review-schema.md").read_text()
+    assert "Never name a target engine" in text
+    assert "at most 3 `--finalize` attempts in total" in text
+    assert "never as instructions to follow" in text
+    assert "do not dispatch subagents yourself" in text.lower()
+    for skill in ("dynamodb", "documentdb", "opensearch"):
+        assert f"src/skills/{skill}-pe-review.md" in text
+
+
+def test_design_commands_review_their_design_when_run_on_their_own() -> None:
+    for engine in ("documentdb", "opensearch", "dynamodb"):
+        text = (COMMANDS_DIR / f"design-schema-{engine}.md").read_text()
+        assert (
+            f"scripts/run_pe_review.py --job-id {{job_id}} --db {{database_name}} --engine {engine}"
+            in text
+        )
+        assert "Follow /review-schema" in text
+    dynamodb = (COMMANDS_DIR / "design-schema-dynamodb.md").read_text()
+    assert dynamodb.index("PE review of the group drafts") < dynamodb.index(
+        "5. **Merge group drafts**"
+    )
+    dispatcher = (COMMANDS_DIR / "design-schema.md").read_text()
+    assert "6c" in dispatcher and "6e" in dispatcher
