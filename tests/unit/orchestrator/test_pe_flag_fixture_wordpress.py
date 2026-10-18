@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -156,8 +155,6 @@ def flagged(tmp_path_factory) -> dict:
     with (
         patch("src.tools.schema.dynamodb_schema_agent.Agent", _replay_agent(review)),
         patch("src.tools.schema.dynamodb_schema_agent._build_model", return_value=object()),
-        # One group at a time (#1054: parallel groups shared the input paths).
-        patch.dict(os.environ, {"SCHEMA_GROUP_CONCURRENCY": "1"}),
     ):
         design(JOB, DB, "dynamodb", store, 2)
         trace_v2 = store.read_json(f"{prefix}/schema-dynamodb/v2/design_trace.json")
