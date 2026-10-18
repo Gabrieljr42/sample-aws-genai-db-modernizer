@@ -100,8 +100,9 @@ names and list-of-object shapes:
 - `query_capabilities` — per-query hard-capability requirements (detected via
   `src/agents/referee/capability_registry.py`), used later to catch an engine
   that cannot actually serve a query it was assigned.
-- `confidence_score` — 0-100, computed from signal and selection counts (see
-  `_compute_triage_confidence` in `triage_handler.py`).
+- `confidence_score` — 0-100, computed from the signals that fired (50 plus 5
+  per signal, up to 100; see `_compute_triage_confidence` in
+  `triage_handler.py`). How many engines are selected does not count.
 - `job_id`, `database_name`, `contract_version`, `agent_type`, `timestamp` —
   envelope fields.
 
