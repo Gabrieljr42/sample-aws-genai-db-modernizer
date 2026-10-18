@@ -9,7 +9,8 @@ of the engine and pattern facts every consumer must agree on. Python reads them 
   (``engineNames.js``, ``cacheLayer.js``, ``ChartSankey.js`` and ``AssignmentGate.js``
   import it), since the UI cannot read TOML at run time;
 - ``docs/architecture/rule-catalog.md``: the pattern x engine matrix (support, score,
-  penalty, why) next to the engine properties, for review.
+  penalty, why) next to the engine properties, and the relational-move gap rules
+  (``src/catalog/gaps/*.toml``, #471), for review.
 
 Usage:
     uv run python scripts/render_catalog.py            # write both files
@@ -36,6 +37,13 @@ from src.shared.catalog import (  # noqa: E402
     default_score_weights,
     engine_ids,
     engines,
+)
+from src.shared.catalog.gaps import (  # noqa: E402
+    GAP_IMPACTS,
+    AuroraVersionLines,
+    GapRule,
+    aurora_version_lines,
+    gap_rules,
 )
 from src.shared.catalog.patterns import (  # noqa: E402
     PENALTY_POINTS,
@@ -263,7 +271,105 @@ def render_md(entries: tuple[EngineEntry, ...], pattern_entries: tuple[PatternEn
         if future:
             out.append(f"- Not modelled yet (future enhancement): {md_text(', '.join(future))}.")
         out.append("")
+    out += render_gaps_md(
+        gap_rules(), aurora_version_lines(), {e.id: e.display_name for e in entries}
+    )
     return "\n".join(out).rstrip("\n") + "\n"
+
+
+_IMPACT_LABELS = {
+    "blocks_move": "Blocks the move",
+    "needs_rewrite": "Needs a rewrite",
+    "behaves_differently": "Behaves differently",
+    "informational": "Informational",
+}
+
+_MATCH_LABELS = (
+    ("calls", "calls"),
+    ("words", "words"),
+    ("syntax", "syntax"),
+    ("statement_endings", "statement endings"),
+    ("data_types", "column types"),
+    ("storage_engines", "storage engines"),
+    ("collations", "collations"),
+    ("routine_languages", "routine languages"),
+)
+
+
+def _match_text(rule: GapRule) -> str:
+    """What a rule looks for, as one Markdown line."""
+    match = rule.match
+    if match.always:
+        return "every source of these engines"
+    if match.version:
+        return f"version: {match.version.replace('_', ' ')}"
+    parts = [
+        f"{label} " + ", ".join(f"`{v}`" for v in getattr(match, name))
+        for name, label in _MATCH_LABELS
+        if getattr(match, name)
+    ]
+    if match.unless_followed_by:
+        parts.append("not before " + ", ".join(f"`{v}`" for v in match.unless_followed_by))
+    if match.extension:
+        parts.append(
+            f"the `{match.extension}` extension: CREATE EXTENSION, its installed C functions, "
+            "or calls to "
+            + ", ".join(f"`{v}`" for v in match.extension_calls)
+            + " unqualified or in "
+            + ", ".join(f"`{v}`" for v in match.extension_schemas)
+            + " (not a user's same-named function)"
+        )
+    if match.routines:
+        parts.append("every procedure, function and trigger")
+    return "; ".join(parts)
+
+
+def render_gaps_md(
+    rules: tuple[GapRule, ...], versions: dict[str, AuroraVersionLines], labels: dict[str, str]
+) -> list[str]:
+    """The relational-move gap rules section of the rule-catalog page (#471)."""
+    out = [
+        "## Relational move: version and feature gaps",
+        "",
+        "Generated from `src/catalog/gaps/*.toml` and `src/catalog/aurora_versions.toml` "
+        "(#471; field definitions: `src/shared/catalog/gaps.py`). Synthesis checks the "
+        "collection against the rules for wave 1's Aurora engine and writes the gaps to "
+        "`report.json`'s `facts.relational_gaps`; routing never reads them. Impacts, most "
+        "severe first: "
+        + ", ".join(f"`{i}` ({_IMPACT_LABELS[i].lower()})" for i in GAP_IMPACTS)
+        + ".",
+        "",
+        "| Aurora engine | Homogeneous sources | Version lines compared | Documentation |",
+        "|---|---|---|---|",
+    ]
+    for engine, entry in sorted(versions.items()):
+        out.append(
+            f"| {md_cell(labels.get(engine, engine))} | {', '.join(entry.source_engines)} | "
+            f"{', '.join(entry.lines)} | {md_cell(entry.docs)} |"
+        )
+    out += [
+        "",
+        "| Rule | Sources | Targets | Impact | Looks for |",
+        "|---|---|---|---|---|",
+    ]
+    ordered = sorted(rules, key=lambda r: (GAP_IMPACTS.index(r.impact), r.id))
+    for r in ordered:
+        targets = ", ".join(labels.get(t, t) for t in r.targets)
+        out.append(
+            f"| [`{r.id}`](#{r.id}) | {', '.join(r.source_engines)} | {md_cell(targets)} | "
+            f"{_IMPACT_LABELS[r.impact]} | {md_cell(_match_text(r))} |"
+        )
+    out.append("")
+    for r in ordered:
+        out += [
+            f"### {r.id}",
+            "",
+            f"{md_text(r.feature)}: {_IMPACT_LABELS[r.impact].lower()}. {md_text(r.reason)}",
+            "",
+            f"Documentation: {md_text(r.docs)}.",
+            "",
+        ]
+    return out
 
 
 def _outputs() -> list[tuple[Path, str]]:

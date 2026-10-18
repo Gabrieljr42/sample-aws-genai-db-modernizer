@@ -1119,3 +1119,59 @@ class TestOpaquePostgresTypes:
             _build_columns([self._col("bigint unsigned", "bigint")])[0].data_type
             == "bigint unsigned"
         )
+
+
+# ---------------------------------------------------------------------------
+# #471: storage engine, collation and routine language reach the contract
+# ---------------------------------------------------------------------------
+
+
+class TestRelationalGapInputs:
+    """The relational-move gap check reads what the collection reports and the
+    builders used to drop: a MySQL table's storage engine and collation (from
+    information_schema.TABLES) and a routine's language."""
+
+    @staticmethod
+    def _raw(**extra) -> dict:
+        return {
+            "table_name": "wp_posts",
+            "row_count": 1,
+            "data_size_mb": 0,
+            "columns": [
+                {
+                    "column_name": "id",
+                    "ordinal_position": 1,
+                    "data_type": "bigint",
+                    "is_nullable": "NO",
+                }
+            ],
+            "indexes": [],
+            "foreign_keys": [],
+            **extra,
+        }
+
+    def test_storage_engine_and_collation_are_kept(self):
+        (table,) = _build_tables(
+            [self._raw(engine="MyISAM", table_collation="utf8mb3_general_ci")], "db"
+        )
+        assert (table.storage_engine, table.collation) == ("MyISAM", "utf8mb3_general_ci")
+
+    @pytest.mark.parametrize("value", [None, "", "  "])
+    def test_missing_values_stay_none(self, value):
+        (table,) = _build_tables([self._raw(engine=value, table_collation=value)], "db")
+        assert (table.storage_engine, table.collation) == (None, None)
+
+    def test_a_table_without_them_still_builds(self):
+        (table,) = _build_tables([self._raw()], "db")
+        assert (table.storage_engine, table.collation) == (None, None)
+
+    def test_the_routine_language_is_kept(self):
+        from src.agents.collector.mysql_collector import _build_procedures
+
+        procs = _build_procedures(
+            [
+                {"routine_name": "f", "routine_type": "FUNCTION", "language": "PLPGSQL"},
+                {"routine_name": "p", "routine_type": "PROCEDURE"},
+            ]
+        )
+        assert [p.language for p in procs or []] == ["PLPGSQL", None]

@@ -42,7 +42,7 @@ def _data(**metadata: Any) -> dict[str, Any]:
 
 def test_a_collection_written_before_3_2_loads_with_none_in_use() -> None:
     contract = CollectorOutputContract(**_data())
-    assert contract.contract_version == "3.3"
+    assert contract.contract_version == "3.4"
     assert contract.metadata.engines_in_use == []
 
 

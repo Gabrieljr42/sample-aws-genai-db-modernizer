@@ -54,6 +54,7 @@ from src.agents.referee.synthesis_report import (
     source_database_label,
     source_table_count,
 )
+from src.agents.referee.table_assignments import retained_engine_for
 from src.agents.referee.table_resolution import PSEUDO_TABLES, SourceScope, TableNameResolver
 from src.agents.referee.write_groups import table_sources
 from src.contracts.executive_summary_response import (
@@ -67,6 +68,7 @@ from src.shared.contract_versioning import stamp_artifact_version
 from src.shared.engine_names import display_engine
 from src.shared.engines_in_use import engines_in_use
 from src.storage.artifact_store import ArtifactStore
+from src.tools.analysis.relational_gaps import detect_relational_gaps
 
 # ---------------------------------------------------------------------------
 # Seam 1: Deterministic — all builders, no LLM
@@ -827,8 +829,24 @@ def _write_synthesis_report(
     for qa in (data.assignment or {}).get("query_assignments", []):
         if qa.get("signal_override") and qa.get("assigned_engine"):
             signal_overrides.setdefault(qa["assigned_engine"], set()).add(qa["signal_override"])
+    # #471: the relational move's version and feature gaps against wave 1's Aurora
+    # engine (the one retained_engine_for names), from the collection; routing never
+    # reads them.
+    relational_gaps = None
+    if data.collector:
+        relational_gaps = detect_relational_gaps(
+            data.collector,
+            retained_engine_for(
+                data.collector,
+                (data.assignment or {}).get("query_assignments") or [],
+                (data.assignment or {}).get("aurora_engine_choice"),
+            ),
+        )
     output_data["facts"] = compute_report_facts(
-        output_data, view_ids=view_ids, signal_overrides=signal_overrides
+        output_data,
+        view_ids=view_ids,
+        signal_overrides=signal_overrides,
+        relational_gaps=relational_gaps,
     )
 
     output = SynthesisOutputContract.model_validate(output_data)

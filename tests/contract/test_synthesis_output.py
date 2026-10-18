@@ -405,8 +405,8 @@ class TestSynthesisOutputContract:
         # #1020: facts.in_scope_query_count, facts.moving_query_count and
         # facts.resolved_risks_by_severity added
         # #746: facts.unreviewed_move_count added
-        # #992: table_sources and facts.table_sources added (1.32)
-        assert output.contract_version == "1.33"
+        # #992: table_sources (1.32); #471: facts.relational_gaps (1.35)
+        assert output.contract_version == "1.35"
 
     def test_summary_input_budget_is_optional(self, valid_synthesis_data):
         assert (

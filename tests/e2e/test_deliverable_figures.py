@@ -36,7 +36,9 @@ from typing import Any
 
 import pytest
 
+from src.agents.referee.table_assignments import retained_engine_for
 from src.shared.report_facts import compute_report_facts
+from src.tools.analysis.relational_gaps import detect_relational_gaps
 from tests.e2e.deliverable_figures import (
     SEVERITIES,
     Figures,
@@ -194,8 +196,26 @@ def test_report_json_facts_are_the_facts_layer_output(run: PipelineResult) -> No
     report = _report_json(run)
     stored = report.get("facts")
     assert isinstance(stored, dict), "report.json has no facts block"
-    recomputed = compute_report_facts({k: v for k, v in report.items() if k != "facts"})
+    recomputed = compute_report_facts(
+        {k: v for k, v in report.items() if k != "facts"},
+        relational_gaps=_relational_gaps_from_the_job(run, report),
+    )
     assert stored == recomputed
+
+
+def _relational_gaps_from_the_job(run: PipelineResult, report: dict[str, Any]) -> Any:
+    """#471: the gap check reads the collection, not the report, so recompute it from
+    the job's own collector output and assignment, as synthesis does."""
+    job = run.job_dir()
+    collector = json.loads((job / "collector" / "output.json").read_text())
+    version = (report.get("assignment_summary") or {}).get("version")
+    assignment = json.loads((job / "assignment" / f"v{version}" / "assignment.json").read_text())
+    target = retained_engine_for(
+        collector,
+        assignment.get("query_assignments") or [],
+        assignment.get("aurora_engine_choice"),
+    )
+    return detect_relational_gaps(collector, target)
 
 
 def _rc_titles(report: dict[str, Any]) -> list[str]:

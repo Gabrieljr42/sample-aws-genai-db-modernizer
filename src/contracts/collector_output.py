@@ -1,7 +1,7 @@
 """
 CollectorOutputContract Pydantic Models
-Version: 3.2
-Last Modified: 2026-10-16
+Version: 3.4
+Last Modified: 2026-10-18
 Description: Output contract for all Collector agents with RDS-specific enhancements
 
 Version History:
@@ -15,6 +15,11 @@ Version History:
   runs today next to its source. Only these, and the source engine itself, can be
   retired for a saving; an engine the plan analysed and dropped never is.
   Backward compatible: defaults to empty (the source is the only engine running).
+- 3.3 (2026-10-17, #934): Added optional ``QueryPattern.parsed_facts``.
+- 3.4 (2026-10-18, #471): Added optional ``Table.storage_engine`` and
+  ``Table.collation`` (the MySQL family reports both), read by the relational-move gap
+  check. Backward compatible: both default to None (not reported), and a rule that
+  needs them then finds nothing.
 """
 
 import re
@@ -378,6 +383,21 @@ class Table(BaseModel):
     sample_data: list[dict[str, Any]] | None = Field(
         None, max_length=1000, description="Sample rows (anonymized if PII protection enabled)"
     )
+    storage_engine: str | None = Field(
+        None,
+        description=(
+            "The table's storage engine where the source has several (MySQL family: "
+            "information_schema.TABLES.ENGINE, e.g. InnoDB, MyISAM); read by the relational-move "
+            "gap check (#471)"
+        ),
+    )
+    collation: str | None = Field(
+        None,
+        description=(
+            "The table's default collation where the source reports one (MySQL family: "
+            "information_schema.TABLES.TABLE_COLLATION); read by the relational-move gap check (#471)"
+        ),
+    )
 
 
 class View(BaseModel):
@@ -676,11 +696,11 @@ class Metrics(BaseModel):
 class CollectorOutputContract(BaseModel):
     """
     Output contract for all Collector agents with RDS-specific enhancements
-    Version: 3.3
+    Version: 3.4
     """
 
     contract_version: str = Field(
-        default="3.3",
+        default="3.4",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

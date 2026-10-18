@@ -358,6 +358,13 @@ Version History:
   ``pending_choice_pairs``, ``auto_decided_choice_count``, ``auto_decided_query_count``
   and ``auto_decided_by_engine`` (``PendingChoicePair``, ``AutoDecidedEngine``). Backward compatible: None,
   0 or empty for a report synthesized before 1.33.
+- 1.35 (2026-10-18, #471, ADR-032): ``facts.relational_gaps``
+  (``RelationalGapFacts``): the relational move's version and feature gaps against
+  wave 1's Aurora engine, each with its impact (blocks the move, needs a rewrite,
+  behaves differently, informational), reason, documentation and evidence (tables,
+  queries, objects), from the rules in ``src/catalog/gaps/``. Computed once at
+  synthesis from the collection; no deliverable renders it yet. Backward compatible:
+  None for a report written before 1.35.
 """
 
 from datetime import datetime
@@ -1214,6 +1221,56 @@ class AutoDecidedEngine(BaseModel):
     tables: list[str] = Field(default_factory=list, description="Their tables, sorted")
 
 
+GapImpactLevel = Literal["blocks_move", "needs_rewrite", "behaves_differently", "informational"]
+
+
+class GapObject(BaseModel):
+    """A schema object a relational-move gap was found in (#471)."""
+
+    kind: Literal["column", "view", "procedure", "function", "trigger"]
+    id: str = Field(..., description="The object id; a column is <table_id>.<column_name>")
+
+
+class RelationalGap(BaseModel):
+    """One version or feature gap for the relational move (#471), from one catalog rule."""
+
+    rule_id: str = Field(..., description="The rule's file in src/catalog/gaps/")
+    feature: str = Field(..., description="What the rule found, by name")
+    impact: GapImpactLevel
+    reason: str = Field(..., description="One plain sentence on what to do about it")
+    docs: str = Field(..., description="The public AWS documentation the rule rests on")
+    tables: list[str] = Field(default_factory=list, description="Table ids it touches")
+    queries: list[str] = Field(default_factory=list, description="Query ids it was found in")
+    objects: list[GapObject] = Field(
+        default_factory=list, description="Columns, views, routines and triggers it was found in"
+    )
+
+
+class RelationalGapFacts(BaseModel):
+    """The relational move's version and feature gaps against its Aurora target (#471),
+    computed once at synthesis by ``src.tools.analysis.relational_gaps``."""
+
+    source_engine: str
+    source_version: str | None = None
+    source_line: str | None = Field(
+        None, description="The source's major version line (8.0, 16), when compared"
+    )
+    target_engine: str = Field(..., description="Wave 1's Aurora engine")
+    target_lines: list[str] = Field(
+        default_factory=list, description="The Aurora major version lines compared against"
+    )
+    version_checked: bool = Field(
+        False, description="Whether the source's version was compared (homogeneous sources)"
+    )
+    rules_checked: int = Field(0, ge=0, description="Catalog rules that apply to this move")
+    gaps: list[RelationalGap] = Field(
+        default_factory=list, description="Most severe impact first, then by rule id"
+    )
+    gaps_by_impact: dict[str, int] = Field(
+        default_factory=dict, description="Gaps per impact, every impact listed"
+    )
+
+
 class ReportFacts(BaseModel):
     """Every customer-facing figure, computed once at synthesis (#615, ADR-032).
 
@@ -1351,6 +1408,13 @@ class ReportFacts(BaseModel):
             "eventual-consistency risk (#992); None when the report has no table_sources"
         ),
     )
+    relational_gaps: RelationalGapFacts | None = Field(
+        None,
+        description=(
+            "The relational move's version and feature gaps against its Aurora target (#471); "
+            "None when there is no Aurora target, no collection, or the report predates 1.35"
+        ),
+    )
 
 
 class CappedList(BaseModel):
@@ -1395,7 +1459,7 @@ class SynthesisOutputContract(BaseModel):
     """
 
     contract_version: str = Field(
-        default="1.33",
+        default="1.35",
         pattern=r"^\d+\.\d+$",
         description="Contract version (MAJOR.MINOR format)",
     )

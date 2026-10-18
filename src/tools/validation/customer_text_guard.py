@@ -307,6 +307,13 @@ ID_FIELD_PATHS = frozenset(
         ("unservable_queries", "required_capabilities"),  # capability ids
         ("blocking_gates", "engine"),  # UnservableGate.engine / UnservableGateFact.engine
         ("blocking_gates", "gate"),  # gate kind code
+        # facts.relational_gaps (RelationalGapFacts, #471): the target engine id and
+        # each gap's evidence ids (tables, queries, objects). feature, reason and docs
+        # are the catalog's sentences and are scanned.
+        ("relational_gaps", "target_engine"),
+        ("gaps", "tables"),
+        ("gaps", "queries"),
+        ("objects", "id"),
     }
 )
 

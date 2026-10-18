@@ -848,3 +848,337 @@ Detected by `src.tools.analysis.documentdb_analysis_tools:analyze_documentdb_use
 - DocumentDB, fit 90 (documentdb-08): Complex aggregation queries \(multiple SUM/COUNT/MIN/MAX with JOINs\) that can be pre-computed at write time via CDC pipeline and stored as documents. Eliminates real-time aggregation entirely. Validated: 65x speedup in AnyCompany PoC.
 - No effect on: DynamoDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
+
+## Relational move: version and feature gaps
+
+Generated from `src/catalog/gaps/*.toml` and `src/catalog/aurora_versions.toml` (#471; field definitions: `src/shared/catalog/gaps.py`). Synthesis checks the collection against the rules for wave 1's Aurora engine and writes the gaps to `report.json`'s `facts.relational_gaps`; routing never reads them. Impacts, most severe first: `blocks_move` (blocks the move), `needs_rewrite` (needs a rewrite), `behaves_differently` (behaves differently), `informational` (informational).
+
+| Aurora engine | Homogeneous sources | Version lines compared | Documentation |
+|---|---|---|---|
+| Aurora MySQL | mysql | 8.0, 8.4 | Amazon Aurora MySQL release calendar (Aurora MySQL version 3 is MySQL 8.0-compatible, Aurora MySQL version 8.4 is MySQL 8.4-compatible); Amazon RDS Extended Support |
+| Aurora PostgreSQL | postgresql | 14, 15, 16, 17, 18 | Amazon Aurora PostgreSQL release calendar |
+
+| Rule | Sources | Targets | Impact | Looks for |
+|---|---|---|---|---|
+| [`postgresql-citus`](#postgresql-citus) | postgresql | Aurora PostgreSQL | Blocks the move | the `citus` extension: CREATE EXTENSION, its installed C functions, or calls to `CREATE_DISTRIBUTED_TABLE`, `CREATE_REFERENCE_TABLE`, `CITUS_ADD_NODE` unqualified or in `pg_catalog` (not a user's same-named function) |
+| [`postgresql-timescaledb`](#postgresql-timescaledb) | postgresql | Aurora PostgreSQL | Blocks the move | the `timescaledb` extension: CREATE EXTENSION, its installed C functions, or calls to `TIME_BUCKET`, `CREATE_HYPERTABLE`, `ADD_RETENTION_POLICY`, `ADD_COMPRESSION_POLICY`, `ADD_CONTINUOUS_AGGREGATE_POLICY` unqualified or in `public`, `_timescaledb_functions`, `timescaledb_experimental`, `timescaledb_information` (not a user's same-named function) |
+| [`postgresql-untrusted-language`](#postgresql-untrusted-language) | postgresql | Aurora PostgreSQL | Blocks the move | routine languages `plperlu`, `plpythonu`, `plpython2u`, `plpython3u`, `pltclu` |
+| [`db2-special-registers`](#db2-special-registers) | db2 | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | words `SYSDUMMY1`; syntax `CURRENT DATE`, `CURRENT TIMESTAMP`, `CURRENT TIME` |
+| [`db2-sql-pl-routines`](#db2-sql-pl-routines) | db2 | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | every procedure, function and trigger |
+| [`fetch-first-to-mysql`](#fetch-first-to-mysql) | sqlserver, oracle, db2 | Aurora MySQL | Needs a rewrite | syntax `ROWS ONLY`, `ROW ONLY` |
+| [`mariadb-sequences`](#mariadb-sequences) | mariadb | Aurora MySQL | Needs a rewrite | calls `NEXTVAL`, `LASTVAL`, `SETVAL`; syntax `NEXT VALUE FOR`, `PREVIOUS VALUE FOR` |
+| [`mysql-newer-major-version`](#mysql-newer-major-version) | mysql | Aurora MySQL | Needs a rewrite | version: newer than target |
+| [`mysql-non-innodb-storage-engine`](#mysql-non-innodb-storage-engine) | mysql, mariadb | Aurora MySQL | Needs a rewrite | storage engines `MyISAM`, `MRG_MYISAM`, `MERGE`, `ARCHIVE`, `CSV`, `FEDERATED`, `BLACKHOLE`, `Aria`, `TokuDB`, `ROCKSDB` |
+| [`mysql-query-cache-hint`](#mysql-query-cache-hint) | mysql, mariadb | Aurora MySQL | Needs a rewrite | words `SQL_CACHE` |
+| [`mysql-removed-functions`](#mysql-removed-functions) | mysql, mariadb | Aurora MySQL | Needs a rewrite | calls `PASSWORD`, `OLD_PASSWORD`, `ENCODE`, `DECODE`, `ENCRYPT`, `DES_ENCRYPT`, `DES_DECRYPT` |
+| [`oracle-builtin-functions`](#oracle-builtin-functions) | oracle | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | calls `NVL`, `NVL2`, `DECODE`, `ADD_MONTHS`, `MONTHS_BETWEEN`, `SYS_GUID`, `LISTAGG`; words `SYSDATE`, `SYSTIMESTAMP` |
+| [`oracle-connect-by`](#oracle-connect-by) | oracle | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | calls `SYS_CONNECT_BY_PATH`; words `CONNECT_BY_ROOT`; syntax `CONNECT BY` |
+| [`oracle-outer-join-operator`](#oracle-outer-join-operator) | oracle | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | syntax `( + )` |
+| [`oracle-plsql-routines`](#oracle-plsql-routines) | oracle | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | every procedure, function and trigger |
+| [`oracle-rownum-rowid`](#oracle-rownum-rowid) | oracle | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | words `ROWNUM`, `ROWID` |
+| [`oracle-sequences`](#oracle-sequences) | oracle | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | syntax `. NEXTVAL`, `. CURRVAL` |
+| [`oracle-types-no-equivalent`](#oracle-types-no-equivalent) | oracle | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | column types `long`, `long raw`, `bfile`, `rowid`, `urowid`, `xmltype`, `anydata`, `sdo_geometry` |
+| [`postgresql-newer-major-version`](#postgresql-newer-major-version) | postgresql | Aurora PostgreSQL | Needs a rewrite | version: newer than target |
+| [`postgresql-server-file-access`](#postgresql-server-file-access) | postgresql | Aurora PostgreSQL | Needs a rewrite | calls `PG_READ_FILE`, `PG_READ_BINARY_FILE`, `PG_LS_DIR`, `PG_STAT_FILE`, `LO_IMPORT`, `LO_EXPORT`; syntax `FROM PROGRAM`, `TO PROGRAM` |
+| [`sqlserver-apply-and-openjson`](#sqlserver-apply-and-openjson) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | calls `OPENJSON`, `OPENXML`; syntax `CROSS APPLY`, `OUTER APPLY` |
+| [`sqlserver-builtin-functions`](#sqlserver-builtin-functions) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | calls `ISNULL`, `LEN`, `CHARINDEX`, `STUFF`, `DATALENGTH`, `IIF`, `CHOOSE`, `COUNT_BIG`, `NEWID`, `NEWSEQUENTIALID` |
+| [`sqlserver-date-functions`](#sqlserver-date-functions) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | calls `GETDATE`, `GETUTCDATE`, `SYSDATETIME`, `SYSUTCDATETIME`, `SYSDATETIMEOFFSET`, `DATEADD`, `DATEDIFF`, `DATEDIFF_BIG`, `DATEPART`, `DATENAME`, `EOMONTH`, `DATEFROMPARTS` |
+| [`sqlserver-identity-functions`](#sqlserver-identity-functions) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | calls `SCOPE_IDENTITY`, `IDENT_CURRENT`; words `@@IDENTITY`, `@@ROWCOUNT` |
+| [`sqlserver-merge-to-mysql`](#sqlserver-merge-to-mysql) | sqlserver | Aurora MySQL | Needs a rewrite | words `MERGE`; not before `JOIN`, `UNION` |
+| [`sqlserver-top-clause`](#sqlserver-top-clause) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | words `TOP` |
+| [`sqlserver-tsql-routines`](#sqlserver-tsql-routines) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | every procedure, function and trigger |
+| [`sqlserver-types-no-equivalent`](#sqlserver-types-no-equivalent) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Needs a rewrite | column types `sql_variant`, `hierarchyid`, `rowversion`, `timestamp`, `geography` |
+| [`db2-isolation-clause`](#db2-isolation-clause) | db2 | Aurora MySQL, Aurora PostgreSQL | Behaves differently | statement endings `WITH UR`, `WITH CS`, `WITH RS`, `WITH RR` |
+| [`db2-types-behave-differently`](#db2-types-behave-differently) | db2 | Aurora MySQL, Aurora PostgreSQL | Behaves differently | column types `decfloat`, `graphic`, `vargraphic`, `dbclob` |
+| [`mariadb-to-aurora-mysql`](#mariadb-to-aurora-mysql) | mariadb | Aurora MySQL | Behaves differently | every source of these engines |
+| [`mysql-older-major-version`](#mysql-older-major-version) | mysql | Aurora MySQL | Behaves differently | version: older than target |
+| [`oracle-date-type`](#oracle-date-type) | oracle | Aurora MySQL, Aurora PostgreSQL | Behaves differently | column types `date` |
+| [`oracle-empty-string-is-null`](#oracle-empty-string-is-null) | oracle | Aurora MySQL, Aurora PostgreSQL | Behaves differently | every source of these engines |
+| [`postgresql-older-major-version`](#postgresql-older-major-version) | postgresql | Aurora PostgreSQL | Behaves differently | version: older than target |
+| [`sqlserver-case-insensitive-comparison`](#sqlserver-case-insensitive-comparison) | sqlserver | Aurora PostgreSQL | Behaves differently | every source of these engines |
+| [`sqlserver-merge-to-postgresql`](#sqlserver-merge-to-postgresql) | sqlserver | Aurora PostgreSQL | Behaves differently | words `MERGE`; not before `JOIN`, `UNION` |
+| [`sqlserver-table-and-query-hints`](#sqlserver-table-and-query-hints) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Behaves differently | calls `OPTION`; words `NOLOCK`, `READPAST`, `UPDLOCK`, `HOLDLOCK`, `ROWLOCK`, `PAGLOCK`, `TABLOCK`, `TABLOCKX`, `READUNCOMMITTED`, `NOEXPAND` |
+| [`sqlserver-types-behave-differently`](#sqlserver-types-behave-differently) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Behaves differently | column types `datetimeoffset`, `money`, `smallmoney`, `bit` |
+| [`mysql-sql-calc-found-rows`](#mysql-sql-calc-found-rows) | mysql, mariadb | Aurora MySQL | Informational | calls `FOUND_ROWS`; words `SQL_CALC_FOUND_ROWS` |
+| [`mysql-utf8mb3-character-set`](#mysql-utf8mb3-character-set) | mysql, mariadb | Aurora MySQL | Informational | collations `utf8_*`, `utf8mb3_*` |
+| [`oracle-types-mapped`](#oracle-types-mapped) | oracle | Aurora MySQL, Aurora PostgreSQL | Informational | column types `number`, `varchar2`, `nvarchar2`, `clob`, `nclob`, `blob`, `raw`, `binary_float`, `binary_double` |
+| [`postgresql-pgvector-half-sparse`](#postgresql-pgvector-half-sparse) | postgresql | Aurora PostgreSQL | Informational | column types `halfvec`, `sparsevec` |
+| [`source-version-unknown`](#source-version-unknown) | mysql, postgresql | Aurora MySQL, Aurora PostgreSQL | Informational | version: unknown |
+| [`sqlserver-babelfish-option`](#sqlserver-babelfish-option) | sqlserver | Aurora PostgreSQL | Informational | every source of these engines |
+| [`sqlserver-types-mapped`](#sqlserver-types-mapped) | sqlserver | Aurora MySQL, Aurora PostgreSQL | Informational | column types `datetime2`, `datetime`, `smalldatetime`, `nvarchar`, `nchar`, `ntext`, `text`, `image`, `tinyint`, `varbinary`, `uniqueidentifier`, `xml` |
+
+### postgresql-citus
+
+Citus distributed tables: blocks the move. Citus is not among the extensions Aurora PostgreSQL offers, so distributed and reference tables must become ordinary tables \(or move to a service that runs Citus\) before the move.
+
+Documentation: Extension versions for Amazon Aurora PostgreSQL.
+
+### postgresql-timescaledb
+
+TimescaleDB functions: blocks the move. TimescaleDB is not among the extensions Aurora PostgreSQL offers, so hypertables and their functions must be replaced \(for example with native partitioning and date\_trunc or date\_bin\) before the move.
+
+Documentation: Extension versions for Amazon Aurora PostgreSQL.
+
+### postgresql-untrusted-language
+
+Functions in an untrusted procedural language: blocks the move. Aurora PostgreSQL runs no untrusted procedural language, so these functions must be rewritten in PL/pgSQL or a trusted language \(for example with Trusted Language Extensions\) before the move.
+
+Documentation: Amazon Aurora User Guide, Working with Trusted Language Extensions for PostgreSQL; Extension versions for Amazon Aurora PostgreSQL.
+
+### db2-special-registers
+
+Db2 special registers and SYSDUMMY1: needs a rewrite. CURRENT DATE, CURRENT TIMESTAMP and SYSIBM.SYSDUMMY1 become CURRENT\_DATE, CURRENT\_TIMESTAMP and a query with no table.
+
+Documentation: AWS Schema Conversion Tool User Guide, Migrating from Db2 for LUW.
+
+### db2-sql-pl-routines
+
+SQL PL procedures, functions and triggers: needs a rewrite. Db2 SQL PL routines are converted to the target's procedural language \(PL/pgSQL on Aurora PostgreSQL, stored programs on Aurora MySQL\), by a schema conversion tool where it supports them and by hand otherwise.
+
+Documentation: AWS Schema Conversion Tool User Guide, Migrating from Db2 for LUW.
+
+### fetch-first-to-mysql
+
+FETCH FIRST and OFFSET ... FETCH row limits: needs a rewrite. Aurora MySQL has no FETCH FIRST or FETCH NEXT clause, so these row limits become LIMIT \(Aurora PostgreSQL runs them as they are\).
+
+Documentation: MySQL 8.0 Reference Manual, SELECT Statement \(LIMIT\).
+
+### mariadb-sequences
+
+MariaDB sequences: needs a rewrite. MariaDB sequence objects have no MySQL equivalent: replace NEXT VALUE FOR and NEXTVAL\(\) with AUTO\_INCREMENT columns or a counter table.
+
+Documentation: MariaDB documentation, CREATE SEQUENCE; MySQL 8.0 Reference Manual, Using AUTO\_INCREMENT.
+
+### mysql-newer-major-version
+
+Source MySQL major version newer than Aurora MySQL: needs a rewrite. The source runs a MySQL major version newer than every Aurora MySQL line, so the move goes to an older major version: replace any feature added since that line, and replicate with a tool that supports the downgrade.
+
+Documentation: Amazon Aurora MySQL release notes.
+
+### mysql-non-innodb-storage-engine
+
+Tables on a storage engine other than InnoDB: needs a rewrite. Aurora MySQL stores table data in InnoDB only, so these tables are converted to InnoDB during the move, which changes their locking, full-text indexing and crash behaviour.
+
+Documentation: Amazon Aurora User Guide, Migrating data to an Amazon Aurora MySQL DB cluster \(convert MyISAM tables to InnoDB\).
+
+### mysql-query-cache-hint
+
+Query cache hint SQL\_CACHE: needs a rewrite. MySQL 8.0 removed the query cache and its SQL\_CACHE modifier \(MariaDB keeps both, Aurora MySQL has neither\), so these queries must drop the hint.
+
+Documentation: MySQL 8.0 Reference Manual, Features Removed in MySQL 8.0 \(query cache\).
+
+### mysql-removed-functions
+
+Functions removed in MySQL 8.0: needs a rewrite. These functions were removed in MySQL 8.0, which Aurora MySQL version 3 is compatible with: replace PASSWORD\(\) with the server's own authentication and ENCODE/ENCRYPT/DES\_\* with AES\_ENCRYPT\(\) or SHA2\(\).
+
+Documentation: MySQL 8.0 Reference Manual, Features Removed in MySQL 8.0.
+
+### oracle-builtin-functions
+
+Oracle-only built-in functions: needs a rewrite. NVL, NVL2, DECODE, SYSDATE and the other Oracle-only functions have other names on the target \(COALESCE, CASE, CURRENT\_TIMESTAMP, ...\), so each call is converted.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Built-in functions.
+
+### oracle-connect-by
+
+Hierarchical CONNECT BY queries: needs a rewrite. CONNECT BY becomes a recursive common table expression \(WITH RECURSIVE\).
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Hierarchical queries.
+
+### oracle-outer-join-operator
+
+Oracle \(+\) outer join operator: needs a rewrite. The \(+\) outer join operator becomes an ANSI LEFT or RIGHT JOIN.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Joins.
+
+### oracle-plsql-routines
+
+PL/SQL procedures, functions and triggers: needs a rewrite. PL/SQL routines are converted to the target's procedural language \(PL/pgSQL on Aurora PostgreSQL, stored programs on Aurora MySQL\): a schema conversion tool converts most of the code, and the rest \(packages, autonomous transactions, DBMS\_ packages\) is rewritten by hand.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\); AWS Schema Conversion Tool User Guide.
+
+### oracle-rownum-rowid
+
+ROWNUM and ROWID pseudo-columns: needs a rewrite. ROWNUM becomes LIMIT or ROW\_NUMBER\(\), and ROWID has no stable equivalent, so code that uses it reads by primary key instead.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), ROWNUM and ROWID.
+
+### oracle-sequences
+
+Oracle sequence reads: needs a rewrite. seq.NEXTVAL and seq.CURRVAL become nextval\('seq'\) and currval\('seq'\) on Aurora PostgreSQL, and AUTO\_INCREMENT columns or a counter table on Aurora MySQL.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Sequences.
+
+### oracle-types-no-equivalent
+
+Data types with no direct equivalent: needs a rewrite. LONG, LONG RAW, BFILE, ROWID, XMLType, ANYDATA and SDO\_GEOMETRY have no direct equivalent on the target, so their columns and the code that reads them are redesigned.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Data types; AWS Schema Conversion Tool User Guide.
+
+### postgresql-newer-major-version
+
+Source PostgreSQL major version newer than Aurora PostgreSQL: needs a rewrite. The source runs a PostgreSQL major version newer than every Aurora PostgreSQL version, so the move goes to an older major version: replace any feature added since, and move the data with logical replication or a dump.
+
+Documentation: Amazon Aurora PostgreSQL release calendar.
+
+### postgresql-server-file-access
+
+Server file system and shell access: needs a rewrite. Aurora PostgreSQL gives no superuser and no access to the database server's file system or shell, so reads and writes of server files move to Amazon S3 \(the aws\_s3 extension\).
+
+Documentation: Amazon Aurora User Guide, Understanding PostgreSQL roles and permissions; Importing data from Amazon S3 into an Aurora PostgreSQL DB cluster.
+
+### sqlserver-apply-and-openjson
+
+APPLY joins and OPENJSON or OPENXML: needs a rewrite. CROSS APPLY and OUTER APPLY become LATERAL joins, and OPENJSON and OPENXML become the target's JSON or XML table functions \(jsonb\_to\_recordset or JSON\_TABLE\).
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), JSON and XML.
+
+### sqlserver-builtin-functions
+
+T-SQL string, null and other built-in functions: needs a rewrite. These T-SQL functions have other names on the target, and ISNULL exists on Aurora MySQL with a different meaning, so each call is converted \(COALESCE, LENGTH, POSITION, gen\_random\_uuid\(\) or UUID\(\), COUNT\).
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), String functions; AWS Schema Conversion Tool User Guide.
+
+### sqlserver-date-functions
+
+T-SQL date and time functions: needs a rewrite. T-SQL date functions have other names or argument orders on the target, and DATEDIFF exists on Aurora MySQL with a different meaning, so each call is converted.
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Date and time functions.
+
+### sqlserver-identity-functions
+
+Identity and row count functions: needs a rewrite. SCOPE\_IDENTITY\(\), @@IDENTITY and @@ROWCOUNT become RETURNING on Aurora PostgreSQL, and LAST\_INSERT\_ID\(\) and ROW\_COUNT\(\) on Aurora MySQL.
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Identity and sequences.
+
+### sqlserver-merge-to-mysql
+
+MERGE statements on Aurora MySQL: needs a rewrite. Aurora MySQL has no MERGE statement, so each one becomes INSERT ... ON DUPLICATE KEY UPDATE plus a separate DELETE.
+
+Documentation: MySQL 8.0 Reference Manual, INSERT ... ON DUPLICATE KEY UPDATE Statement; AWS Schema Conversion Tool User Guide.
+
+### sqlserver-top-clause
+
+TOP row limits: needs a rewrite. TOP \(n\) becomes LIMIT n, and a DELETE or UPDATE with TOP becomes a keyed subquery.
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\); AWS Schema Conversion Tool User Guide.
+
+### sqlserver-tsql-routines
+
+T-SQL procedures, functions and triggers: needs a rewrite. T-SQL routines are converted to the target's procedural language \(PL/pgSQL on Aurora PostgreSQL, stored programs on Aurora MySQL\): a schema conversion tool converts most of the code, and the rest is rewritten by hand.
+
+Documentation: AWS DMS User Guide, Converting database schemas using DMS Schema Conversion; AWS Schema Conversion Tool User Guide.
+
+### sqlserver-types-no-equivalent
+
+Data types with no direct equivalent: needs a rewrite. sql\_variant, hierarchyid, rowversion \(timestamp\) and geography have no direct equivalent on the target, so their columns and the code that reads them are redesigned \(for example ltree or PostGIS on Aurora PostgreSQL\).
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Data types; AWS Schema Conversion Tool User Guide.
+
+### db2-isolation-clause
+
+Statement isolation clauses: behaves differently. WITH UR, CS, RS and RR set the isolation of one statement, which neither target can do, so the session's isolation level applies instead.
+
+Documentation: AWS Schema Conversion Tool User Guide, Migrating from Db2 for LUW.
+
+### db2-types-behave-differently
+
+Db2 data types that change behaviour: behaves differently. DECFLOAT and the double-byte GRAPHIC, VARGRAPHIC and DBCLOB types map to numeric and text types with other rounding and length rules, so check the code that computes with or measures them.
+
+Documentation: AWS Schema Conversion Tool User Guide, Migrating from Db2 for LUW.
+
+### mariadb-to-aurora-mysql
+
+MariaDB source on a MySQL-compatible target: behaves differently. Aurora MySQL is compatible with MySQL, not MariaDB, which diverged after 5.5: check every MariaDB-only feature the application uses \(system-versioned tables, Aria or ColumnStore tables, RETURNING, its JSON and optimizer differences\).
+
+Documentation: Amazon Aurora User Guide, Migrating data to an Amazon Aurora MySQL DB cluster; AWS DMS User Guide, Using a MySQL-compatible database as a source.
+
+### mysql-older-major-version
+
+Source MySQL major version older than Aurora MySQL: behaves differently. The source runs a MySQL major version older than every Aurora MySQL line with standard support, so the move is also a major version upgrade: review the removed features, new reserved words and changed defaults in the upgrade notes.
+
+Documentation: Amazon Aurora MySQL release notes; MySQL 8.0 Reference Manual, Changes in MySQL 8.0.
+
+### oracle-date-type
+
+Oracle DATE columns: behaves differently. An Oracle DATE carries a time of day, so it maps to timestamp \(Aurora PostgreSQL\) or datetime \(Aurora MySQL\), not date, and date arithmetic in the code changes.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Date and time data types.
+
+### oracle-empty-string-is-null
+
+Empty strings stored as NULL: behaves differently. Oracle stores an empty string as NULL, and both targets keep '' and NULL apart, so filters, joins and constraints on text columns can change.
+
+Documentation: Oracle to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Null handling.
+
+### postgresql-older-major-version
+
+Source PostgreSQL major version older than Aurora PostgreSQL: behaves differently. The source runs a PostgreSQL major version older than every Aurora PostgreSQL version with standard support, so the move is also a major version upgrade: review the incompatible changes in each release's notes.
+
+Documentation: Amazon Aurora PostgreSQL release calendar; PostgreSQL release notes \(Migration to Version N\).
+
+### sqlserver-case-insensitive-comparison
+
+Case-insensitive text comparison: behaves differently. SQL Server compares text case-insensitively under its default collation, and Aurora PostgreSQL compares case-sensitively unless a column uses citext or a nondeterministic ICU collation, so lookups, sorts and unique keys on text can change.
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Collations.
+
+### sqlserver-merge-to-postgresql
+
+MERGE statements on Aurora PostgreSQL: behaves differently. PostgreSQL 15 and later run MERGE, with differences from T-SQL: INTO is required, and the OUTPUT clause becomes RETURNING \(PostgreSQL 17\), so check each statement.
+
+Documentation: PostgreSQL documentation, MERGE; SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\).
+
+### sqlserver-table-and-query-hints
+
+T-SQL table and query hints: behaves differently. Neither target has T-SQL table or query hints, so they are dropped: readers never block writers under the targets' multi-version concurrency, so NOLOCK's dirty reads go away.
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Query hints and table hints.
+
+### sqlserver-types-behave-differently
+
+Data types that change behaviour: behaves differently. These types map to the nearest target type: datetimeoffset keeps the instant but not the original offset, money becomes numeric\(19,4\), and bit becomes boolean \(Aurora PostgreSQL\) or BIT\(1\) \(Aurora MySQL\), so check the code that compares or formats them.
+
+Documentation: SQL Server to Aurora PostgreSQL Migration Playbook \(AWS DMS documentation\), Data types.
+
+### mysql-sql-calc-found-rows
+
+SQL\_CALC\_FOUND\_ROWS and FOUND\_ROWS\(\): informational. SQL\_CALC\_FOUND\_ROWS and FOUND\_ROWS\(\) are deprecated since MySQL 8.0.17: they still run on Aurora MySQL, but a later version may remove them, so plan a COUNT\(\*\) query instead.
+
+Documentation: MySQL 8.0 Reference Manual, Information Functions \(FOUND\_ROWS deprecation\).
+
+### mysql-utf8mb3-character-set
+
+Tables in the utf8mb3 character set: informational. utf8mb3 \(also spelled utf8\) is deprecated in MySQL 8.0 and stores no 4-byte characters such as emoji: plan the conversion to utf8mb4.
+
+Documentation: MySQL 8.0 Reference Manual, The utf8mb3 Character Set.
+
+### oracle-types-mapped
+
+Data types the conversion maps: informational. These types are converted to the target's matching type \(for example NUMBER to numeric or a native integer, VARCHAR2 to varchar, CLOB to text\): check precision and range in the conversion report.
+
+Documentation: AWS Schema Conversion Tool User Guide, data type mappings.
+
+### postgresql-pgvector-half-sparse
+
+pgvector halfvec and sparsevec columns: informational. halfvec and sparsevec columns need pgvector 0.7.0 or later: pick an Aurora PostgreSQL minor version whose pgvector is at least that.
+
+Documentation: Extension versions for Amazon Aurora PostgreSQL \(pgvector\).
+
+### source-version-unknown
+
+Source version not collected: informational. The collection names no source version, so the version check did not run: confirm the source's major version against the Aurora versions before planning the move.
+
+Documentation: Amazon Aurora MySQL release notes; Amazon Aurora PostgreSQL release calendar.
+
+### sqlserver-babelfish-option
+
+Babelfish for Aurora PostgreSQL: informational. Babelfish for Aurora PostgreSQL accepts T-SQL and SQL Server's wire protocol \(TDS\), which can keep much of this code unchanged: check its list of supported features before planning a full conversion.
+
+Documentation: Amazon Aurora User Guide, Working with Babelfish for Aurora PostgreSQL.
+
+### sqlserver-types-mapped
+
+Data types the conversion maps: informational. These types are converted to the target's matching type \(for example nvarchar to varchar in UTF-8, datetime2 to timestamp, tinyint to smallint on Aurora PostgreSQL\): check precision and range in the conversion report.
+
+Documentation: AWS Schema Conversion Tool User Guide, data type mappings.

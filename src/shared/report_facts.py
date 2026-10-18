@@ -1434,6 +1434,7 @@ def compute_report_facts(
     waves: list[dict[str, Any]] | None = None,
     view_ids: Iterable[str] | None = None,
     signal_overrides: Mapping[str, Iterable[str]] | None = None,
+    relational_gaps: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Every customer-facing figure, computed once (``SynthesisOutputContract.facts``).
 
@@ -1444,7 +1445,10 @@ def compute_report_facts(
     what wave 1 carries beyond ``source_table_count``. ``signal_overrides``
     (engine -> the triage signals the assignment's ``signal_override`` fields
     name) is what synthesis passes; an older report reads them from the
-    ranking's reason text instead (#584).
+    ranking's reason text instead (#584). ``relational_gaps`` is the relational move's
+    gap check (``src.tools.analysis.relational_gaps.detect_relational_gaps``, #471),
+    which needs the collection: synthesis passes it, and a report rebuilt without the
+    collection has None.
     """
     if waves is None:
         waves = [w for w in (report.get("migration_waves") or []) if isinstance(w, dict)]
@@ -1543,4 +1547,6 @@ def compute_report_facts(
         "access_pattern_totals": access_pattern_facts(report),
         # #992: each written table's source of truth, replicas and CDC risk.
         "table_sources": table_source_facts(report),
+        # #471: the relational move's version and feature gaps.
+        "relational_gaps": dict(relational_gaps) if relational_gaps is not None else None,
     }

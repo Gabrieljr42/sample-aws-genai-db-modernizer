@@ -735,6 +735,12 @@ def _collect_aws_raw(inp, cred_mgr) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _text_or_none(value: Any) -> str | None:
+    """``value`` as stripped text, or None when it is missing or blank."""
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
 def _build_tables(schema_raw: list[dict], db_name: str) -> list[Table]:
     tables = []
     skipped_empty = 0
@@ -792,6 +798,10 @@ def _build_tables(schema_raw: list[dict], db_name: str) -> list[Table]:
                 primary_key=t.get("primary_key") or None,
                 foreign_keys=fks,
                 sample_data=t.get("sample_data"),
+                # #471: the MySQL family reports both (information_schema.TABLES);
+                # the relational-move gap check reads them.
+                storage_engine=_text_or_none(t.get("engine")),
+                collation=_text_or_none(t.get("table_collation")),
             )
         )
     if skipped_empty:
@@ -1241,6 +1251,9 @@ def _build_procedures(raw: list[dict]) -> list[Procedure] | None:
                 else ProcedureType.PROCEDURE
             ),
             definition=p.get("definition"),
+            # #471: the collection's routine language (e.g. PLPGSQL, C, TSQL), which the
+            # relational-move gap check reads.
+            language=_text_or_none(p.get("language")),
             return_type=p.get("return_type"),
         )
         for p in raw

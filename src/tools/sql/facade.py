@@ -393,6 +393,89 @@ def read_sql(sql: str, source_engine: str) -> SqlReading:
 
 
 @dataclass(frozen=True)
+class SqlTokens:
+    """The words and punctuation of a piece of SQL text, read in the source engine's
+    dialect (#471): what a feature check matches on, so a string literal, a quoted
+    identifier (T-SQL ``[...]`` too) or a comment never counts as a keyword or a call.
+
+    ``tokens`` are upper-cased, in text order: words (``@@IDENTITY`` and ``#tmp`` keep
+    their sigils), numbers and single punctuation characters. ``calls`` are the words
+    directly followed by ``(``, each also with its dotted qualifier when it has one
+    (``DBMS_OUTPUT.PUT_LINE`` and ``PUT_LINE``).
+    """
+
+    tokens: tuple[str, ...]
+    calls: frozenset[str]
+    dialect: str
+    # The called names written with no qualifier (``time_bucket(...)``, not
+    # ``my_schema.time_bucket(...)``), so a check can tell an extension's function
+    # from a user function of the same name.
+    unqualified_calls: frozenset[str] = frozenset()
+
+
+_TOKEN_RE = re.compile(r"@@?[A-Za-z_][\w$#@]*|#{1,2}[A-Za-z_][\w$#@]*|[A-Za-z_][\w$#]*|\d+|\S")
+_TSQL_BRACKET_RE = re.compile(r"\[[^\]\n]*\]")
+_BACKTICK_CALL_RE = re.compile(r"`([A-Za-z_][\w$]*)`(?=\s*\()")
+_DOUBLE_QUOTE_CALL_RE = re.compile(r'"([A-Za-z_][\w$]*)"(?=\s*\()')
+
+
+def _quoted_call_re(engine: str) -> re.Pattern[str]:
+    """A quoted function name in ``engine``'s identifier quotes, followed by "("."""
+    return _BACKTICK_CALL_RE if engine in ("mysql", "mariadb") else _DOUBLE_QUOTE_CALL_RE
+
+
+def _is_word(token: str) -> bool:
+    return token[:1].isalpha() or token[:1] in "_@#"
+
+
+def sql_tokens(sql: str, source_engine: str) -> SqlTokens:
+    """The :class:`SqlTokens` of ``sql`` for ``source_engine``. Never raises.
+
+    No parse: the text is scanned with the dialect's own quoting and comment rules
+    (:func:`src.tools.sql.normalize.quoted_mask`: backslash escapes and ``#`` comments
+    for the MySQL family only, dollar quotes outside it, Oracle ``q'[...]'``), so it
+    works on a routine body or a digest sqlglot cannot read.
+    """
+    text = sql or ""
+    engine = (source_engine or "").strip().lower()
+    mask = quoted_mask(text, engine)
+    chars = [" " if hidden else ch for ch, hidden in zip(text, mask, strict=True)]
+    if engine == "sqlserver":
+        for m in _TSQL_BRACKET_RE.finditer(text):
+            if not any(mask[m.start() : m.end()]):
+                chars[m.start() : m.end()] = " " * (m.end() - m.start())
+    # A quoted name directly followed by "(" is still a call: a MySQL digest writes a
+    # native function such as FOUND_ROWS as `FOUND_ROWS` ( ).
+    for m in _quoted_call_re(engine).finditer(text):
+        start, end = m.span(0)
+        opens_here = mask[start] and (start == 0 or not mask[start - 1])
+        if opens_here and all(mask[start:end]):
+            chars[start:end] = f" {m.group(1)} "
+    visible = "".join(chars)
+    tokens = tuple(t.upper() for t in _TOKEN_RE.findall(visible))
+    calls: set[str] = set()
+    unqualified: set[str] = set()
+    for i in range(len(tokens) - 1):
+        if tokens[i + 1] != "(" or not _is_word(tokens[i]):
+            continue
+        name = tokens[i]
+        calls.add(name)
+        if not (i >= 1 and tokens[i - 1] == "."):
+            unqualified.add(name)
+        j = i
+        while j >= 2 and tokens[j - 1] == "." and _is_word(tokens[j - 2]):
+            name = f"{tokens[j - 2]}.{name}"
+            j -= 2
+        calls.add(name)
+    return SqlTokens(
+        tokens=tokens,
+        calls=frozenset(calls),
+        dialect=sqlglot_dialect(engine),
+        unqualified_calls=frozenset(unqualified),
+    )
+
+
+@dataclass(frozen=True)
 class _Parsed:
     """One parse: the statements, or why there are none (the fallback reason)."""
 
