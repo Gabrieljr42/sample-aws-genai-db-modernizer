@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from src.agents.interaction import read_answers, read_partial_output
 from src.agents.referee.cache_overlay import CACHE_OVERLAY_ENGINES, is_write_query
 from src.agents.referee.table_resolution import TableNameResolver
+from src.agents.schema_design.group_trace import scope_decision_trace
 from src.agents.schema_design.scope import (
     EMPTY_REPORT,
     ScopeReport,
@@ -48,6 +49,33 @@ from src.tools.schema.design_metrics import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_GROUP_CONCURRENCY = 5
+
+
+def _write_trace_tmp(trace_data: dict) -> str:
+    """Write a decision trace to a temp file and return its path."""
+    trace_tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".json", delete=False)
+    try:
+        trace_tmp.write(json.dumps(trace_data, indent=2, default=str).encode())
+        trace_tmp.close()
+    except BaseException:
+        trace_tmp.close()
+        os.unlink(trace_tmp.name)
+        raise
+    return trace_tmp.name
+
+
+def _read_decision_trace(
+    store: ArtifactStore, database_name: str, job_id: str, target_type: str
+) -> dict | None:
+    """The engine's analysis decision trace, or None when it was not written."""
+    if target_type not in ("documentdb", "opensearch"):
+        return None
+    trace_key = f"{database_name}/{job_id}/analysis-{target_type}/decision-trace.json"
+    try:
+        return store.read_json(trace_key)
+    except Exception as exc:
+        print(f"[schema-design/{target_type}] Decision trace not found: {exc}")
+        return None
 
 
 def _group_concurrency() -> int:
@@ -691,22 +719,13 @@ def run_schema_design(
     analysis_tmp.write(analysis_raw)
     analysis_tmp.close()
 
-    # Load decision trace for agents that need it (DocumentDB, OpenSearch)
+    # The decision trace of this call's own queries (DocumentDB, OpenSearch).
+    full_trace = _read_decision_trace(store, database_name, job_id, target_type)
     trace_tmp_path: str | None = None
-    if target_type in ("documentdb", "opensearch"):
-        trace_key = f"{database_name}/{job_id}/analysis-documentdb/decision-trace.json"
-        try:
-            trace_data = store.read_json(trace_key)
-            trace_raw = json.dumps(trace_data, indent=2, default=str).encode()
-            trace_tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".json", delete=False)
-            trace_tmp.write(trace_raw)
-            trace_tmp.close()
-            trace_tmp_path = trace_tmp.name
-            print(f"[schema-design/{target_type}] Loaded decision trace")
-        except Exception as exc:
-            print(f"[schema-design/{target_type}] Decision trace not found: {exc}")
-
     try:
+        if full_trace is not None:
+            trace_tmp_path = _write_trace_tmp(scope_decision_trace(full_trace, collector_output))
+            print(f"[schema-design/{target_type}] Loaded decision trace")
         output_json, trace_json = _dispatch_schema_agent(
             target_type,
             collector_path=collector_tmp.name,
@@ -1054,6 +1073,9 @@ def run_schema_design_auto(
     print(f"[schema-design/{target_type}] Designing {len(groups)} groups in parallel")
     start = time.time()
 
+    # Read once; each group gets its own slice (DocumentDB and OpenSearch only).
+    full_trace = _read_decision_trace(store, database_name, job_id, target_type)
+
     def _design_group(group: dict) -> None:
         idx = group["group_index"]
         draft_key = (
@@ -1091,15 +1113,22 @@ def run_schema_design_auto(
         analysis_tmp.write(analysis_raw)
         analysis_tmp.close()
 
+        # The group's own slice of the decision trace, in its own temp file (#1060).
+        trace_tmp_path: str | None = None
         try:
+            if full_trace is not None:
+                trace_tmp_path = _write_trace_tmp(scope_decision_trace(full_trace, group_collector))
             output_json, trace_json = _dispatch_schema_agent(
                 target_type,
                 collector_path=collector_tmp.name,
                 analysis_path=analysis_tmp.name,
+                decision_trace_path=trace_tmp_path,
             )
         finally:
             os.unlink(collector_tmp.name)
             os.unlink(analysis_tmp.name)
+            if trace_tmp_path:
+                os.unlink(trace_tmp_path)
 
         # Write group draft (draft_key computed at the top for the resume check).
         store.write_json(draft_key, json.loads(output_json))
@@ -1225,20 +1254,11 @@ def run_schema_design_with_injected(
     analysis_tmp.write(analysis_raw)
     analysis_tmp.close()
 
+    full_trace = _read_decision_trace(store, database_name, job_id, target_type)
     trace_tmp_path: str | None = None
-    if target_type in ("documentdb", "opensearch"):
-        trace_key = f"{database_name}/{job_id}/analysis-documentdb/decision-trace.json"
-        try:
-            trace_data = store.read_json(trace_key)
-            trace_raw = json.dumps(trace_data, indent=2, default=str).encode()
-            trace_tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".json", delete=False)
-            trace_tmp.write(trace_raw)
-            trace_tmp.close()
-            trace_tmp_path = trace_tmp.name
-        except Exception:  # noqa: B110
-            pass  # nosec B110
-
     try:
+        if full_trace is not None:
+            trace_tmp_path = _write_trace_tmp(scope_decision_trace(full_trace, collector_output))
         output_json, trace_json = _dispatch_schema_agent(
             target_type,
             collector_path=collector_tmp.name,
