@@ -665,7 +665,10 @@ def test_every_written_path_is_registered_for_its_contract(
     for shape in shapes:
         found = versioning.contract_for_artifact(shape)
         name = f"{found.__module__}.{found.__qualname__}" if found else None
-        assert name == model, (
+        # A skipped placeholder is stored at its contract's path (#1023).
+        skipped = versioning.placeholder_for_artifact(shape)
+        allowed = {name} | ({f"{skipped.__module__}.{skipped.__qualname__}"} if skipped else set())
+        assert model in allowed, (
             f"{file}:{line} writes {model} to {shape!r}, which the contract file registry in "
             f"src/shared/contract_versioning.py maps to {name}. Add the path pattern."
         )

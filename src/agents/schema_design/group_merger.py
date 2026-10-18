@@ -27,6 +27,8 @@ from src.agents.schema_design.dynamodb_merge import (
     pattern_id_maps,
     rewrite_pattern_ids,
 )
+from src.contracts.schema_design_input import ExcludedQuery
+from src.contracts.skipped_placeholders import SkippedSchemaOutput
 from src.shared.contract_versioning import ContractVersionError, stamp_artifact_version
 from src.storage.artifact_store import ArtifactStore
 
@@ -292,12 +294,13 @@ def merge_schema_groups(
     if not manifest["groups"]:
         excluded_queries = manifest.get("excluded_queries") or []
         if excluded_queries:
-            skipped = {
-                "target_type": engine,
-                "status": "skipped",
-                "reason": "every assigned query touches no source table",
-                "excluded_queries": excluded_queries,
-            }
+            # A placeholder of its own contract, not the design (#1023).
+            placeholder = SkippedSchemaOutput(
+                target_type=engine,
+                reason="every assigned query touches no source table",
+                excluded_queries=[ExcludedQuery.model_validate(q) for q in excluded_queries],
+            )
+            skipped = placeholder.model_dump(mode="json")
             store.write_json(f"{base_key}/schema_output.json", skipped)
             print(
                 f"[schema-merge/{engine}] No groups to merge: all "
