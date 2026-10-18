@@ -30,6 +30,7 @@ from src.agents.referee.reality_check_request import (
 )
 from src.agents.schema_design.group_input import READ_PAGE_CHARS, READ_PAGE_LINES
 from src.contracts.model_flag import ModelFlag
+from src.contracts.reality_check_output import FlagDecision
 from tests.shared_runs import cached_run, copy_run
 
 REPO = Path(__file__).resolve().parents[4]
@@ -644,8 +645,87 @@ class TestOnlyMovedQueriesCanBeCorrected:
         ):
             corrections = validate_consolidations(consolidations, revised, query_map, {}, original)
         assert [c.query_ids for c in corrections] == [["q1"]]
-        assert "'other'" in caplog.text
-        assert "'documentdb', which is not the engine under review" in caplog.text
+        assert "'other' on 'dynamodb': it is not one of the queries under review" in caplog.text
+        assert "'q2' on 'documentdb': it is not on that engine" in caplog.text
+
+    def test_the_validator_hands_back_what_it_ignored(self):
+        """#746 item 1: a flag on another engine or a query not under review is
+        no longer dropped with only a log line; the handler records it."""
+        original, revised, query_map, consolidations = _bedrock_case(3)
+        ignored: list = []
+        with patch(
+            "src.agents.referee.consolidation_validator._call_llm_validator",
+            return_value=[_flag(["q1", "other"]), _flag(["q2"], "documentdb")],
+        ):
+            corrections = validate_consolidations(
+                consolidations, revised, query_map, {}, original, ignored=ignored
+            )
+        assert [c.query_ids for c in corrections] == [["q1"]]
+        assert [(qid, f.flagged_engine, why) for qid, f, why in ignored] == [
+            ("other", "dynamodb", "it is not one of the queries under review"),
+            ("q2", "documentdb", "it is not on that engine"),
+        ]
+
+    def test_bedrock_and_headless_write_the_same_ignored_record(self):
+        """#746 item 1: the same flag on an engine the query is not on leaves the
+        same ``flag_decisions`` record in both modes."""
+        from src.agents.referee.model_flags import apply_consolidation_flags, ignored_flag_outcome
+        from src.agents.referee.query_scoring import ScoringContext
+
+        original, revised, query_map, consolidations = _bedrock_case(3)
+        flag = _flag(["q0"], "opensearch")
+        ignored: list = []
+        with patch(
+            "src.agents.referee.consolidation_validator._call_llm_validator",
+            return_value=[flag],
+        ):
+            validate_consolidations(
+                consolidations, revised, query_map, {}, original, ignored=ignored
+            )
+        bedrock = [ignored_flag_outcome(qid, f, why) for qid, f, why in ignored]
+        _, _, headless, _ = apply_consolidation_flags(
+            [flag],
+            [dict(qa) for qa in revised],
+            consolidations,
+            original,
+            ScoringContext(),
+            {qid: {"query_id": qid, **q} for qid, q in query_map.items()},
+            {"documentdb", "dynamodb"},
+        )
+        assert bedrock == headless
+        assert bedrock[0]["outcome"] == "ignored"
+        FlagDecision.model_validate(bedrock[0])
+
+    def test_the_bedrock_handler_writes_the_ignored_records(self):
+        from src.agents.referee.reality_check_handler import run_reality_check_handler
+        from tests.unit.agents.referee.test_reality_check_llm_seam import _mock_store
+
+        flag = _flag(["q-elsewhere"], "opensearch")
+
+        def fake(consolidations, revised_assignments, query_map, query_signals, **kw):
+            kw["ignored"].append(("q-elsewhere", flag, "it is not on that engine"))
+            return []
+
+        store = _mock_store()
+        with (
+            patch(
+                "src.agents.referee.reality_check_handler.validate_consolidations",
+                side_effect=fake,
+            ),
+            patch(
+                "src.agents.referee.reality_check_handler._generate_executive_summary",
+                return_value=None,
+            ),
+        ):
+            run_reality_check_handler("job-1", "mydb", store, llm_mode="bedrock")
+        output = next(v for k, v in store._written.items() if k.endswith("output.json"))
+        [record] = output["flag_decisions"]
+        assert (record["query_ids"], record["flagged_engine"], record["outcome"]) == (
+            ["q-elsewhere"],
+            "opensearch",
+            "ignored",
+        )
+        assert record["reason"] == "Flag ignored: it is not on that engine"
 
     def test_a_flag_on_several_queries_stays_one_flag(self):
         """#628: the validator keeps a multi-query flag whole, as headless does

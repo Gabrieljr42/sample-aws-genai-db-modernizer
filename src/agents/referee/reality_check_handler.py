@@ -23,7 +23,11 @@ from src.agents.referee.consolidation_validator import (
     sanity_sweep,
     validate_consolidations,
 )
-from src.agents.referee.model_flags import apply_consolidation_flags, parse_model_flags
+from src.agents.referee.model_flags import (
+    apply_consolidation_flags,
+    ignored_flag_outcome,
+    parse_model_flags,
+)
 from src.agents.referee.move_ledger import (
     MoveLedger,
     apply_to_assignment,
@@ -231,6 +235,9 @@ def run_reality_check_deterministic(
         "revised_assignments": result["revised_assignments"],
         # This check's Moves so far (#616); the later steps add theirs.
         "move_ledger": ledger,
+        # The resolver's settled-workload snapshot (ADR-031 Decision 12,
+        # ``RoutingTrace.settled_counts``) the placement's ties used (#746).
+        "settled_counts": result.get("settled_counts"),
         # The stored input's (engine, tied_engines) per query: what the
         # revision replays from (before the cache owner normalisation).
         "input_state": input_state,
@@ -655,6 +662,44 @@ def _scoring_inputs(det: dict) -> tuple[dict, ScoringContext]:
     return query_map, scoring_context
 
 
+def _flag_settled_counts(result: dict, kept_engines: set[str]) -> dict[str, int]:
+    """The settled workload a flag's tie-break reads (ADR-031 Decision 12, #746).
+
+    The resolver's own snapshot (``RoutingTrace.settled_counts``), the one the
+    reality check's placement used, over the engines the check kept: a flag
+    re-routes only among those. A result without the snapshot (one built
+    before it was carried) falls back to counting the revised assignments.
+    """
+    snapshot = result.get("settled_counts")
+    if not isinstance(snapshot, dict):
+        snapshot = settled_counts(result["revised_assignments"])
+    return {e: n for e, n in snapshot.items() if e in kept_engines}
+
+
+def _drop_superseded_ignored(decisions: list[dict]) -> list[dict]:
+    """``decisions`` without an ``ignored`` record for a query a flag moved (#746).
+
+    One query can get both: on Bedrock, a batch's flag naming a query another
+    batch reviews is ignored there, while that batch's own flag moves it; in
+    either mode, a flag on the wrong engine is ignored beside one that moves
+    the query. The move is what happened, so it wins; an ignored record for a
+    query nothing moved is kept.
+    """
+    moved = {
+        str(qid)
+        for d in decisions
+        if d.get("outcome") == "moved"
+        for qid in [*(d.get("query_ids") or []), *(d.get("moved_with_group") or [])]
+    }
+    kept: list[dict] = []
+    for d in decisions:
+        ids = {str(q) for q in d.get("query_ids") or []}
+        if d.get("outcome") == "ignored" and ids and ids <= moved:
+            continue
+        kept.append(d)
+    return kept
+
+
 def _apply_model_flags(result: dict, flags: list) -> None:
     """Apply validated model flags to ``result`` in place (#647, #667).
 
@@ -682,11 +727,13 @@ def _apply_model_flags(result: dict, flags: list) -> None:
         kept_engines,
         query_signals=_build_query_signals(result.get("triage", {}).get("signals", [])),
         source_engine=source_engine,
-        settled=settled_counts(result["revised_assignments"]),
+        settled=_flag_settled_counts(result, kept_engines),
         co_dependency_groups=result.get("assignment", {}).get("co_dependency_groups", []),
         ledger=_ledger(result),
     )
-    result["flag_decisions"] = result.get("flag_decisions", []) + decisions
+    result["flag_decisions"] = _drop_superseded_ignored(
+        result.get("flag_decisions", []) + decisions
+    )
     merged_gaps = {k: set(v) for k, v in (result.get("model_flag_gaps") or {}).items()}
     for qid, engines in gaps.items():
         merged_gaps.setdefault(qid, set()).update(engines)
@@ -781,6 +828,8 @@ def _run_sanity_sweep(det: dict) -> None:
         # ``may_absorb``'s specialist-absorb restriction).
         query_signals=_build_query_signals(det.get("triage", {}).get("signals", [])),
         ledger=_ledger(det),
+        # The resolver's snapshot, as the placement and the flag path read it (#746).
+        settled=det.get("settled_counts") if isinstance(det.get("settled_counts"), dict) else None,
     )
     # Recompute after_distribution post-sweep
     sweep_distribution: dict[str, int] = defaultdict(int)
@@ -886,6 +935,7 @@ def _run_bedrock_llm_phase(det: dict, database_name: str) -> None:
 
     incomplete: list[dict] = []
     rejected: list[str] = []
+    ignored: list = []
     corrections = validate_consolidations(
         consolidations=det["consolidations"],
         revised_assignments=det["revised_assignments"],
@@ -894,7 +944,13 @@ def _run_bedrock_llm_phase(det: dict, database_name: str) -> None:
         original_assignments=det["assignment"].get("query_assignments"),
         incomplete=incomplete,
         rejected=rejected,
+        ignored=ignored,
     )
+    if ignored:
+        # The ``ignored`` record headless finalize writes for the same flag (#746).
+        det["flag_decisions"] = det.get("flag_decisions", []) + [
+            ignored_flag_outcome(qid, flag, why) for qid, flag, why in ignored
+        ]
     if rejected:
         # The same count the headless response gets for an entry off the contract.
         det["model_flags_rejected"] = det.get("model_flags_rejected", 0) + len(rejected)

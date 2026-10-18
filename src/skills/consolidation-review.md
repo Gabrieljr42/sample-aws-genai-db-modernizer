@@ -10,7 +10,7 @@ Flag a query only when the target engine cannot serve its access pattern without
 
 A flag is evidence, not a decision: it says the target engine cannot serve the query, and it never names where the query goes. Finalize does this with a flag:
 
-- It counts only for a query a consolidation moved onto the flagged engine. Any other flag changes nothing: headless finalize records it as ignored, and the Bedrock validator drops it before finalize.
+- It counts only for a query a consolidation moved onto the flagged engine. Any other flag changes nothing: each mode records it as ignored, with the reason.
 - The flagged engine is treated as unable to serve that query, and the same scorer re-routes it to the best-scoring engine among the engines the reality check kept. A co-dependency group on the flagged engine moves with it, as one unit.
 - A flag never brings back an engine the reality check removed and never moves a query outside the flagged query's co-dependency group.
 - When no kept engine can serve the query, it stays where it is, and its record says why.

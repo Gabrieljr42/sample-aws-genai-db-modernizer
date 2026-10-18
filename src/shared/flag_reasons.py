@@ -15,6 +15,13 @@ FLAG_REASON_TEXT: dict[str, str] = {
 }
 
 
+# Why a flag changed nothing, in its ``ignored`` ``flag_decisions`` record
+# (``model_flags.ignored_flag_outcome``), the same words in both LLM modes (#746).
+IGNORED_NOT_ON_ENGINE = "it is not on that engine"
+IGNORED_NOT_MOVED_ONTO = "no consolidation moved it onto that engine"
+IGNORED_NOT_UNDER_REVIEW = "it is not one of the queries under review"
+
+
 def flag_reason_text(category: str | None) -> str:
     """The wording for ``category`` (a ``FlagReason`` value); the generic one otherwise."""
     return FLAG_REASON_TEXT.get(str(category or ""), FLAG_REASON_TEXT["other"])

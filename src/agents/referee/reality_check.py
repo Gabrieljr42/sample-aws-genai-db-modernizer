@@ -422,4 +422,7 @@ def run_reality_check(
         "recommendations": recommendations,
         "unique_value_assessment": unique_value_assessment,
         "move_ledger": ledger,
+        # The resolver's settled-workload snapshot this check's ties used
+        # (ADR-031 Decision 12), for the later steps to reuse (#746).
+        "settled_counts": dict(settled_counts),
     }
