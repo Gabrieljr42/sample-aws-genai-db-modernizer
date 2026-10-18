@@ -295,6 +295,11 @@ def _group_entries(store, base_key: str, manifest: dict) -> list[dict]:
         idx = group["group_index"]
         draft_key = f"{base_key}/schema_draft_group_{idx}.json"
         state, digest = _draft_state(store, draft_key)
+        # A PE review recorded after the last --merge (#1059) makes the merge
+        # stale too: --merge is what consolidates the group's trace.
+        _trace_state, trace_digest = _draft_state(
+            store, f"{base_key}/design_trace_group_{idx}.json"
+        )
         entries.append(
             {
                 "group_index": idx,
@@ -306,6 +311,7 @@ def _group_entries(store, base_key: str, manifest: dict) -> list[dict]:
                 "draft_exists": state != "missing",
                 "draft_state": state,
                 "_hash": digest,
+                "_trace_hash": trace_digest,
             }
         )
     return entries
@@ -322,7 +328,12 @@ def _draft_problems(groups: list[dict]) -> tuple[list[int], list[int]]:
 
 
 def _hashes(groups: list[dict]) -> dict[str, str | None]:
-    return {str(g["group_index"]): g["_hash"] for g in groups}
+    """Each group draft's digest, and its design trace's when it has one (#1059)."""
+    hashes: dict[str, str | None] = {str(g["group_index"]): g["_hash"] for g in groups}
+    for g in groups:
+        if g.get("_trace_hash"):
+            hashes[f"trace-{g['group_index']}"] = g["_trace_hash"]
+    return hashes
 
 
 def run_status(store, job_id: str, db: str, engine: str, assignment_version: int) -> None:

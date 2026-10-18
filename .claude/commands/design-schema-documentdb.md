@@ -43,3 +43,12 @@ Read files with the Read tool (use `offset`/`limit` for large files). Search fil
 
 5. **Update state**
    Only after `--finalize` printed `"status": "complete"`: set `phase_status.schema_design_documentdb` = "complete"
+
+6. **PE review** (run on your own only)
+   Dispatched by `/modernize` or `/design-schema`, stop after Step 5: your dispatcher runs the review, the one Bedrock mode runs after every DocumentDB design. Run on your own (you are the top-level session), request it:
+
+   ```bash
+   uv run python scripts/run_pe_review.py --job-id {job_id} --db {database_name} --engine documentdb
+   ```
+
+   If it prints `"status": "awaiting_llm"`, dispatch one subagent for its one review with the `/modernize` 6c task text (`Follow /review-schema ...`) and wait for it to report. Its routing flags are recorded for the post-schema reroute, which `/modernize` and `/design-schema` run after every engine is designed.
