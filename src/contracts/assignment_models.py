@@ -116,6 +116,9 @@ Version History:
   ``FeasibilityFinding`` stay versioned through ``Assignment``.
   ``ValidationResult`` (``validation.json``) carries its own
   ``contract_version``, starting at 1.0.
+- 1.16 (2026-10-17, #976): No field change. The embedded ``Move`` (move ledger
+  1.6) and ``FeasibilityFinding`` (1.1) accept and keep unknown fields, so an
+  assignment written by a later MINOR loads (ADR-008 Decision 5).
 """
 
 from datetime import datetime
@@ -381,7 +384,7 @@ class Assignment(BaseModel):
     """Complete versioned assignment artifact."""
 
     contract_version: str = Field(
-        default="1.15", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+        default="1.16", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
     )
 
     job_id: str = Field(..., description="Unique job identifier")

@@ -184,7 +184,20 @@ class TestMoveContract:
             assert match, f"{path}: no pydantic floor"
             assert (int(match[1]), int(match[2])) >= (2, 11), f"{path}: pydantic floor below 2.11"
 
-    def test_an_unknown_key_is_rejected(self):
+    def test_an_unknown_key_from_a_newer_file_is_kept(self):
+        """Moves are read back across versions: a field a later MINOR adds is kept,
+        not refused (ADR-008 Decision 5, #976). Known fields stay strict."""
+        move = Move.model_validate(
+            {
+                "seq": 1,
+                "query_id": "q1",
+                "pass": "score",
+                "to_engine": "dynamodb",
+                "reason_code": "highest_score",
+                "added_later": "kept",
+            }
+        )
+        assert move.model_dump(by_alias=True)["added_later"] == "kept"
         with pytest.raises(ValidationError):
             Move.model_validate(
                 {
@@ -192,8 +205,7 @@ class TestMoveContract:
                     "query_id": "q1",
                     "pass": "score",
                     "to_engine": "dynamodb",
-                    "reason_code": "highest_score",
-                    "why": "free text",
+                    "reason_code": "not_a_reason",
                 }
             )
 

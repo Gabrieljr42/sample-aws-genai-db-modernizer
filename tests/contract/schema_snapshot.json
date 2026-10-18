@@ -2168,7 +2168,7 @@
       }
     },
     "schema_hash": "9b604cb6a2cfb911c8e542d08886cd811c562ea410f11936eac63f7d871fd4fc",
-    "version": "1.15"
+    "version": "1.16"
   },
   "assignment_models.ValidationResult": {
     "fields": {
@@ -7545,7 +7545,7 @@
       }
     },
     "schema_hash": "da8f40d2b183ad0d87936796d59f3aa45e4960411f76b863edc7f924bbfa63fa",
-    "version": "1.0"
+    "version": "1.1"
   },
   "documentdb_model_output.DocumentDBModelOutputContract": {
     "fields": {
@@ -16016,7 +16016,7 @@
       }
     },
     "schema_hash": "f76f9b98f86b67da12a6c40696a53c08c1c5e5ea64f2028cbee39f926f9d43b9",
-    "version": "1.0"
+    "version": "1.1"
   },
   "schema_revision_models.SchemaConfirmation": {
     "fields": {

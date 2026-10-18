@@ -107,6 +107,10 @@ Version History:
   per analyzed engine, the first member (by query id) that ruled it out and
   the gate kind, so a reader can say why the group fell back even for a
   member with real, ungated scores of its own.
+- 1.6 (2026-10-17, #976): ``Move``, ``MoveEvidence``, ``EngineScore``,
+  ``CandidateScore`` and ``GroupGate``: Unknown fields are accepted and kept
+  (``extra="allow"``, was ``"forbid"``): a file written by a later MINOR loads in
+  older code (ADR-008 Decision 5, #976).
 """
 
 from __future__ import annotations
@@ -194,7 +198,7 @@ class MoveActor(str, Enum):
 class EngineScore(BaseModel):
     """One engine and its score, e.g. the runner-up of a Move."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     engine: str = Field(..., description="Engine id")
     score: float | None = Field(
@@ -205,7 +209,7 @@ class EngineScore(BaseModel):
 class CandidateScore(BaseModel):
     """One rung of a query's candidate ladder at the moment of a Move."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     engine: str = Field(..., description="Candidate engine id")
     score: float | None = Field(
@@ -227,7 +231,7 @@ class CandidateScore(BaseModel):
 class GroupGate(BaseModel):
     """Why one engine could not host a co-dependency group (#787)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     engine: str = Field(..., description="The analyzed engine that was ruled out")
     query_id: str = Field(
@@ -245,7 +249,7 @@ class GroupGate(BaseModel):
 class MoveEvidence(BaseModel):
     """What the pass saw when it recorded the Move. Every field is optional."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     candidates: list[CandidateScore] = Field(
         default_factory=list,
@@ -295,7 +299,7 @@ class Move(BaseModel):
     ``serialize_by_alias`` needs pydantic 2.11, the project floor).
     """
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+    model_config = ConfigDict(extra="allow", populate_by_name=True, serialize_by_alias=True)
 
     seq: int = Field(..., ge=1, description="Order of the Move within the ledger, from 1")
     query_id: str = Field(..., description="The query that moved")

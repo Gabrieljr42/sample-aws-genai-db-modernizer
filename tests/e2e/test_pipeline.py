@@ -204,6 +204,31 @@ def test_every_versioned_artifact_is_a_registered_contract_file(run: PipelineRes
     assert any(k.endswith("/report.json") for k in seen)
 
 
+def test_every_read_back_artifact_loads_a_newer_file_with_unknown_fields(
+    run: PipelineResult,
+) -> None:
+    """Each registered contract file the job wrote, with an unknown field added to every
+    object its model types (a file a later MINOR wrote), still loads through
+    ``load_contract`` (ADR-008 Decision 5, #976): no read-back artifact refuses it."""
+    from src.shared.contract_versioning import contract_for_artifact, is_model_io, load_contract
+    from tests.contract.test_extra_policy import with_unknown_fields
+
+    loaded = []
+    for path in sorted(run.job_dir().rglob("*.json")):
+        key = str(path.relative_to(run.artifact_root))
+        model = None if is_model_io(key) else contract_for_artifact(key)
+        if model is None:
+            continue
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict) or "contract_version" not in data:
+            continue  # a raw upload or a legacy placeholder, not a stored contract
+        newer = with_unknown_fields(model, data)
+        assert isinstance(newer, dict)
+        load_contract(model, newer, artifact=key)
+        loaded.append(model.__name__)
+    assert {"Assignment", "AnalysisOutputContract", "SynthesisOutputContract"} <= set(loaded)
+
+
 @pytest.mark.deterministic
 def test_dynamodb_check_costs_on_a_real_split_group(run: PipelineResult, tmp_path) -> None:
     """External-mode DynamoDB group drafts can pass the skill's cost check (#198).

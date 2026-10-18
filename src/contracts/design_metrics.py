@@ -11,6 +11,9 @@ external (Claude Code) mode alike. The skills read the provided numbers, and
 
 Version History:
 - 1.0 (2026-10-13): Initial version
+- 1.1 (2026-10-17, #976): every model: Unknown fields are accepted and kept
+  (``extra="allow"``, was ``"forbid"``): a file written by a later MINOR loads in
+  older code (ADR-008 Decision 5, #976).
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ class QueryDesignMetrics(BaseModel):
         ..., ge=0, description="base_rps × peak_to_avg_ratio × growth_multiplier, 4 decimals"
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class TableDesignMetrics(BaseModel):
@@ -67,7 +70,7 @@ class TableDesignMetrics(BaseModel):
         ),
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class CoverageMetrics(BaseModel):
@@ -81,7 +84,7 @@ class CoverageMetrics(BaseModel):
         ..., ge=0, description="in_scope_patterns / total_queries_analyzed, 4 decimals"
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class DynamoDBPartitionLimits(BaseModel):
@@ -97,7 +100,7 @@ class DynamoDBPartitionLimits(BaseModel):
         80.0, description="at_risk when utilization_pct is above this"
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class EmbeddingSizeMetrics(BaseModel):
@@ -117,7 +120,7 @@ class EmbeddingSizeMetrics(BaseModel):
         ..., ge=0, description="parent_row_size_kb + embedded_avg_kb (this child only)"
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class OpenSearchShardMetrics(BaseModel):
@@ -130,7 +133,7 @@ class OpenSearchShardMetrics(BaseModel):
         ..., ge=1, description="As a time-series data stream (≤ 50 GB per shard)"
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class OpenSearchShardRules(BaseModel):
@@ -150,14 +153,14 @@ class OpenSearchShardRules(BaseModel):
         default_factory=list, description="Shard counts per source table"
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class DesignMetricsContract(BaseModel):
     """Every number the schema designer reads instead of computing (#626)."""
 
     contract_version: str = Field(
-        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR)"
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR)"
     )
     engine: str = Field(..., description="Target engine the metrics are for")
     growth_multiplier: float = Field(
@@ -184,4 +187,4 @@ class DesignMetricsContract(BaseModel):
     )
     opensearch_shards: OpenSearchShardRules | None = Field(None, description="OpenSearch only")
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")

@@ -339,10 +339,11 @@ class SchemaDesignGroupsManifest(BaseModel):
 
     Versioned on its own (ADR-008 Decision 1): 1.0 (2026-10-17, #972) added
     ``contract_version``; a manifest written before has none, and still loads.
+    1.1 (2026-10-17, #976): unknown fields are accepted and kept (was ``extra="forbid"``).
     """
 
     contract_version: str = Field(
-        default="1.0", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
+        default="1.1", pattern=r"^\d+\.\d+$", description="Contract version (MAJOR.MINOR format)"
     )
 
     job_id: str
@@ -358,7 +359,8 @@ class SchemaDesignGroupsManifest(BaseModel):
         description="Queries left out of every group (not counted in total_groups)",
     )
 
-    model_config = ConfigDict(extra="forbid")
+    # Read back across versions: unknown fields are kept, not refused (#976).
+    model_config = ConfigDict(extra="allow")
 
 
 # ---------------------------------------------------------------------------

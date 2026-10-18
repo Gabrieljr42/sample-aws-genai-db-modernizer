@@ -53,16 +53,17 @@ def test_table_defaults_to_none_for_query_group_findings() -> None:
     assert finding.table is None
 
 
-def test_rejects_unknown_field() -> None:
-    with pytest.raises(ValidationError):
-        FeasibilityFinding.model_validate(
-            {
-                "kind": "read_write_split",
-                "severity": "blocking",
-                "message": "x",
-                "bogus": "nope",
-            }
-        )
+def test_keeps_an_unknown_field_from_a_newer_file() -> None:
+    """Read back across versions: a field a later MINOR adds is kept, not refused (#976)."""
+    finding = FeasibilityFinding.model_validate(
+        {
+            "kind": "read_write_split",
+            "severity": "blocking",
+            "message": "x",
+            "added_later": "kept",
+        }
+    )
+    assert finding.model_dump()["added_later"] == "kept"
 
 
 def test_rejects_unknown_enum_values() -> None:

@@ -88,7 +88,7 @@
       "post_schema_routing",
       "reality_check"
     ],
-    "version": "1.15"
+    "version": "1.16"
   },
   "assignment_models.AssignmentStatus": {
     "module": "assignment_models",
@@ -99,7 +99,7 @@
       "reroute_rolled_back",
       "rerouted_after_approval"
     ],
-    "version": "1.15"
+    "version": "1.16"
   },
   "capability_ids": {
     "module": "triage_output",
@@ -570,7 +570,7 @@
       "neptune",
       "opensearch"
     ],
-    "version": "1.15"
+    "version": "1.16"
   },
   "feasibility_models.FindingKind": {
     "module": "feasibility_models",
@@ -579,7 +579,7 @@
       "co_dependency_split",
       "read_write_split"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "feasibility_models.FindingSeverity": {
     "module": "feasibility_models",
@@ -587,7 +587,7 @@
       "advisory",
       "blocking"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "model_flag.FlagReason": {
     "module": "model_flag",
@@ -618,7 +618,7 @@
       "model_flag",
       "rule"
     ],
-    "version": "1.5"
+    "version": "1.6"
   },
   "move_ledger.MovePass": {
     "module": "move_ledger",
@@ -642,7 +642,7 @@
       "tie",
       "utility_pin"
     ],
-    "version": "1.5"
+    "version": "1.6"
   },
   "move_ledger.ReasonCode": {
     "module": "move_ledger",
@@ -670,7 +670,7 @@
       "tie.source_compatible",
       "tie.stability"
     ],
-    "version": "1.5"
+    "version": "1.6"
   },
   "phase_models.Phase": {
     "module": "phase_models",
@@ -767,7 +767,7 @@
       "LOW",
       "MEDIUM"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "schema_design_input.ForeignKeyAction": {
     "module": "schema_design_input",
@@ -778,7 +778,7 @@
       "SET DEFAULT",
       "SET NULL"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "schema_design_input.MigrationComplexity": {
     "module": "schema_design_input",
@@ -787,7 +787,7 @@
       "LOW",
       "MEDIUM"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "schema_design_input.NormalizedDataType": {
     "module": "schema_design_input",
@@ -807,7 +807,7 @@
       "uuid",
       "xml"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "schema_design_input.QueryLogSource": {
     "module": "schema_design_input",
@@ -821,7 +821,7 @@
       "slow_query_log",
       "v_dollar_sql"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "schema_design_input.QueryType": {
     "module": "schema_design_input",
@@ -833,7 +833,7 @@
       "SELECT",
       "UPDATE"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "schema_revision_models.PatternAction": {
     "module": "schema_revision_models",
