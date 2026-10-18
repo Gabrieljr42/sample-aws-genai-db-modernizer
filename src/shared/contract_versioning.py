@@ -188,9 +188,10 @@ def load_contract[M: BaseModel](model: type[M], payload: Mapping[str, Any], *, a
     stored MINOR's fields were read into today's shape, so writing the model back
     stores today's version. A file at a newer MINOR is relabelled to this code's
     MINOR too. A model that keeps unknown fields (``extra="allow"``) then carries
-    them under the older label: approving an assignment as-is writes back its
-    moves and feasibility findings with a newer MINOR's fields kept, while
-    ``Assignment``'s own unknown fields (``extra="ignore"``) are dropped (#1056).
+    them under the older label, and one that ignores them (``Assignment``) drops
+    them: a writer that must keep a newer MINOR's fields patches the stored dict
+    and stamps it with ``stamp_artifact_version`` instead (approving an assignment
+    as-is, #1056).
     ``payload`` itself is not changed, and a ``ValidationError`` shows it as stored.
     """
     data = read_payload(payload, model, artifact=artifact)
