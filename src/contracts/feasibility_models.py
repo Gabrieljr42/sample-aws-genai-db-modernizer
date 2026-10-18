@@ -11,6 +11,9 @@ Version History:
 - 1.0 (2026-10-16, #975): The version the value-set snapshot
   (``scripts/contract_value_snapshot.py``) tracks for ``FindingKind`` and
   ``FindingSeverity``. No schema change.
+- 1.1 (2026-10-17, #976): ``FeasibilityFinding``: Unknown fields are accepted and kept
+  (``extra="allow"``, was ``"forbid"``): a file written by a later MINOR loads in
+  older code (ADR-008 Decision 5, #976).
 """
 
 from __future__ import annotations
@@ -63,4 +66,4 @@ class FeasibilityFinding(BaseModel):
         ),
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")

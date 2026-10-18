@@ -63,10 +63,10 @@ _REVISION_REQUEST = {
     "new_patterns": [],
 }
 
-# model -> (the version this PR starts it at, a pre-#972 file it wrote)
+# model -> (the version a loaded file says today, a pre-#972 file it wrote)
 LEGACY_FILES: dict[type[BaseModel], tuple[str, dict[str, Any]]] = {
     Assignment: (
-        "1.15",
+        "1.16",
         {
             "job_id": "job-1",
             "version": 1,
@@ -155,7 +155,7 @@ LEGACY_FILES: dict[type[BaseModel], tuple[str, dict[str, Any]]] = {
         },
     ),
     SchemaDesignGroupsManifest: (
-        "1.0",
+        "1.1",
         {
             "job_id": "job-1",
             "database_name": "app",

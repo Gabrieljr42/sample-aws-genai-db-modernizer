@@ -187,8 +187,10 @@ def load_contract[M: BaseModel](model: type[M], payload: Mapping[str, Any], *, a
     The returned model's ``contract_version`` is the model's current default: the
     stored MINOR's fields were read into today's shape, so writing the model back
     stores today's version. A file at a newer MINOR is relabelled to this code's
-    MINOR too; a contract that keeps unknown fields (``extra="allow"``) would then
-    carry them under the older label (no caller writes one back today, #1018).
+    MINOR too. A model that keeps unknown fields (``extra="allow"``) then carries
+    them under the older label: approving an assignment as-is writes back its
+    moves and feasibility findings with a newer MINOR's fields kept, while
+    ``Assignment``'s own unknown fields (``extra="ignore"``) are dropped (#1056).
     ``payload`` itself is not changed, and a ``ValidationError`` shows it as stored.
     """
     data = read_payload(payload, model, artifact=artifact)
