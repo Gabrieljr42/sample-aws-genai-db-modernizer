@@ -15,7 +15,8 @@ so do the decisions an ``## Amendment`` section adds (ADR-028's D, E, F). Each `
 path under ``tests/``, optionally followed by ``::Class`` and ``::function``
 names that must exist in that file. A decision with no guard says
 ``none yet -- #N`` (the follow-up issue that adds one) instead of inventing a
-weak test; it is never left blank. A decision a later ADR replaced says
+weak test; it is never left blank. A decision no code can guard (a deployment property, or a
+rule another decision's guard already covers) says ``by design -- <reason>``. A decision a later ADR replaced says
 ``superseded by ADR-NNN Decision N``: that ADR must exist and number that decision, and the
 superseding decision carries the guard (its own Enforcement row). When no later ADR covers
 it, ``superseded -- #N (reason)`` or ``superseded -- <what changed and the code path>`` says so (the decision text stays). An amendment that adds no lettered or numbered decision (a prose ``## Amendment 2 (date)``
@@ -63,6 +64,7 @@ SUPERSEDED_NOTE = re.compile(
 SUPERSEDED = re.compile(
     r"^superseded by ADR-(\d{3}) Decision (\d+|[A-Z])(?:\s+\(.*\))?$", re.IGNORECASE
 )
+BY_DESIGN = re.compile(r"^by design\s+(?:--|—)\s+\S.*$", re.IGNORECASE)
 NO_RULE = re.compile(r"^no rule\s+(?:--|—)\s+\S.*$", re.IGNORECASE)
 # An amendment row label: ``Amendment 1``, ``Amendment 2026-10-02`` or ``Amendment #273``,
 # optionally followed by free text before the ``|``.
@@ -287,6 +289,8 @@ def entry_problems(entry: str, current: str | None = None, *, amendment: bool = 
         return []
     if amendment and NO_RULE.match(entry):
         return []
+    if BY_DESIGN.match(entry):
+        return []
     if SUPERSEDED_NOTE.match(entry):
         return []
     sup = SUPERSEDED.match(entry)
@@ -504,6 +508,14 @@ def test_checker_accepts_the_explicit_marker_only_with_an_issue_number() -> None
     assert cell_problems("none yet -- #638") == []
     assert cell_problems("none yet — #638") == []
     assert cell_problems("none yet -- later")
+
+
+def test_checker_accepts_by_design_only_with_a_reason() -> None:
+    assert cell_problems("by design -- a deployment property") == []
+    assert cell_problems("by design — covered by Decision 3's guard") == []
+    assert cell_problems("by design")
+    assert cell_problems("by design -- ")
+    assert cell_problems("by design a deployment property")
 
 
 def test_checker_accepts_a_superseded_marker_only_when_the_target_decision_exists() -> None:
