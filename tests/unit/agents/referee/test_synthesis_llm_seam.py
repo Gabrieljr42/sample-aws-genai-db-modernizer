@@ -464,12 +464,19 @@ class TestPrepareSynthesisLlmInputHasCorrectKeys:
     def test_ranking_matches_result(self):
         det = self._det()
         payload = prepare_synthesis_llm_input(det)
-        assert payload["ranking"] is det["ranking"]
+        # Slimmed (#1064): the same engines in the same order, and every kept
+        # field carries the result's own value.
+        assert [r["target"] for r in payload["ranking"]] == [r["target"] for r in det["ranking"]]
+        for slim, full in zip(payload["ranking"], det["ranking"], strict=True):
+            assert slim == {k: full[k] for k in slim}
 
     def test_trade_offs_matches_result(self):
         det = self._det()
         payload = prepare_synthesis_llm_input(det)
-        assert payload["trade_offs"] is det["trade_offs"]
+        # Slimmed (#1064): the same entries, in order, with their prose intact.
+        assert [(t["description"], t["impact"]) for t in payload["trade_offs"]] == [
+            (t["description"], t["impact"]) for t in det["trade_offs"]
+        ]
 
     def test_no_internal_data_key_in_payload(self):
         """The internal 'data' key must not be exposed in the LLM payload."""

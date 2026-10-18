@@ -21,6 +21,7 @@ from src.agents.referee.aurora_choice import source_database_engine, source_data
 from src.agents.referee.capability_registry import triage_query_capabilities
 from src.agents.referee.migration_waves import build_migration_waves
 from src.agents.referee.summary_input_budget import apply_summary_input_budget, table_query_weights
+from src.agents.referee.summary_input_slim import slim_summary_input
 from src.agents.referee.synthesis_data import load_synthesis_data
 from src.agents.referee.synthesis_grounding import (
     build_effective_architecture,
@@ -532,7 +533,7 @@ def prepare_synthesis_llm_input(deterministic_result: dict) -> dict:
     data = deterministic_result.get("data")
     assignment = getattr(data, "assignment", None)
     weights = table_query_weights(assignment.get("query_assignments") or []) if assignment else None
-    return apply_summary_input_budget(payload, table_weights=weights)
+    return apply_summary_input_budget(slim_summary_input(payload), table_weights=weights)
 
 
 # ---------------------------------------------------------------------------

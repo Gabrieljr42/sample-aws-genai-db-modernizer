@@ -2,9 +2,9 @@
 
 Since #628 (payload parity) Bedrock and headless (Claude Code) reason over the
 same ``prepare_synthesis_llm_input`` payload. Its lists grow with the
-workload -- one ``query_groups`` entry per group, every risk's query and table
-lists, every table a wave or an engine serves -- so with no limit a large
-enough workload overflows the model's context window, the Bedrock call fails,
+workload -- one ``query_groups`` entry per group, every risk's table
+lists, one trade-off per design decision, every table a wave or an engine
+serves -- so with no limit a large enough workload overflows the model's context window, the Bedrock call fails,
 and the summary silently falls back to the deterministic one.
 
 :func:`apply_summary_input_budget` runs on that shared payload, after it is
@@ -18,11 +18,17 @@ built, so both modes still see identical data:
   engine's ``top_query_groups`` names first, then by ``query_count`` (then
   name); tables by how many in-scope queries touch them across the whole
   assignment, every engine's queries included (``table_query_weights``, then
-  name); query IDs sorted. Every cut list's own length is kept next to it as
+  name); trade-offs by the queries they touch (``query_count``, then engine
+  and description). Every cut list's own length is kept next to it as
   ``<field>_total`` (computed before the cut, ``TOTAL_FIELD_NAMES``), and
   ``input_budget`` lists every capped path with its totals, plus an "N more"
   aggregate for the dropped query groups (how many, and how many queries they
   carry). A log line says the cap applied.
+
+The cap only works on lists, so the request's fixed part (what no cut removes)
+must stay small on its own: ``summary_input_slim.slim_summary_input`` runs
+before it and drops what the summary instruction never reads (#1064). A test
+holds every bundled sample's request within the budget with its lists kept.
 
 What the cap never touches: every scalar (``workload_percent``,
 ``assigned_queries``, wave ``query_count``/``table_count``/
@@ -42,9 +48,9 @@ both modes. 24,000 estimated tokens at one token per three characters
 and at most 2,000 lines, the Read tool's default page, so headless reads it in
 one call. The compact Bedrock form is about 30% smaller, so with the instruction
 text (about 2.5k tokens) a capped Bedrock prompt stays well under 14% of a
-200k-token window. The wordpress sample's full request (about 13.5k tokens,
-1,020 lines) is never capped; discourse (1,654 queries, about 76.6k uncapped)
-is.
+200k-token window. The wordpress sample's full request (about 11.2k tokens,
+930 lines) is never capped; discourse (1,654 queries, about 73.8k uncapped)
+is, to 25 items per list.
 """
 
 from __future__ import annotations
@@ -120,12 +126,12 @@ def _group_weights(query_groups: list[dict]) -> dict[str, int]:
 TOTAL_FIELD_NAMES = (
     "tables_total",
     "affected_tables_total",
-    "query_ids_total",
     "table_owners_total",
     "table_groups_total",
     "source_tables_total",
     "target_tables_total",
     "recommended_engine_by_table_total",
+    "trade_offs_total",
 )
 
 
@@ -219,7 +225,6 @@ def _cap(payload: dict, limit: int, weights: dict[str, int]) -> tuple[dict, list
     for section in ("risks", "resolved_risks"):
         for r in risk.get(section) or []:
             c.tables(r, "affected_tables", f"risk_assessment.{section}[].affected_tables")
-            c.field(r, "query_ids", f"risk_assessment.{section}[].query_ids", key=str)
 
     for w in out.get("migration_waves") or []:
         c.tables(w, "tables", "migration_waves[].tables")
@@ -238,10 +243,24 @@ def _cap(payload: dict, limit: int, weights: dict[str, int]) -> tuple[dict, list
         for tg in w.get("table_groups") or []:
             c.tables(tg, "tables", "migration_waves[].table_groups[].tables")
 
+    # Trade-offs are prose and grow with every designed table (#1064): the ones
+    # that touch the most queries stay, in a fixed order among equals.
+    trade_offs = out.get("trade_offs") or []
+    kept_trade_offs = c.cut(
+        trade_offs,
+        "trade_offs",
+        key=lambda t: (
+            -(t.get("query_count") or 0),
+            str(t.get("engine")),
+            str(t.get("description")),
+        ),
+    )
+    if kept_trade_offs is not None:
+        out["trade_offs"] = kept_trade_offs
+        out["trade_offs_total"] = len(trade_offs)
     for t in out.get("trade_offs") or []:
         c.tables(t, "source_tables", "trade_offs[].source_tables")
         c.tables(t, "target_tables", "trade_offs[].target_tables")
-        c.field(t, "query_ids", "trade_offs[].query_ids", key=str)
     kept_mappings = c.cut(
         out.get("table_mappings") or [],
         "table_mappings",
