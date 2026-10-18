@@ -56,11 +56,20 @@ from src.agents.referee.triage import SOURCE_ENGINE_TO_AURORA
 from src.contracts.model_flag import FlagReason, ModelFlag, parse_model_flags
 from src.contracts.move_ledger import EngineScore, MoveActor, MoveEvidence, MovePass, ReasonCode
 from src.shared.engine_names import display_engine
-from src.shared.flag_reasons import FLAG_REASON_TEXT
+from src.shared.flag_reasons import (
+    FLAG_REASON_TEXT,
+    IGNORED_NOT_MOVED_ONTO,
+    IGNORED_NOT_ON_ENGINE,
+)
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["apply_consolidation_flags", "parse_model_flags", "route_flagged_unit"]
+__all__ = [
+    "apply_consolidation_flags",
+    "ignored_flag_outcome",
+    "parse_model_flags",
+    "route_flagged_unit",
+]
 
 # Customer-facing wording for each reason category (never the raw enum value),
 # shared with the deliverables (src.shared.flag_reasons).
@@ -208,6 +217,25 @@ class FlagOutcome:
         }
 
 
+def ignored_flag_outcome(query_id: str, flag: ModelFlag, why: str) -> dict:
+    """The ``ignored`` ``flag_decisions`` record of one query a flag cannot apply to.
+
+    The one shape both LLM modes write (#746): headless finalize
+    (:func:`apply_consolidation_flags`) and the Bedrock consolidation validator
+    (``consolidation_validator.validate_consolidations``), so a flag that
+    changes nothing leaves the same audit record either way.
+    """
+    logger.warning("Ignored a model flag for %r on %r: %s", query_id[:80], flag.flagged_engine, why)
+    return FlagOutcome(
+        [query_id],
+        flag.flagged_engine,
+        flag.reason_category.value,
+        flag.explanation,
+        OUTCOME_IGNORED,
+        reason=f"Flag ignored: {why}",
+    ).as_dict()
+
+
 def _moved_reason(flagged: str, label: str, routing: UnitRouting, grouped: bool) -> str:
     dest = routing.destination or ""
     basis = "co-dependency group moves together" if grouped else "best-scoring remaining engine"
@@ -285,25 +313,13 @@ def apply_consolidation_flags(
         for qid in dict.fromkeys(flag.query_ids):
             current = by_id.get(qid)
             if current is None or current["assigned_engine"] != flag.flagged_engine:
-                why = "it is not on that engine"
+                why = IGNORED_NOT_ON_ENGINE
             elif qid not in moved_onto.get(flag.flagged_engine, set()):
-                why = "no consolidation moved it onto that engine"
+                why = IGNORED_NOT_MOVED_ONTO
             else:
                 ok_ids.append(qid)
                 continue
-            logger.warning(
-                "Ignored a model flag for %r on %r: %s", qid[:80], flag.flagged_engine, why
-            )
-            decisions.append(
-                FlagOutcome(
-                    [qid],
-                    flag.flagged_engine,
-                    flag.reason_category.value,
-                    flag.explanation,
-                    OUTCOME_IGNORED,
-                    reason=f"Flag ignored: {why}",
-                ).as_dict()
-            )
+            decisions.append(ignored_flag_outcome(qid, flag, why))
         if ok_ids:
             accepted.append((ok_ids, flag))
             for qid in ok_ids:

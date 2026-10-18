@@ -70,6 +70,7 @@ from src.shared.bedrock_guardrail import (
     guard_messages,
 )
 from src.shared.engine_names import display_engine
+from src.shared.flag_reasons import IGNORED_NOT_ON_ENGINE, IGNORED_NOT_UNDER_REVIEW
 from src.shared.models import (
     ROLE_SPECS,
     Role,
@@ -168,6 +169,7 @@ def validate_consolidations(
     original_assignments: list[dict] | None = None,
     incomplete: list[dict] | None = None,
     rejected: list[str] | None = None,
+    ignored: list[tuple[str, ModelFlag, str]] | None = None,
 ) -> list[ModelFlag]:
     """Validate consolidation decisions using an LLM.
 
@@ -191,6 +193,12 @@ def validate_consolidations(
         rejected: when given, one note is appended per response entry that
             fails the ``ModelFlag`` contract; that entry is dropped and the
             valid flags beside it are kept (the headless response's handling)
+        ignored: when given, one ``(query_id, flag, why)`` is appended per
+            query a valid flag cannot apply to -- a flag on an engine other
+            than the one under review, or a query not under review in that
+            call -- for the handler to record as an ``ignored``
+            ``flag_decisions`` entry, the record headless finalize writes for
+            the same case (#746)
 
     Returns:
         One flag per flagged query, ``flagged_engine`` the consolidation's
@@ -256,27 +264,27 @@ def validate_consolidations(
                 rejected.extend(bad)
             batch_ids = {q["query_id"] for q in batch}
             for flag in flagged:
-                if flag.flagged_engine != to_engine:
+                kept_ids = []
+                for qid in dict.fromkeys(flag.query_ids):
+                    if qid not in batch_ids:
+                        why = IGNORED_NOT_UNDER_REVIEW
+                    elif flag.flagged_engine != to_engine:
+                        # A query under review sits on to_engine.
+                        why = IGNORED_NOT_ON_ENGINE
+                    else:
+                        kept_ids.append(qid)
+                        continue
+                    if ignored is not None:
+                        ignored.append((qid, flag, why))  # its record logs it
+                        continue
                     logger.warning(
-                        "Consolidation %s -> %s: dropped a flag on %r, which is not "
-                        "the engine under review",
+                        "Consolidation %s -> %s: ignored a flag for %r on %r: %s",
                         from_engine,
                         to_engine,
+                        str(qid)[:80],
                         flag.flagged_engine,
+                        why,
                     )
-                    continue
-                kept_ids = []
-                for qid in flag.query_ids:
-                    if qid not in batch_ids:
-                        logger.warning(
-                            "Consolidation %s -> %s: dropped a flag for %r, "
-                            "which is not one of the queries under review",
-                            from_engine,
-                            to_engine,
-                            str(qid)[:80],
-                        )
-                        continue
-                    kept_ids.append(qid)
                 # One flag stays one flag (as in the headless response), so a
                 # flag on several queries is applied as one unit in both modes.
                 if kept_ids:
@@ -539,6 +547,7 @@ def sanity_sweep(
     routing_trace: RoutingTrace | None = None,
     query_signals: Mapping[str, list[str]] | None = None,
     ledger: MoveLedger | None = None,
+    settled: Mapping[str, int] | None = None,
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Final pass: remove a tiny orphan engine the other committed engines
     can serve (ADR-031 Decision 7: "when an engine serves only a few
@@ -636,6 +645,10 @@ def sanity_sweep(
             (ignoring any model flag) and on its destination, both from the
             shared scorer and both in its reason (#755). A fresh one from
             ``revised_assignments`` when ``None``.
+        settled: the settled-workload snapshot a tie reads (ADR-031 Decision
+            12: the resolver's, which the reality check carries,
+            ``RoutingTrace.settled_counts``); recounted from
+            ``revised_assignments`` when ``None`` (#746).
 
     Returns:
         (updated_assignments, updated_consolidations, sweep_decisions) —
@@ -651,7 +664,10 @@ def sanity_sweep(
         ledger = ledger_for(revised_assignments)
     engine_counts = Counter(qa["assigned_engine"] for qa in revised_assignments)
     source_compatible_engine = SOURCE_ENGINE_TO_AURORA.get((source_engine or "").lower())
-    workload = settled_counts(revised_assignments)
+    # The settled workload an orphan's tie-break reads: the resolver's snapshot
+    # the reality check's placement used (ADR-031 Decision 12, #746), when the
+    # caller has it; the revised assignments' own count otherwise.
+    workload = dict(settled) if settled is not None else settled_counts(revised_assignments)
     by_id = {qa["query_id"]: qa for qa in revised_assignments}
     # The engines a tiny orphan may actually move to: Aurora (the
     # consolidation target ADR-031 Decision 7 has in mind), or any engine

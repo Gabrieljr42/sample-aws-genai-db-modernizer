@@ -25,6 +25,12 @@ Version History:
 - 1.0 (2026-10-14, #628): unchanged; the Bedrock-only ``ModelFlagBatch``
   wrapper is replaced by ``RealityCheckModelResponse``, the response contract
   both modes share.
+- 1.0 (2026-10-17, #746): unchanged; its schema is pinned
+  (``MODEL_FLAG_SCHEMA_VERSION`` and
+  ``tests/contract/test_model_flag_schema_pin.py``). A flag is never written on
+  its own, so it carries no ``contract_version`` field (``extra="forbid"``
+  would make the model send one); the pin makes a change to the shape every
+  embedding contract advertises move this version too.
 """
 
 from __future__ import annotations
@@ -51,6 +57,12 @@ FlaggableEngine = Literal[
     "elasticache",
     "opensearch",
 ]
+
+# The ModelFlag schema's version (see Version History). A flag is embedded in
+# other contracts' structured output (``RoutingFlagEntry``), never written on its
+# own, so the version lives here; tests/contract/test_model_flag_schema_pin.py
+# pins it to the schema's hash.
+MODEL_FLAG_SCHEMA_VERSION = "1.0"
 
 # A flag's explanation is a short note, not an essay (the old free-text reason
 # was asked for in at most 15 words).

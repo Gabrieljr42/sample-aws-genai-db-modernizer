@@ -329,6 +329,36 @@ class TestSanitySweepOrphanRemoval:
         assert by_id["j1"] == "dynamodb"
         assert by_id["j2"] == "dynamodb"  # moved together, never split from j1
 
+    def test_the_tie_reads_the_settled_snapshot_it_is_given(self) -> None:
+        """#746 (ADR-031 Decision 12): the same 50/50 group tie, but the caller
+        passes the resolver's settled snapshot, in which Aurora MySQL carries
+        more settled work than DynamoDB: the snapshot decides, not a recount of
+        the revised assignments (which favours DynamoDB, 6 against 1)."""
+        assignments = [
+            {"query_id": "j1", "assigned_engine": "documentdb"},
+            {"query_id": "j2", "assigned_engine": "documentdb"},
+            {"query_id": "a0", "assigned_engine": "aurora_mysql"},
+        ] + [{"query_id": f"y{i}", "assigned_engine": "dynamodb"} for i in range(6)]
+        query_map = _query_map("j1", "j2", "a0", *(f"y{i}" for i in range(6)))
+        scoring_context = _scoring_context(
+            {
+                "j1": {"dynamodb": 90, "aurora_mysql": 10},
+                "j2": {"dynamodb": 10, "aurora_mysql": 90},
+            }
+        )
+
+        updated, _, _ = sanity_sweep(
+            assignments,
+            [],
+            scoring_context,
+            query_map,
+            co_dependency_groups=[["j1", "j2"]],
+            settled={"aurora_mysql": 10, "dynamodb": 1},
+        )
+
+        by_id = {qa["query_id"]: qa["assigned_engine"] for qa in updated}
+        assert (by_id["j1"], by_id["j2"]) == ("aurora_mysql", "aurora_mysql")
+
     def test_a_blocked_group_member_keeps_the_whole_group_and_engine(self, capsys) -> None:
         # j1 needs a capability no committed engine has; j2 (the same
         # group) would otherwise have somewhere to go on its own -- but a
