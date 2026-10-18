@@ -229,7 +229,7 @@ deterministic job.
   and `ci/llm/run.py check-transcript`'s parsed summary (or `{"error": ...}`).
 - `reports-junit.xml`, `ui-junit.xml` (ui/both only), `pw-reports/`, `pw-ui/` --
   same shapes as `e2e.sh`'s outputs, produced by the same pytest invocations.
-- `judge.json` -- `ci/llm/judge.py`'s rubric scores.
+- `judge.json` -- `ci/llm/judge.py`'s rubric scores. The judge grades the same prompt `JUDGE_SAMPLES` times (default 3, about $0.40 per run) with a pinned model (`JUDGE_MODEL` overrides it), and `scores` are the per-criterion medians the pass rule is applied to. It also records `model` (the model that answered, read from the CLI record's `modelUsage`; every `judge.json` before #952 has `null` there), `model_requested`, `samples` (each sample's scores, model and cost), `spread` (max - min per criterion), `samples_failed`, `notes` (from the sample closest to the medians, `notes_from_sample`) and `defects` (one entry per defect the samples named, with criterion, kind, where, quote and how many samples named it). With `E2E_LLM_JUDGE_BASELINE` set to a saved main `judge.json`, `baseline` holds the per-criterion deltas, and a drop of one point or more on any shared criterion fails the judge step: compare criteria, not the mean, because the mean hides moves that cancel. The judge measures the deliverables, not routing: routing quality is the answer-key benchmark's gate (`benchmarks/README.md`).
 - `token_usage` in `results.json` (and `job-logs/token_usage.json`) -- `ci/llm/token_usage.py` sums the session's per-turn input-side usage (input, cache-read, cache-write tokens, calls; subagent turns included) per pipeline phase, attributed from the `scripts/run_<phase>.py` calls and design/reality-check/synthesize skills each agent made, in the same key names as the Bedrock `token_usage` in `design_trace.json`. Per-phase `outputTokens` is `null`: the transcript's assistant records only carry the first-chunk output count (about 100x too low), so `total.outputTokens` is the session total from the final result records' `modelUsage`, and `session_model_usage` shows the session figures to compare against (the per-phase sums come out 0.2-3.3% short on cache-read). Grouped runs also carry a `token_usage` run total in the consolidated `design_trace.json`.
 - `job-logs/` -- the run's own logs, copied by the EXIT trap (`ci/llm/run.py
   collect-logs`) because only this directory is uploaded: `run_assessment.log`
@@ -339,6 +339,8 @@ uv run python ci/llm/aggregate_notes.py --json > recurring.json
 `--concerns-only` is a lossy convenience: it keeps only sentences containing
 hedge or gap wording (could, soft, somewhat, repeats, ambiguous, generic, ...),
 so recurring praise does not drown them out. Run without it when in doubt.
+
+A `judge.json` written since #952 also has a structured `defects[]` list. Those entries are grouped per criterion and kind by the same similarity on the quoted text and listed after the notes (`recurring_defects` in `--json`), so a defect that comes back in many runs reads as a worklist item. Older files have no defects and add nothing there.
 
 ## `../scripts/hooks/` (Claude Code hooks, #731)
 
