@@ -35,6 +35,15 @@ ENV_TRACE = "BEDROCK_GUARDRAIL_TRACE"
 
 _TRACE_MODES = ("enabled", "disabled", "enabled_full")
 
+ENV_STREAM_MODE = "BEDROCK_GUARDRAIL_STREAM_MODE"
+_STREAM_MODES = ("sync", "async")
+
+#: Read timeout (seconds) for a guarded Strands call. In the default ``sync``
+#: stream mode Bedrock evaluates a whole streamed reply before releasing any of
+#: it, so a long reply (a schema design with thinking) sends nothing for minutes
+#: and tripped the 300 s timeout on every attempt (#1062).
+GUARDED_READ_TIMEOUT_SECONDS = 900
+
 
 class GuardrailConfigError(ValueError):
     """The guardrail environment variables are inconsistent or invalid."""
@@ -58,6 +67,7 @@ class GuardrailSettings:
     identifier: str
     version: str
     trace: str = "enabled"
+    stream_mode: str = "sync"
 
 
 def guardrail_settings() -> GuardrailSettings | None:
@@ -80,7 +90,10 @@ def guardrail_settings() -> GuardrailSettings | None:
     trace = os.environ.get(ENV_TRACE, "").strip().lower() or "enabled"
     if trace not in _TRACE_MODES:
         raise GuardrailConfigError(f"{ENV_TRACE} must be one of {', '.join(_TRACE_MODES)}")
-    return GuardrailSettings(identifier, version, trace)
+    stream_mode = os.environ.get(ENV_STREAM_MODE, "").strip().lower() or "sync"
+    if stream_mode not in _STREAM_MODES:
+        raise GuardrailConfigError(f"{ENV_STREAM_MODE} must be one of {', '.join(_STREAM_MODES)}")
+    return GuardrailSettings(identifier, version, trace, stream_mode)
 
 
 def require_valid_guardrail_config() -> None:
@@ -116,11 +129,33 @@ def strands_guardrail_kwargs() -> dict[str, Any]:
     if settings is None:
         return {}
     logger.info("Bedrock guardrail %s (version %s) is attached", *_shown(settings))
-    return {
+    kwargs: dict[str, Any] = {
         "guardrail_id": settings.identifier,
         "guardrail_version": settings.version,
         "guardrail_trace": settings.trace,
     }
+    if settings.stream_mode == "async":
+        # Opt-in: Bedrock cannot mask (PII anonymize) in async streaming.
+        kwargs["guardrail_stream_processing_mode"] = "async"
+    return kwargs
+
+
+def guarded_boto_config(config: Any = None) -> Any:
+    """``config`` with a read timeout long enough for a guarded stream; ``config`` as is when off.
+
+    Applies to Strands calls only. Keeps a longer timeout the caller already set.
+    """
+    if guardrail_settings() is None:
+        return config
+    from botocore.config import Config
+
+    guarded = Config(read_timeout=GUARDED_READ_TIMEOUT_SECONDS)
+    if config is None:
+        return guarded
+    current = getattr(config, "read_timeout", None)
+    if current is not None and current >= GUARDED_READ_TIMEOUT_SECONDS:
+        return config
+    return config.merge(guarded)
 
 
 def converse_guardrail_fields() -> dict[str, Any]:

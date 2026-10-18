@@ -451,6 +451,10 @@ NUMERIC_CONSTANTS: dict[str, tuple[frozenset[str], str]] = {
         "(maintainer decision on #992, 2026-10-17): it keeps the write in the mean without "
         "letting it outweigh real traffic; no engine reads it differently",
     ),
+    "src/shared/bedrock_guardrail.py": (
+        frozenset({"GUARDED_READ_TIMEOUT_SECONDS"}),
+        "a transport read timeout for guarded streaming calls, not a routing rule (#1062)",
+    ),
     "src/shared/models.py": (
         frozenset({"ADAPTIVE_MAX_TOKENS_FLOOR", "LEGACY_MAX_TOKENS_FLOOR"}),
         _BUDGET,

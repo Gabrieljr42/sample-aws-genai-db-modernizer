@@ -33,7 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in (bg.ENV_ID, bg.ENV_VERSION, bg.ENV_TRACE):
+    for name in (bg.ENV_ID, bg.ENV_VERSION, bg.ENV_TRACE, bg.ENV_STREAM_MODE):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AWS_REGION", "us-east-1")
 
@@ -142,6 +142,60 @@ def test_on_request_is_the_off_request_plus_the_guardrail(role, monkeypatch):
         "trace": "enabled",
     }
     assert on == off, "the guardrail must be the only difference"
+
+
+def test_default_stream_mode_is_sync_so_masking_works(guardrail_on):
+    """Async streaming cannot mask (PII anonymize), so it is opt-in (#1062)."""
+    assert "guardrail_stream_processing_mode" not in bg.strands_guardrail_kwargs()
+    assert "streamProcessingMode" not in str(_request_for(Role.SCHEMA_DESIGN))
+
+
+def test_stream_mode_async_is_opt_in(guardrail_on, monkeypatch):
+    monkeypatch.setenv(bg.ENV_STREAM_MODE, "ASYNC")
+    assert bg.strands_guardrail_kwargs()["guardrail_stream_processing_mode"] == "async"
+    assert _request_for(Role.SCHEMA_DESIGN)["guardrailConfig"]["streamProcessingMode"] == "async"
+    monkeypatch.setenv(bg.ENV_STREAM_MODE, "sync")
+    assert "guardrail_stream_processing_mode" not in bg.strands_guardrail_kwargs()
+
+
+def test_stream_mode_is_validated(guardrail_on, monkeypatch):
+    monkeypatch.setenv(bg.ENV_STREAM_MODE, "fast")
+    with pytest.raises(GuardrailConfigError, match=bg.ENV_STREAM_MODE):
+        bg.guardrail_settings()
+
+
+def test_stream_mode_without_a_guardrail_adds_nothing(monkeypatch):
+    monkeypatch.setenv(bg.ENV_STREAM_MODE, "async")
+    assert bg.strands_guardrail_kwargs() == {}
+    assert bg.guarded_boto_config() is None
+
+
+def test_non_streamed_boto3_calls_carry_no_stream_mode(guardrail_on, monkeypatch):
+    monkeypatch.setenv(bg.ENV_STREAM_MODE, "async")
+    assert "streamProcessingMode" not in str(bg.converse_guardrail_fields())
+    assert "streamProcessingMode" not in str(bg.invoke_model_guardrail_kwargs())
+
+
+def test_guarded_model_gets_a_long_read_timeout(guardrail_on):
+    from botocore.config import Config
+
+    for build in _schema_builders():
+        assert build().client.meta.config.read_timeout == bg.GUARDED_READ_TIMEOUT_SECONDS
+    assert build_bedrock_model(Role.SUMMARY).client.meta.config.read_timeout == (
+        bg.GUARDED_READ_TIMEOUT_SECONDS
+    )
+    keep = Config(read_timeout=2000, connect_timeout=7)
+    assert bg.guarded_boto_config(keep) is keep
+    merged = bg.guarded_boto_config(Config(read_timeout=300, connect_timeout=7))
+    assert (merged.read_timeout, merged.connect_timeout) == (900, 7)
+
+
+def test_read_timeout_is_unchanged_without_a_guardrail():
+    for build in _schema_builders():
+        assert build().client.meta.config.read_timeout == 300
+    assert build_bedrock_model(Role.SUMMARY).client.meta.config.read_timeout != (
+        bg.GUARDED_READ_TIMEOUT_SECONDS
+    )
 
 
 def test_converse_and_invoke_helpers(guardrail_on):

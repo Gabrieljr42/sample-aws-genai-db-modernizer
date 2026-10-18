@@ -50,7 +50,11 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from src.shared.role_bedrock_model import RoleBedrockModel
 
-from src.shared.bedrock_guardrail import converse_guardrail_fields, strands_guardrail_kwargs
+from src.shared.bedrock_guardrail import (
+    converse_guardrail_fields,
+    guarded_boto_config,
+    strands_guardrail_kwargs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -498,6 +502,9 @@ def build_bedrock_model(
     from src.shared.role_bedrock_model import RoleBedrockModel
 
     kwargs = bedrock_model_kwargs(role, model_id=model_id, max_tokens=max_tokens)
+    if kwargs.get("guardrail_id"):
+        # A guarded stream can send nothing for minutes (#1062); off is untouched.
+        transport["boto_client_config"] = guarded_boto_config(transport.get("boto_client_config"))
     return RoleBedrockModel(
         profile=profile_for(kwargs["model_id"]), phase=role.value, **kwargs, **transport
     )
