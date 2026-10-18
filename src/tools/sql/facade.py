@@ -1106,6 +1106,10 @@ class ScopeFacts:
     ``TRUNC``, ``DATE()``, a cast to ``date``, ``YEAR``/``MONTH``/``DAY``/...,
     ``EXTRACT``, ``date_part``/``DATEPART``, ``to_char``/``DATE_FORMAT``,
     ``strftime`` (#920). Grouping on a raw timestamp is not one.
+    ``or_branches``: when the WHERE's only ``OR`` group is a disjunction of
+    branches made only of ``col = <value>`` terms (``id = $1 OR id = $2``), the
+    columns each branch pins, one tuple per branch (#915); empty otherwise. The
+    ``OR`` group itself still counts in ``other_filters``.
     """
 
     sources: tuple[ScopeSource, ...]
@@ -1123,6 +1127,7 @@ class ScopeFacts:
     like_parameter: bool = False
     time_bucket: bool = False
     text_search_kinds: frozenset[TextSearchKind] = frozenset()
+    or_branches: tuple[tuple[ColumnFact, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1506,6 +1511,36 @@ def _conjuncts(condition: exp.Expr | None) -> list[exp.Expr]:
     return [condition]
 
 
+def _disjuncts(condition: exp.Expr) -> list[exp.Expr]:
+    while isinstance(condition, exp.Paren):
+        condition = condition.this
+    if isinstance(condition, exp.Or):
+        return _disjuncts(condition.this) + _disjuncts(condition.expression)
+    return [condition]
+
+
+def _or_branches(terms: list[exp.Expr], aliases: set[str]) -> tuple[tuple[ColumnFact, ...], ...]:
+    """The columns each branch of the WHERE's only ``OR`` group pins, when every
+    branch is made only of ``col = <value>`` terms (:class:`ScopeFacts`)."""
+    groups = [t for t in terms if len(_disjuncts(t)) > 1]
+    if len(groups) != 1:
+        return ()
+    branches: list[tuple[ColumnFact, ...]] = []
+    for branch in _disjuncts(groups[0]):
+        reader = _ScopeReader(aliases)
+        for term in _conjuncts(branch):
+            stripped = term
+            while isinstance(stripped, exp.Paren):
+                stripped = stripped.this
+            if not isinstance(stripped, (exp.EQ, exp.NullSafeEQ)):
+                return ()
+            reader.term(stripped)
+        if reader.other or reader.ranges or reader.joins or not reader.equalities:
+            return ()
+        branches.append(tuple(reader.equalities))
+    return tuple(branches)
+
+
 def _own_columns(node: exp.Expr) -> list[exp.Column]:
     """Columns in ``node``, not looking inside a nested query."""
     found: list[exp.Column] = []
@@ -1660,7 +1695,8 @@ def _scope_facts(
     aliases |= {s.table.name.lower() for s in sources if s.table is not None}
     reader = _ScopeReader(aliases)
     where = root.args.get("where")
-    for term in _conjuncts(where):
+    where_terms = _conjuncts(where)
+    for term in where_terms:
         reader.term(term)
     seen_aliases = [s.alias for s in sources[: len(sources) - len(joins)]]
     for join in joins:
@@ -1694,4 +1730,5 @@ def _scope_facts(
         like_parameter=any(_text_search_kind(n) == "parameter" for n in own),
         time_bucket=_has_time_bucket(root),
         text_search_kinds=frozenset(k for n in own if (k := _text_search_kind(n)) is not None),
+        or_branches=_or_branches(where_terms, aliases),
     )

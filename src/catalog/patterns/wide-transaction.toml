@@ -22,7 +22,7 @@ supported = true
 catalog = "dynamodb"
 catalog_id = "dynamodb-ap-04"
 severity = 0.3
-why = "A write wider than one transaction: more than 100 items, or rows a range, join, subquery or unkeyed predicate picks. DynamoDB TransactWriteItems holds up to 100 items and 4 MB across tables (Amazon DynamoDB Developer Guide, Amazon DynamoDB Transactions)."
+why = "A write wider than one transaction: more than 100 items, or rows a range, join, subquery or a filter with no key anchor picks (a write by a non-unique key column is a key-scoped Query plus batch write, not this). DynamoDB TransactWriteItems holds up to 100 items and 4 MB across tables (Amazon DynamoDB Developer Guide, Amazon DynamoDB Transactions)."
 guidance = "Writes of up to 100 known items run as one TransactWriteItems call. A wider write needs batches of at most 100 items or a retry-safe multi-step flow."
 
 [engines.documentdb]

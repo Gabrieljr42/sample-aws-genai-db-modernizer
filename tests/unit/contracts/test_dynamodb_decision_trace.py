@@ -77,7 +77,7 @@ def _raw_file(tmp_path: Path, key: str) -> dict:
 
 def test_the_trace_declares_a_checked_contract_version() -> None:
     field = DynamoDBDecisionTrace.model_fields["contract_version"]
-    assert field.default == CURRENT == "1.0"
+    assert field.default == CURRENT == "1.1"
     assert any(getattr(m, "pattern", None) == r"^\d+\.\d+$" for m in field.metadata)
 
 
@@ -157,6 +157,7 @@ def test_the_transaction_shapes_are_the_ones_the_classifier_writes() -> None:
     assert typing.get_args(TransactionShapeKind) == (
         shapes.SINGLE_ITEM,
         shapes.BOUNDED,
+        shapes.KEY_SCOPED,
         shapes.UNBOUNDED,
     )
 

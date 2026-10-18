@@ -19,6 +19,7 @@ from src.agents.referee.query_scoring import (
 )
 from src.agents.referee.transaction_shape import (
     BOUNDED,
+    KEY_SCOPED,
     SINGLE_ITEM,
     TRANSACTION_MAX_ITEMS,
     UNBOUNDED,
@@ -279,3 +280,364 @@ def test_the_shape_reads_its_facts_in_the_source_engines_dialect(monkeypatch):
     }
     analyze_dynamodb_use_cases(collector)
     assert seen[-1] == SourceScope(name="trailgear", engine="sqlserver")
+
+
+# --- Only a primary or unique key addresses one item (#915) ---------------------------
+
+
+def _keyed_collector(*queries: dict, engine: str | None = None) -> dict:
+    """``app.orders`` keyed by ``id``, a unique ``email``, a unique (tenant_id, code), a
+    non-unique index on ``status``, a foreign key ``customer_id`` and an unindexed
+    ``flag``; ``app.events`` collected with no primary or unique key, an index on
+    ``source`` and an unindexed ``kind``."""
+    orders = {
+        "table_id": "app.orders",
+        "table_name": "orders",
+        "row_count": 10_000,
+        "primary_key": ["id"],
+        "columns": [
+            {"column_name": c, "data_type": "text"}
+            for c in ("id", "status", "email", "tenant_id", "code", "customer_id", "flag")
+        ],
+        "foreign_keys": [{"columns": ["customer_id"], "referenced_table": "app.customers"}],
+        "indexes": [
+            {"index_name": "ux_email", "columns": ["email"], "is_unique": True},
+            {"index_name": "ux_code", "columns": ["tenant_id", "code"], "is_unique": True},
+            {"index_name": "ix_status", "columns": ["status"], "is_unique": False},
+        ],
+    }
+    events = {
+        "table_id": "app.events",
+        "table_name": "events",
+        "row_count": 10_000,
+        "primary_key": [],
+        "columns": [
+            {"column_name": "kind", "data_type": "text"},
+            {"column_name": "source", "data_type": "text"},
+        ],
+        "indexes": [{"index_name": "ix_source", "columns": ["source"], "is_unique": False}],
+    }
+    collector: dict = {
+        "database_schema": {"tables": [orders, events]},
+        "queries": {"query_patterns": list(queries)},
+    }
+    if engine:
+        collector["metadata"] = {"source_database": {"engine": engine, "database_name": "app"}}
+    return collector
+
+
+def _keyed_shape(query: dict, engine: str | None = "postgresql"):
+    from src.agents.referee.access_pattern import SchemaKeys
+    from src.agents.referee.table_resolution import SourceScope
+
+    collector = _keyed_collector(query, engine=engine)
+    shape = transaction_shape(
+        query, SourceScope.from_collector(collector), SchemaKeys.from_collector(collector)
+    )
+    assert shape is not None
+    return shape
+
+
+@pytest.mark.parametrize(
+    ("text", "query_type", "stats", "shape"),
+    [
+        # A full primary or unique key: one item, or as many as the IN list names.
+        ("UPDATE orders SET status = $1 WHERE id = $2", "UPDATE", {}, SINGLE_ITEM),
+        ("DELETE FROM orders WHERE email = $1", "DELETE", {}, SINGLE_ITEM),
+        ("DELETE FROM orders WHERE tenant_id = $1 AND code = $2", "DELETE", {}, SINGLE_ITEM),
+        ("DELETE FROM orders WHERE id IN ($1, $2, $3)", "DELETE", {}, BOUNDED),
+        ("UPDATE orders SET code = $1 WHERE id = $2 AND status = $3", "UPDATE", {}, SINGLE_ITEM),
+        # A key anchor that is not a full key: the item collection one value addresses
+        # (maintainer decision on #915): an index, a foreign key, part of a unique key.
+        ("UPDATE orders SET status = $1 WHERE status = $2", "UPDATE", {}, KEY_SCOPED),
+        ("DELETE FROM orders WHERE status IN ($1, $2)", "DELETE", {}, KEY_SCOPED),
+        ("DELETE FROM orders WHERE customer_id = $1", "DELETE", {}, KEY_SCOPED),
+        ("DELETE FROM orders WHERE tenant_id = $1", "DELETE", {}, KEY_SCOPED),
+        ("DELETE FROM orders WHERE customer_id = $1 AND flag = $2", "DELETE", {}, KEY_SCOPED),
+        (
+            "DELETE FROM events WHERE source = $1",
+            "DELETE",
+            {"tables_accessed": ["app.events"]},
+            KEY_SCOPED,
+        ),
+        # A filter with no key anchor changes every row that matches: a set the statement
+        # does not bound.
+        ("UPDATE orders SET status = $1 WHERE flag = $2", "UPDATE", {}, UNBOUNDED),
+        ("DELETE FROM orders WHERE flag IN ($1, $2)", "DELETE", {}, UNBOUNDED),
+        ("DELETE FROM orders WHERE id = $1 OR flag = $2", "DELETE", {}, UNBOUNDED),
+        ("DELETE FROM orders WHERE NOT (id = $1)", "DELETE", {}, UNBOUNDED),
+        # An OR of full-key values is as many items as branches (review of #1038).
+        ("DELETE FROM orders WHERE id = $1 OR id = $2", "DELETE", {}, BOUNDED),
+        ("DELETE FROM orders WHERE id = $1 OR email = $2", "DELETE", {}, BOUNDED),
+        (
+            "DELETE FROM orders WHERE tenant_id = $1 AND (code = $2 OR code = $3)",
+            "DELETE",
+            {},
+            BOUNDED,
+        ),
+        ("DELETE FROM orders WHERE (id = $1)", "DELETE", {}, SINGLE_ITEM),
+        (
+            "UPDATE events SET kind = $1 WHERE kind = $2",
+            "UPDATE",
+            {"tables_accessed": ["app.events"]},
+            UNBOUNDED,
+        ),
+        ("DELETE FROM orders WHERE customer_id = $1 OR flag = $2", "DELETE", {}, UNBOUNDED),
+        # Every branch pins a key anchor: one item collection per branch.
+        ("DELETE FROM orders WHERE customer_id = $1 OR status = $2", "DELETE", {}, KEY_SCOPED),
+        # The condition's own key is not the write's (it guards, it changes nothing).
+        (
+            "UPDATE orders SET status = $1 WHERE flag = $2 "
+            "AND NOT EXISTS (SELECT 1 FROM orders o2 WHERE o2.id = $3)",
+            "UPDATE",
+            {},
+            UNBOUNDED,
+        ),
+        (
+            "UPDATE orders SET status = $1 WHERE id = $2 "
+            "AND NOT EXISTS (SELECT 1 FROM orders o2 WHERE o2.status = $3)",
+            "UPDATE",
+            {},
+            SINGLE_ITEM,
+        ),
+        # An INSERT ... SELECT copies the rows its SELECT picks.
+        (
+            "INSERT INTO orders (id, status) SELECT id, $1 FROM orders WHERE id = $2",
+            "INSERT",
+            {},
+            SINGLE_ITEM,
+        ),
+        (
+            "INSERT INTO orders (id, status) SELECT id, $1 FROM orders WHERE flag = $2",
+            "INSERT",
+            {},
+            UNBOUNDED,
+        ),
+        (
+            "INSERT INTO orders (id, status) SELECT id, $1 FROM orders WHERE status = $2",
+            "INSERT",
+            {},
+            KEY_SCOPED,
+        ),
+        # A measurement still decides.
+        (
+            "UPDATE orders SET status = $1 WHERE status = $2",
+            "UPDATE",
+            {"rows_affected_avg": 1},
+            SINGLE_ITEM,
+        ),
+        # A table outside the collected schema has no key facts: the text check stands.
+        (
+            "UPDATE other SET status = $1 WHERE status = $2",
+            "UPDATE",
+            {"tables_accessed": ["app.other"]},
+            SINGLE_ITEM,
+        ),
+    ],
+)
+def test_only_a_primary_or_unique_key_addresses_one_item(
+    text: str, query_type: str, stats: dict, shape: str
+) -> None:
+    assert _keyed_shape(_write(text, query_type, **stats)).shape == shape
+
+
+def test_the_reason_names_the_columns_that_are_not_a_key() -> None:
+    shape = _keyed_shape(_write("DELETE FROM orders WHERE flag = $1", "DELETE"))
+    assert shape.reason == (
+        "addresses its rows by flag, no key of orders: the statement does not bound them"
+    )
+    assert shape.schema_note is None
+    either = _keyed_shape(_write("DELETE FROM orders WHERE id = $1 OR flag = $2", "DELETE"))
+    assert either.reason == (
+        "addresses its rows by a predicate that pins no primary or unique key of orders: "
+        "the statement does not bound them"
+    )
+    copied = _keyed_shape(
+        _write("INSERT INTO orders (id) SELECT id FROM orders WHERE flag = $1", "INSERT")
+    )
+    assert copied.reason == "inserts the rows a query returns: the statement does not bound them"
+
+
+def test_without_schema_keys_any_key_predicate_still_counts() -> None:
+    """Callers that pass no keys keep the text check's answer (no fact to read)."""
+    assert _shape(_write("UPDATE orders SET status = $1 WHERE status = $2", "UPDATE")) == (
+        SINGLE_ITEM
+    )
+
+
+def test_without_a_dialect_an_empty_reading_is_no_evidence() -> None:
+    """With no source engine, ``$2`` may not read as a value, so the facade pins
+    nothing: that is not evidence of a non-unique key. A column it does pin still is."""
+    pk = _write("UPDATE orders SET status = $1 WHERE id = $2", "UPDATE")
+    assert _keyed_shape(pk, engine=None).shape == SINGLE_ITEM
+    flag = _write("UPDATE orders SET code = ? WHERE flag = ?", "UPDATE")
+    assert _keyed_shape(flag, engine=None).shape == UNBOUNDED
+
+
+@pytest.mark.parametrize(
+    ("engine", "text", "shape"),
+    [
+        ("sqlserver", "UPDATE [orders] SET [Status] = @s WHERE [Id] = @id", SINGLE_ITEM),
+        ("sqlserver", "UPDATE [orders] SET [Status] = @s WHERE [Status] = @old", KEY_SCOPED),
+        ("sqlserver", "UPDATE [orders] SET [Status] = @s WHERE [Flag] = @old", UNBOUNDED),
+        ("mysql", "UPDATE `orders` SET `status` = ? WHERE `email` = ?", SINGLE_ITEM),
+        ("mysql", "DELETE FROM `orders` WHERE `status` = ?", KEY_SCOPED),
+        ("mysql", "DELETE FROM `orders` WHERE `flag` = ?", UNBOUNDED),
+    ],
+)
+def test_the_key_check_reads_the_source_dialect(engine: str, text: str, shape: str) -> None:
+    query = _write(text, text.split()[0])
+    assert _keyed_shape(query, engine=engine).shape == shape
+
+
+def test_the_key_check_parses_in_the_source_engines_dialect(monkeypatch) -> None:
+    from src.agents.referee import transaction_shape as module
+
+    seen = []
+    real = module.query_access
+
+    def recording(query, keys, source_engine):
+        seen.append(source_engine)
+        return real(query, keys, source_engine)
+
+    monkeypatch.setattr(module, "query_access", recording)
+    _keyed_shape(
+        _write("UPDATE [orders] SET [Status] = @s WHERE [Id] = @id", "UPDATE"), "sqlserver"
+    )
+    assert seen == ["sqlserver"]
+
+
+def test_the_dynamodb_analysis_reads_the_schema_keys() -> None:
+    """Only a write whose filter has no key anchor is a wide transaction; a key-scoped
+    write takes no penalty and its trace carries the schema-design note."""
+    collector = _keyed_collector(
+        _write("UPDATE orders SET status = $1 WHERE id = $2", "UPDATE", "by-pk"),
+        _write("UPDATE orders SET code = $1 WHERE status = $2", "UPDATE", "by-status"),
+        _write("UPDATE orders SET code = $1 WHERE flag = $2", "UPDATE", "by-flag"),
+        engine="postgresql",
+    )
+    workload = analyze_dynamodb_use_cases(collector)
+    wide = [
+        ap
+        for ap in workload.anti_patterns_detected or []
+        if ap.anti_pattern_type == "wide-transaction"
+    ]
+    assert [ap.query_ids for ap in wide] == [["by-flag"]]
+    trace = build_decision_trace(
+        collector, workload, analyze_dynamodb_patterns(collector, workload)
+    )
+    shapes = {m["query_id"]: m.get("transaction_shape") for m in trace["query_matches"]}
+    assert shapes["by-pk"]["shape"] == SINGLE_ITEM
+    assert shapes["by-status"]["shape"] == KEY_SCOPED
+    assert shapes["by-status"]["items"] is None
+    assert shapes["by-status"]["reason"] == (
+        "changes the rows one status value of orders addresses, a key that is not unique: "
+        "a key-scoped multi-item write (a Query plus a batch write)"
+    )
+    assert shapes["by-status"]["schema_note"] == (
+        "orders.status must become the partition key of an item collection (or a GSI's) "
+        "so this write reads its items by key"
+    )
+    assert shapes["by-flag"]["shape"] == UNBOUNDED
+    assert "schema_note" not in shapes["by-flag"]
+    assert "flag, no key of orders" in shapes["by-flag"]["reason"]
+
+
+def test_an_or_of_full_keys_counts_its_branches() -> None:
+    shape = _keyed_shape(_write("DELETE FROM orders WHERE id = $1 OR id = $2", "DELETE"))
+    assert (shape.shape, shape.items) == (BOUNDED, 2)
+    assert shape.reason == "addresses its rows by 2 key value(s) on one table"
+
+
+def test_an_insert_select_over_many_keys_keeps_its_item_count() -> None:
+    """More than 100 key values is unbounded, and the trace keeps the count (review
+    of #1038)."""
+    shape = _keyed_shape(
+        _write(f"INSERT INTO orders (id) SELECT id FROM orders WHERE id IN ({IN_150})", "INSERT")
+    )
+    assert (shape.shape, shape.items) == (UNBOUNDED, 150)
+    assert shape.reason.startswith("copies the rows of 150 key value(s) on one table")
+
+
+def _view_collector(query: dict) -> dict:
+    """A collected table ``public.users`` and an updatable view ``public.active_users``."""
+    return {
+        "metadata": {"source_database": {"engine": "postgresql", "database_name": "app"}},
+        "database_schema": {
+            "tables": [
+                {
+                    "table_id": "public.users",
+                    "table_name": "users",
+                    "row_count": 1000,
+                    "primary_key": ["id"],
+                    "columns": [
+                        {"column_name": "id", "data_type": "bigint"},
+                        {"column_name": "email", "data_type": "text"},
+                    ],
+                }
+            ],
+            "views": [{"view_id": "public.active_users", "view_name": "active_users"}],
+        },
+        "queries": {"query_patterns": [query]},
+    }
+
+
+def test_a_write_through_a_view_keeps_the_text_check() -> None:
+    """A view resolves to a collected id but has no keys: no verdict from the keys, the
+    text check stands (ADR-031 Decision 3), and nothing raises (review of #1038)."""
+    from src.agents.referee.access_pattern import SchemaKeys
+    from src.agents.referee.table_resolution import SourceScope
+
+    query = {
+        "query_id": "v1",
+        "query_text": "DELETE FROM active_users WHERE email = $1",
+        "query_type": "DELETE",
+        "tables_accessed": ["public.active_users"],
+        "calls_per_second": 1.0,
+    }
+    collector = _view_collector(query)
+    shape = transaction_shape(
+        query, SourceScope.from_collector(collector), SchemaKeys.from_collector(collector)
+    )
+    assert shape is not None and shape.shape == SINGLE_ITEM
+    workload = analyze_dynamodb_use_cases(collector)
+    trace = build_decision_trace(
+        collector, workload, analyze_dynamodb_patterns(collector, workload)
+    )
+    (match,) = [m for m in trace["query_matches"] if m["query_id"] == "v1"]
+    assert match["transaction_shape"]["shape"] == SINGLE_ITEM
+
+
+def test_a_key_scoped_write_takes_no_wide_transaction_penalty() -> None:
+    shape = _keyed_shape(_write("DELETE FROM orders WHERE customer_id = $1", "DELETE"))
+    assert shape.shape == KEY_SCOPED and not shape.needs_redesign
+    copied = _keyed_shape(
+        _write("INSERT INTO orders (id) SELECT id FROM orders WHERE status = $1", "INSERT")
+    )
+    assert copied.reason.startswith("copies the rows one status value of orders addresses")
+
+
+def test_a_saved_1_0_trace_still_loads() -> None:
+    """The contract adds a shape and an optional field (1.1): a 1.0 trace loads."""
+    from src.contracts.dynamodb_decision_trace import TransactionShapeTrace
+
+    old = TransactionShapeTrace.model_validate({"shape": "unbounded", "items": None, "reason": "r"})
+    assert old.schema_note is None
+    new = TransactionShapeTrace.model_validate(
+        {"shape": "key scoped", "items": None, "reason": "r", "schema_note": "n"}
+    )
+    assert new.model_dump()["schema_note"] == "n"
+
+
+def test_an_or_of_key_anchors_names_each_one() -> None:
+    shape = _keyed_shape(
+        _write("DELETE FROM orders WHERE customer_id = $1 OR status = $2", "DELETE")
+    )
+    assert shape.reason == (
+        "changes the rows of orders that one value of each of customer_id, status addresses, "
+        "a key that is not unique: a key-scoped multi-item write (a Query plus a batch write)"
+    )
+    assert shape.schema_note == (
+        "orders.customer_id, orders.status must each become the partition key of an item "
+        "collection (or a GSI's) so this write reads its items by key"
+    )

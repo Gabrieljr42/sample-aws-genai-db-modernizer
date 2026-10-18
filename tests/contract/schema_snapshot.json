@@ -8737,12 +8737,29 @@
                             "type": "string"
                           }
                         },
+                        "schema_note": {
+                          "required": false,
+                          "schema": {
+                            "kind": "anyOf",
+                            "members": [
+                              {
+                                "kind": "scalar",
+                                "type": "null"
+                              },
+                              {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
                         "shape": {
                           "required": true,
                           "schema": {
                             "kind": "enum",
                             "values": [
                               "bounded",
+                              "key scoped",
                               "single item",
                               "unbounded"
                             ]
@@ -9168,8 +9185,8 @@
         }
       }
     },
-    "schema_hash": "8147f6e2126183167cc0b1f0441f65568c8438def0c541fcc59adaf456adcdb5",
-    "version": "1.0"
+    "schema_hash": "20b94301b1c7f632c2ef6c80e9adc7d4b8d7506499e631d52e871e63f84c64c0",
+    "version": "1.1"
   },
   "dynamodb_model_output.DynamoDBModelOutputContract": {
     "fields": {

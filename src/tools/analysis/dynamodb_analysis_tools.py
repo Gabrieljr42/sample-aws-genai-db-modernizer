@@ -13,7 +13,12 @@ from pathlib import Path
 
 from pydantic import BaseModel, TypeAdapter
 
-from src.agents.referee.access_pattern import SMALL_TABLE_MAX_ROWS, UNPARSED, UTILITY
+from src.agents.referee.access_pattern import (
+    SMALL_TABLE_MAX_ROWS,
+    UNPARSED,
+    UTILITY,
+    SchemaKeys,
+)
 from src.agents.referee.table_resolution import SourceScope
 from src.agents.referee.transaction_shape import transaction_shape
 from src.contracts.analysis_output import (
@@ -1047,7 +1052,7 @@ def analyze_dynamodb_use_cases(collector_output: dict) -> WorkloadAnalysis:
         # 100 items as one transaction; only a write whose shape one transaction
         # cannot hold (more items, or a set the statement does not bound) needs a
         # redesign. The shape is the engine-neutral fact in transaction_shape.
-        shape = transaction_shape(q, scope)
+        shape = transaction_shape(q, scope, reader.keys)
         if shape is not None and shape.needs_redesign:
             wide_transaction_queries.append(q)
 
@@ -1456,6 +1461,7 @@ def build_decision_trace(
     """
     queries = collector_output.get("queries", {}).get("query_patterns", [])
     scope = SourceScope.from_collector(collector_output)
+    keys = SchemaKeys.from_collector(collector_output)
 
     # Build FK-connected table groups
     table_groups = build_table_groups(collector_output)
@@ -1477,7 +1483,7 @@ def build_decision_trace(
     for q in queries:
         qid = q.get("query_id", "")
         # Which transaction shape a write matched and why (ADR-031 Decision 3).
-        shape = transaction_shape(q, scope)
+        shape = transaction_shape(q, scope, keys)
         query_matches.append(
             QueryMatch(
                 query_id=qid,

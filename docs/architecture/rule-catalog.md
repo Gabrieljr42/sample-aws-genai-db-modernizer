@@ -797,7 +797,7 @@ Writes only: no parity anchor borrows from it and no access class lists it.
 Detected by `src.tools.analysis.dynamodb_analysis_tools:analyze_dynamodb_use_cases`.
 Writes only: no parity anchor borrows from it and no access class lists it.
 
-- DynamoDB, anti 0.3 (dynamodb-ap-04): A write wider than one transaction: more than 100 items, or rows a range, join, subquery or unkeyed predicate picks. DynamoDB TransactWriteItems holds up to 100 items and 4 MB across tables \(Amazon DynamoDB Developer Guide, Amazon DynamoDB Transactions\).
+- DynamoDB, anti 0.3 (dynamodb-ap-04): A write wider than one transaction: more than 100 items, or rows a range, join, subquery or a filter with no key anchor picks \(a write by a non-unique key column is a key-scoped Query plus batch write, not this\). DynamoDB TransactWriteItems holds up to 100 items and 4 MB across tables \(Amazon DynamoDB Developer Guide, Amazon DynamoDB Transactions\).
 - No effect on: DocumentDB, OpenSearch, ElastiCache, Aurora PostgreSQL, Aurora MySQL.
 - Not modelled yet (future enhancement): Neptune, Keyspaces.
 

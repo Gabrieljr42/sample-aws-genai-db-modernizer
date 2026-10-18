@@ -143,6 +143,12 @@ class TableKeys:
     # The collector's row count, when it reports one.
     row_count: int | None = None
 
+    def pins_unique_key(self, pinned: Iterable[str]) -> bool:
+        """Whether ``pinned`` (lower-case column names held to a value) covers a full
+        unique key: the primary key or every column of a unique index."""
+        columns = frozenset(pinned)
+        return any(u <= columns for u in self.unique_keys)
+
 
 @dataclass(frozen=True)
 class SchemaKeys:
@@ -314,7 +320,7 @@ def _scope_class(
     unique = {
         a
         for a in anchored
-        if (k := scope.table_keys(a)) is not None and any(u <= pinned[a] for u in k.unique_keys)
+        if (k := scope.table_keys(a)) is not None and k.pins_unique_key(pinned[a])
     }
     ranged = {
         owner
@@ -563,6 +569,9 @@ class ScopeColumns:
     joined: frozenset[tuple[str, str, str, str]]
     ranged: Mapping[str, frozenset[str]] = field(default_factory=dict)
     key_columns: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Per branch of the WHERE's only OR group of plain equalities (the facade's
+    # ``or_branches``, #915): per table, the columns that branch pins.
+    or_pinned: tuple[Mapping[str, frozenset[str]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -573,14 +582,19 @@ class QueryAccess:
     scopes: tuple[ScopeColumns, ...]
 
 
-def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
-    scope = _ScopeTables(keys, facts)
+def _pinned_by_table(scope: _ScopeTables, columns: Iterable[ColumnFact]) -> dict[str, set[str]]:
     pinned: dict[str, set[str]] = {}
-    for column in facts.equalities:
+    for column in columns:
         owner = scope.owner(column)
         table_id = scope.ids.get(owner) if owner is not None else None
         if table_id:
             pinned.setdefault(table_id, set()).add(column.name)
+    return pinned
+
+
+def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
+    scope = _ScopeTables(keys, facts)
+    pinned = _pinned_by_table(scope, facts.equalities)
     ranged: dict[str, set[str]] = {}
     for column in facts.ranges:
         owner = scope.owner(column)
@@ -605,6 +619,10 @@ def _scope_columns(facts: ScopeFacts, keys: SchemaKeys) -> ScopeColumns:
         joined=frozenset(joined),
         ranged={t: frozenset(c) for t, c in ranged.items()},
         key_columns={t: keys.tables[t].key_columns for t in tables if t in keys.tables},
+        or_pinned=tuple(
+            {t: frozenset(c) for t, c in _pinned_by_table(scope, branch).items()}
+            for branch in facts.or_branches
+        ),
     )
 
 
