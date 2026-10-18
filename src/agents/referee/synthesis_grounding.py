@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from src.agents.referee.schema_fields import field_list
 from src.agents.referee.summary_input_budget import TOTAL_FIELD_NAMES
 from src.agents.referee.table_resolution import TableNameResolver
 from src.shared.cache_engines import CACHE_ENGINES
@@ -656,7 +657,7 @@ def build_effective_architecture(
     """
     group_rps: dict[str, dict[str, float]] = {}
     for g in query_groups:
-        for ap in g.get("access_patterns", []):
+        for ap in field_list(g, "access_patterns"):
             per_engine = group_rps.setdefault(ap.get("engine", ""), {})
             per_engine[g["group_name"]] = per_engine.get(g["group_name"], 0) + (
                 ap.get("design_rps") or 0

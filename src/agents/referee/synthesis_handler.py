@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from src.agents.referee.aurora_choice import source_database_engine, source_database_version
 from src.agents.referee.capability_registry import triage_query_capabilities
 from src.agents.referee.migration_waves import build_migration_waves
+from src.agents.referee.schema_fields import field_list
 from src.agents.referee.summary_input_budget import apply_summary_input_budget, table_query_weights
 from src.agents.referee.summary_input_slim import slim_summary_input
 from src.agents.referee.synthesis_data import SynthesisData, load_synthesis_data
@@ -1007,8 +1008,8 @@ def _build_schema_summaries(data):
 
 def _build_standard_schema_summary(schema):
     tables = schema["table_definitions"]
-    access_patterns = schema.get("access_patterns", [])
-    hot_partition = schema.get("hot_partition_analysis", [])
+    access_patterns = schema.get("access_patterns") or []
+    hot_partition = schema.get("hot_partition_analysis") or []
     return {
         "status": "completed",
         "validation_passed": schema.get("validation_passed", False),
@@ -1016,8 +1017,8 @@ def _build_standard_schema_summary(schema):
             {
                 "table_name": t["table_name"],
                 "aggregate_pattern": t.get("aggregate_pattern"),
-                "source_tables": t.get("source_tables", []),
-                "gsi_count": len(t.get("gsis", [])),
+                "source_tables": t.get("source_tables") or [],
+                "gsi_count": len(t.get("gsis") or []),
                 "item_count": t.get("item_count", 0),
                 "item_size_bytes": t.get("item_size_bytes", 0),
             }
@@ -1025,16 +1026,16 @@ def _build_standard_schema_summary(schema):
         ],
         "access_pattern_count": len(access_patterns),
         "hot_partitions_at_risk": sum(1 for hp in hot_partition if hp.get("at_risk")),
-        "trade_offs": schema.get("trade_offs", []),
-        "unsupported_patterns": schema.get("unsupported_patterns", []),
-        "migration_notes": schema.get("migration_notes", []),
+        "trade_offs": field_list(schema, "trade_offs"),
+        "unsupported_patterns": field_list(schema, "unsupported_patterns"),
+        "migration_notes": field_list(schema, "migration_notes"),
     }
 
 
 def _build_documentdb_schema_summary(schema):
     """Build schema summary for DocumentDB (collections format)."""
-    collections = schema.get("collections", [])
-    access_patterns = schema.get("access_patterns", [])
+    collections = schema.get("collections") or []
+    access_patterns = schema.get("access_patterns") or []
     return {
         "status": "completed",
         "validation_passed": schema.get("validation_passed", False),
@@ -1042,8 +1043,8 @@ def _build_documentdb_schema_summary(schema):
             {
                 "table_name": c.get("collection_name", ""),
                 "aggregate_pattern": "document_collection",
-                "source_tables": c.get("source_tables", []),
-                "gsi_count": len(c.get("indexes", [])),
+                "source_tables": field_list(c, "source_tables"),
+                "gsi_count": len(c.get("indexes") or []),
                 "item_count": 0,
                 "item_size_bytes": 0,
             }
@@ -1051,9 +1052,9 @@ def _build_documentdb_schema_summary(schema):
         ],
         "access_pattern_count": len(access_patterns),
         "hot_partitions_at_risk": 0,
-        "trade_offs": schema.get("trade_offs", []),
-        "unsupported_patterns": schema.get("unsupported_patterns", []),
-        "migration_notes": schema.get("migration_notes", []),
+        "trade_offs": field_list(schema, "trade_offs"),
+        "unsupported_patterns": field_list(schema, "unsupported_patterns"),
+        "migration_notes": field_list(schema, "migration_notes"),
     }
 
 
@@ -1077,30 +1078,30 @@ def _build_aurora_schema_summary(engine, schema):
                 "gsi_count": 0,
                 "item_count": 0,
                 "item_size_bytes": 0,
-                "column_count": len(t.get("columns", [])),
-                "primary_key": t.get("primary_key", []),
-                "index_count": len(t.get("indexes", [])),
-                "foreign_key_count": len(t.get("foreign_keys", [])),
+                "column_count": len(t.get("columns") or []),
+                "primary_key": t.get("primary_key") or [],
+                "index_count": len(t.get("indexes") or []),
+                "foreign_key_count": len(t.get("foreign_keys") or []),
             }
             for t in tables
         ],
-        "index_count": sum(len(t.get("indexes", [])) for t in tables),
-        "foreign_key_count": sum(len(t.get("foreign_keys", [])) for t in tables),
-        "access_pattern_count": len(schema.get("access_patterns", [])),
+        "index_count": sum(len(t.get("indexes") or []) for t in tables),
+        "foreign_key_count": sum(len(t.get("foreign_keys") or []) for t in tables),
+        "access_pattern_count": len(schema.get("access_patterns") or []),
         "hot_partitions_at_risk": 0,
-        "optimizations": schema.get("optimizations", []),
-        "app_layer_notes": schema.get("app_layer_notes", []),
+        "optimizations": field_list(schema, "optimizations"),
+        "app_layer_notes": field_list(schema, "app_layer_notes"),
         "ddl_available": bool(schema.get("generated_ddl")),
-        "trade_offs": schema.get("trade_offs", []),
-        "unsupported_patterns": schema.get("unsupported_patterns", []),
-        "migration_notes": schema.get("migration_notes", []),
+        "trade_offs": field_list(schema, "trade_offs"),
+        "unsupported_patterns": field_list(schema, "unsupported_patterns"),
+        "migration_notes": field_list(schema, "migration_notes"),
     }
 
 
 def _build_elasticache_schema_summary(schema):
     """Build schema summary for ElastiCache/Redis (key_designs format)."""
-    key_designs = schema.get("key_designs", [])
-    access_patterns = schema.get("access_patterns", [])
+    key_designs = schema.get("key_designs") or []
+    access_patterns = schema.get("access_patterns") or []
     return {
         "status": "completed",
         "validation_passed": schema.get("validation_passed", False),
@@ -1108,7 +1109,7 @@ def _build_elasticache_schema_summary(schema):
             {
                 "table_name": kd.get("key_pattern", ""),
                 "aggregate_pattern": kd.get("data_type", "unknown"),
-                "source_tables": kd.get("source_tables", []),
+                "source_tables": field_list(kd, "source_tables"),
                 "gsi_count": 0,
                 "item_count": 0,
                 "item_size_bytes": 0,
@@ -1118,41 +1119,41 @@ def _build_elasticache_schema_summary(schema):
         ],
         "access_pattern_count": len(access_patterns),
         "hot_partitions_at_risk": 0,
-        "trade_offs": schema.get("trade_offs", []),
-        "unsupported_patterns": schema.get("unsupported_patterns", []),
-        "migration_notes": schema.get("migration_notes", []),
+        "trade_offs": field_list(schema, "trade_offs"),
+        "unsupported_patterns": field_list(schema, "unsupported_patterns"),
+        "migration_notes": field_list(schema, "migration_notes"),
     }
 
 
 def _build_opensearch_schema_summary(schema):
-    index_designs = schema.get("index_designs", [])
-    data_stream_designs = schema.get("data_stream_designs", [])
+    index_designs = schema.get("index_designs") or []
+    data_stream_designs = schema.get("data_stream_designs") or []
     if not index_designs and not data_stream_designs:
         return {"status": "not_available"}
     tables = []
     for idx in index_designs:
-        settings = idx.get("settings", {})
+        settings = idx.get("settings") or {}
         tables.append(
             {
                 "table_name": idx.get("index_name", ""),
                 "aggregate_pattern": "search_index",
-                "source_tables": idx.get("source_tables", []),
+                "source_tables": field_list(idx, "source_tables"),
                 "gsi_count": 0,
                 "item_count": 0,
                 "item_size_bytes": 0,
                 "shards": settings.get("number_of_shards", 0),
                 "replicas": settings.get("number_of_replicas", 1),
-                "field_count": len(idx.get("field_mappings", [])),
+                "field_count": len(idx.get("field_mappings") or []),
             }
         )
     for ds in data_stream_designs:
-        ism = ds.get("ism_policy", {})
-        ts = ds.get("index_template", {}).get("settings", {})
+        ism = ds.get("ism_policy") or {}
+        ts = (ds.get("index_template") or {}).get("settings") or {}
         tables.append(
             {
                 "table_name": ds.get("data_stream_name", ""),
                 "aggregate_pattern": "data_stream",
-                "source_tables": ds.get("source_tables", []),
+                "source_tables": field_list(ds, "source_tables"),
                 "gsi_count": 0,
                 "item_count": 0,
                 "item_size_bytes": 0,
@@ -1162,17 +1163,20 @@ def _build_opensearch_schema_summary(schema):
                 "ism_delete_days": ism.get("delete_after_days"),
             }
         )
-    access_patterns = schema.get("access_patterns", [])
+    access_patterns = schema.get("access_patterns") or []
     return {
         "status": "completed",
         "validation_passed": schema.get("validation_passed", False),
         "tables": tables,
         "access_pattern_count": len(access_patterns),
         "hot_partitions_at_risk": 0,
-        "trade_offs": schema.get("trade_offs", []),
-        "unsupported_patterns": schema.get("unsupported_patterns", []),
+        "trade_offs": field_list(schema, "trade_offs"),
+        "unsupported_patterns": field_list(schema, "unsupported_patterns"),
         "migration_notes": [],
     }
+
+
+_TRADE_OFF_LISTS = ("source_tables", "target_tables", "query_ids")
 
 
 def _collect_trade_offs(data):
@@ -1180,10 +1184,12 @@ def _collect_trade_offs(data):
     seen: set[str] = set()
     for engine, artifacts in data.engines.items():
         schema = artifacts.schema_design or {}
-        for t in schema.get("trade_offs", []):
+        for t in field_list(schema, "trade_offs"):
             if isinstance(t, dict):
                 # Structured TradeOff — ensure engine is set
-                entry = {**t, "engine": t.get("engine") or engine}
+                # A null list field reads as empty (#757), the contract's own default.
+                nulls = {k: [] for k in _TRADE_OFF_LISTS if k in t and t[k] is None}
+                entry = {**t, **nulls, "engine": t.get("engine") or engine}
                 dedup_key = entry.get("description", str(entry))
             else:
                 # Legacy string format — wrap into structured form

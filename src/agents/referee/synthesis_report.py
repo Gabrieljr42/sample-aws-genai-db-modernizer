@@ -26,6 +26,7 @@ from src.agents.referee.assignment_resolver import retained_engine_for
 from src.agents.referee.aurora_choice import source_database_engine
 from src.agents.referee.cache_overlay import CACHE_OVERLAY_ENGINES, PATTERN_LABELS, overlay_summary
 from src.agents.referee.routed_confidence import routed_fits
+from src.agents.referee.schema_fields import field_list
 from src.agents.referee.substring_match import substring_match_risks
 from src.agents.referee.synthesis_grounding import (
     display_name,
@@ -209,14 +210,14 @@ def schema_table_defs(engine: str, schema: dict) -> list[dict]:
         return [
             {
                 "table_name": idx.get("index_name", ""),
-                "source_tables": idx.get("source_tables", []),
+                "source_tables": field_list(idx, "source_tables"),
                 "aggregate_pattern": "search_index",
             }
             for idx in (schema.get("index_designs") or [])
         ] + [
             {
                 "table_name": ds.get("data_stream_name", ""),
-                "source_tables": ds.get("source_tables", []),
+                "source_tables": field_list(ds, "source_tables"),
                 "aggregate_pattern": "data_stream",
             }
             for ds in (schema.get("data_stream_designs") or [])
@@ -225,7 +226,7 @@ def schema_table_defs(engine: str, schema: dict) -> list[dict]:
         return [
             {
                 "table_name": coll.get("collection_name", ""),
-                "source_tables": coll.get("source_tables", []),
+                "source_tables": field_list(coll, "source_tables"),
                 "aggregate_pattern": "document_collection",
             }
             for coll in (schema.get("collections") or [])
@@ -234,7 +235,7 @@ def schema_table_defs(engine: str, schema: dict) -> list[dict]:
         return [
             {
                 "table_name": kd.get("key_pattern", ""),
-                "source_tables": kd.get("source_tables", []),
+                "source_tables": field_list(kd, "source_tables"),
                 "aggregate_pattern": kd.get("data_type", "unknown"),
             }
             for kd in (schema.get("key_designs") or [])
@@ -415,7 +416,7 @@ def build_ranking(data: SynthesisData) -> list[dict]:
         # Schema design stats — handle engine-specific formats
         schema = artifacts.schema_design or {}
         schema_tables = schema_table_defs(engine, schema)
-        access_patterns = schema.get("access_patterns", [])
+        access_patterns = field_list(schema, "access_patterns")
         pattern_groups: dict[str, list] = {}
         for ap in access_patterns:
             g = ap.get("pattern_group", "ungrouped")
@@ -550,7 +551,7 @@ def build_table_mappings(data: SynthesisData) -> list[dict]:
             target_table_name = table_def.get("table_name", "")
             aggregate_pattern = table_def.get("aggregate_pattern", "separate")
 
-            for raw_source_table in table_def.get("source_tables", []):
+            for raw_source_table in field_list(table_def, "source_tables"):
                 source_table = _canonical(raw_source_table)
                 if source_table is None:
                     continue
@@ -635,7 +636,7 @@ def build_query_groups(data: SynthesisData) -> list[dict]:
 
     for engine, artifacts in data.engines.items():
         schema = artifacts.schema_design or {}
-        for ap in schema.get("access_patterns", []):
+        for ap in field_list(schema, "access_patterns"):
             source_tables = sorted(set(ap.get("source_tables") or []))
             clean_tables = [t for t in source_tables if t not in _PLACEHOLDER_TABLES]
             if ap.get("pattern_group"):
@@ -1132,7 +1133,7 @@ def build_risk_assessment(
             if ap_type in ("frequent-full-scan", "queries-without-index"):
                 continue
 
-            ap_query_ids = set(ap.get("query_ids", []))
+            ap_query_ids = set(field_list(ap, "query_ids"))
             severity = "HIGH" if ap.get("severity_weight", 0) >= 0.7 else "MEDIUM"
             description = ap.get("description", ap.get("anti_pattern_type", "Unknown"))
             ap_tables = [t for t in ap.get("table_ids", []) if t and t not in _PLACEHOLDER_TABLES]
@@ -1378,7 +1379,7 @@ def build_risk_assessment(
         # engine's unsupported patterns become risks with real text, not
         # "[engine] unknown: " for the engines whose contract this code used
         # to not read (#210).
-        for up in schema.get("unsupported_patterns", []):
+        for up in field_list(schema, "unsupported_patterns"):
             pattern_ids = unsupported_pattern_ids(up)
             tables = sorted({t for q in pattern_ids for t in risk_tables.get(q, ())})
             risk_id += 1
@@ -1471,7 +1472,7 @@ def build_risk_assessment(
 
         # Migration notes from schema design
         # The description names the object; the logic to build is the mitigation (#252).
-        for mn in schema.get("migration_notes", []):
+        for mn in field_list(schema, "migration_notes"):
             risk_id += 1
             object_label = str(mn.get("object_name") or "").strip()
             logic = str(mn.get("application_logic_required") or "").strip()
@@ -1677,7 +1678,7 @@ def _access_pattern_query_ids(ap: dict) -> list[str]:
 def _covered_query_ids(schema: dict) -> set[str]:
     """Query ids served by the schema design's in-scope access patterns."""
     covered: set[str] = set()
-    for ap in schema.get("access_patterns", []):
+    for ap in field_list(schema, "access_patterns"):
         if ap.get("in_scope", True):
             covered.update(_access_pattern_query_ids(ap))
     return covered
@@ -1686,7 +1687,7 @@ def _covered_query_ids(schema: dict) -> set[str]:
 def _unsupported_query_ids(schema: dict) -> set[str]:
     """Query ids the schema design lists as unsupported (each is its own MEDIUM risk)."""
     ids: set[str] = set()
-    for up in schema.get("unsupported_patterns", []):
+    for up in field_list(schema, "unsupported_patterns"):
         ids.update(unsupported_pattern_ids(up))
     return ids
 
@@ -2976,7 +2977,7 @@ def _access_pattern_scope(data: SynthesisData, rank: dict) -> tuple[int, int]:
     artifacts = data.engines.get(rank["target"])
     if artifacts is None or artifacts.schema_design is None:
         return int(rank.get("access_patterns", 0)), 0
-    patterns = artifacts.schema_design.get("access_patterns", [])
+    patterns = field_list(artifacts.schema_design, "access_patterns")
     n_in = sum(1 for ap in patterns if ap.get("in_scope", True))
     return n_in, len(patterns) - n_in
 
