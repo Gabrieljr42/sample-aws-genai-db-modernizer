@@ -63,7 +63,7 @@ from src.contracts.assignment_models import (
 )
 from src.contracts.move_ledger import MoveActor, MovePass, ReasonCode
 from src.shared.capability_labels import capability_gap_phrase
-from src.shared.contract_versioning import load_contract
+from src.shared.contract_versioning import load_contract, stamp_artifact_version
 from src.shared.engine_names import SOURCE_ENGINE_DISPLAY_NAMES, display_engine
 from src.storage.assignment_versioning import (
     assignment_artifact_path,
@@ -852,17 +852,20 @@ def mark_assignment_customer_approved(
     if version == 0:
         return None
     path = assignment_artifact_path(database_name, job_id, version)
-    current = load_contract(Assignment, store.read_json(path), artifact=path)
+    stored = store.read_json(path)
+    current = load_contract(Assignment, stored, artifact=path)
     if current.status in (AssignmentStatus.CUSTOMER_MODIFIED, AssignmentStatus.CUSTOMER_APPROVED):
         return current
-    # #972: rewritten by today's code, so it says today's version.
-    updated = current.model_copy(
-        update={
-            "status": AssignmentStatus.CUSTOMER_APPROVED,
-            "contract_version": Assignment.model_fields["contract_version"].default,
-        }
+    # #1056: patch the stored dict rather than dumping the model, so a field a newer
+    # MINOR added (top level or on a query assignment) is kept as it was stored.
+    # The model above still validates the file. #972: rewritten by today's code, so
+    # the file says today's version.
+    patched = stamp_artifact_version(
+        path, {**stored, "status": AssignmentStatus.CUSTOMER_APPROVED.value}
     )
-    store.write_json(path, updated.model_dump(mode="json"))
+    load_contract(Assignment, patched, artifact=path)  # the patched file must still load
+    store.write_json(path, patched)
+    updated = current.model_copy(update={"status": AssignmentStatus.CUSTOMER_APPROVED})
     return updated
 
 

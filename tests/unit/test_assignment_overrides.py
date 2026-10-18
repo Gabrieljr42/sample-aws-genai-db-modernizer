@@ -9,6 +9,7 @@ assignment, or a hard validation error.
 
 from __future__ import annotations
 
+import copy
 from datetime import UTC, datetime
 
 import pytest
@@ -1334,3 +1335,80 @@ class TestOwnershipGateWithoutAScoringContext:
 
         query = {"query_type": "SELECT", "query_text": "SELECT id FROM t WHERE id = ?"}
         assert _gate_failure("q1", query, "opensearch", None) is None
+
+
+class TestApproveAsIsKeepsNewerFields:
+    """#1056: approving as-is keeps the fields a newer MINOR of the same MAJOR added."""
+
+    def _newer_file(self, store) -> str:
+        key = f"{DB}/{JOB}/assignment/v1/assignment.json"
+        data = store.read_json(key)
+        data["contract_version"] = "1.99"
+        data["added_in_a_later_minor"] = {"kept": True}
+        data["query_assignments"][0]["also_added_later"] = ["kept"]
+        store.write_json(key, data)
+        return key
+
+    def test_unknown_top_level_and_query_fields_survive(self) -> None:
+        from src.agents.referee.assignment_overrides import mark_assignment_customer_approved
+        from src.contracts.assignment_models import Assignment
+
+        store = _store_with_two_ddb_queries()
+        key = self._newer_file(store)
+
+        mark_assignment_customer_approved(store, DB, JOB)
+
+        persisted = store.read_json(key)
+        assert persisted["status"] == AssignmentStatus.CUSTOMER_APPROVED.value
+        assert persisted["added_in_a_later_minor"] == {"kept": True}
+        assert persisted["query_assignments"][0]["also_added_later"] == ["kept"]
+        assert persisted["contract_version"] == Assignment.model_fields["contract_version"].default
+
+    def test_nothing_else_in_the_file_changes(self) -> None:
+        from src.agents.referee.assignment_overrides import mark_assignment_customer_approved
+
+        store = _store_with_two_ddb_queries()
+        key = self._newer_file(store)
+        before = store.read_json(key)
+
+        mark_assignment_customer_approved(store, DB, JOB)
+
+        after = store.read_json(key)
+        changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+        assert changed == {"status", "contract_version"}
+
+    def test_an_already_approved_newer_file_is_not_rewritten(self) -> None:
+        from src.agents.referee.assignment_overrides import mark_assignment_customer_approved
+
+        store = _store_with_two_ddb_queries()
+        key = self._newer_file(store)
+        mark_assignment_customer_approved(store, DB, JOB)
+        once = store.read_json(key)
+
+        mark_assignment_customer_approved(store, DB, JOB)
+
+        assert store.read_json(key) == once
+
+    @pytest.mark.parametrize(
+        "damage",
+        [
+            lambda d: d["query_assignments"][0].pop("query_id"),
+            lambda d: d.update(contract_version="99.0"),
+        ],
+        ids=["invalid_file", "different_major"],
+    )
+    def test_an_unreadable_file_raises_and_is_not_rewritten(self, damage) -> None:
+        from src.agents.referee.assignment_overrides import mark_assignment_customer_approved
+
+        store = _store_with_two_ddb_queries()
+        key = f"{DB}/{JOB}/assignment/v1/assignment.json"
+        data = store.read_json(key)
+        damage(data)
+        store.write_json(key, data)
+        before = copy.deepcopy(store.read_json(key))
+
+        with pytest.raises(Exception) as caught:  # ValidationError or ContractVersionError
+            mark_assignment_customer_approved(store, DB, JOB)
+
+        assert type(caught.value).__name__ in {"ValidationError", "ContractVersionError"}
+        assert store.read_json(key) == before
