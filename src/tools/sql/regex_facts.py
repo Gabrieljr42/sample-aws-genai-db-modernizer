@@ -144,10 +144,14 @@ _ROW_LIMIT_RE = re.compile(
 # ``SELECT TOP (n) ... ORDER BY`` and ``ORDER BY ... [OFFSET ...] FETCH {FIRST|NEXT}``.
 # TOP takes a number, a ``(expression)`` or a variable, so a column named ``top``
 # is not one; TOP with no ORDER BY returns arbitrary rows and is not a top-N.
-_TOP_N_RE = re.compile(
-    r"order\s+by\b.*\b(?:limit|fetch\s+(?:first|next))\b|\btop\s*(?:\(|\d|@).*\border\s+by\b",
-    re.IGNORECASE | re.DOTALL,
-)
+# Read as two ordered word pairs rather than one ``X.*Y`` regex, which retried its
+# gap from every ``ORDER BY`` (quadratic on repeated ones with no row limit, #1009):
+# the first ``ORDER BY`` is followed by a row limit anywhere after it, or the first
+# ``TOP`` with a count is followed by an ``ORDER BY`` anywhere after it.
+_ORDER_BY_WORDS_RE = re.compile(r"order\s+by\b", re.IGNORECASE)
+_LIMIT_WORD_RE = re.compile(r"\b(?:limit|fetch\s+(?:first|next))\b", re.IGNORECASE)
+_TOP_COUNT_RE = re.compile(r"\btop\s*(?:\(|\d|@)", re.IGNORECASE)
+_ORDER_BY_WORD_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 # The names of a timestamp column: every name the DynamoDB, OpenSearch,
 # ElastiCache and triage detectors read before #893, as whole names. Since #935 a
 # column's collected type decides; these names are read only for a collection with
@@ -549,7 +553,12 @@ def regex_row_limit(query_text: str) -> bool:
 def regex_top_n(query_text: str) -> bool:
     """``ORDER BY ... LIMIT``/``FETCH``, or ``TOP (n) ... ORDER BY``, not counting an
     ``ORDER BY`` inside a window's ``OVER (...)``."""
-    return bool(_TOP_N_RE.search(_without_windows(query_text or "")))
+    text = _without_windows(query_text or "")
+    order_by = _ORDER_BY_WORDS_RE.search(text)
+    if order_by and _LIMIT_WORD_RE.search(text, order_by.end()):
+        return True
+    top = _TOP_COUNT_RE.search(text)
+    return bool(top and _ORDER_BY_WORD_RE.search(text, top.end()))
 
 
 def regex_timestamp_column_names(query_text: str) -> list[str]:

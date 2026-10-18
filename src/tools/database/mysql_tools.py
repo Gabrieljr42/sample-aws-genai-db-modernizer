@@ -11,6 +11,7 @@ import re
 
 from src.tools.aws.ssm_executor import SSMExecutor
 from src.tools.database import live_sql
+from src.tools.database.filter_columns import where_columns
 from src.tools.database.live_sql import LiveQueryReader
 from src.tools.sql.bulk_load import bulk_load_table
 
@@ -373,7 +374,6 @@ class MySQLRemoteCollector:
 # ---------------------------------------------------------------------------
 
 _QUERY_TYPE_RE = re.compile(r"^\s*(SELECT|INSERT|UPDATE|DELETE|MERGE|REPLACE)\b", re.I)
-_WHERE_COL_RE = re.compile(r"WHERE\s+.*?`?(\w+)`?\s*(?:=|<|>|!=|LIKE|IN|BETWEEN|IS)", re.I)
 _AND_COL_RE = re.compile(r"(?:AND|OR)\s+`?(\w+)`?\s*(?:=|<|>|!=|LIKE|IN|BETWEEN|IS)", re.I)
 _ORDER_COL_RE = re.compile(r"ORDER\s+BY\s+(.*?)(?:LIMIT|$)", re.I)
 
@@ -400,7 +400,7 @@ def _estimate_rows_p95(avg_rows: float, avg_ms: float, p95_ms: float) -> float |
 
 
 def _extract_filter_columns(sql: str) -> list[str] | None:
-    cols = _WHERE_COL_RE.findall(sql) + _AND_COL_RE.findall(sql)
+    cols = where_columns(sql, "`") + _AND_COL_RE.findall(sql)
     return list(dict.fromkeys(cols)) or None
 
 
