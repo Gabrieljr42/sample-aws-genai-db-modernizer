@@ -81,6 +81,9 @@ OTHER_SQL_MODULES: dict[str, str] = {
         "a live collector's own parsing of its source's output (filter, sort and time-range "
         "columns); its has_text_search is the text_search fact (#929)"
     ),
+    "src/tools/database/filter_columns.py": (
+        "the MySQL and PostgreSQL collectors' filter-column reading of a WHERE clause (#1009)"
+    ),
     "src/tools/database/oracle_tools.py": (
         "a live collector's own parsing of its source's output (filter, sort and time-range "
         "columns); its has_text_search is the text_search fact (#929)"

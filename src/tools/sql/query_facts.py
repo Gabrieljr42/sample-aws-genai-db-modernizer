@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import re
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING
@@ -171,11 +171,38 @@ _FOUND_ROWS_RE = re.compile(r"\bsql_calc_found_rows\b|`?\bfound_rows\b`?\s*\(", 
 # the end of the statement) so a function call elsewhere in the query (e.g. a
 # WHERE clause unrelated to the join) is never mistaken for part of the join
 # condition.
-_JOIN_ON_CLAUSE_RE = re.compile(
-    r"\bjoin\b.*?\bon\b\s*(?P<cond>.*?)(?=\b(?:where|group\s+by|order\s+by|having|"
-    r"left|right|inner|full|cross|join|limit)\b|$)",
-    re.IGNORECASE | re.DOTALL,
+_JOIN_WORD_RE = re.compile(r"\bjoin\b", re.IGNORECASE)
+_ON_WORD_RE = re.compile(r"\bon\b", re.IGNORECASE)
+_SPACE_RE = re.compile(r"\s*")
+# Where a join condition ends: the next clause keyword, or the end of the text.
+_JOIN_CONDITION_END_RE = re.compile(
+    r"\b(?:where|group\s+by|order\s+by|having|left|right|inner|full|cross|join|limit)\b|$",
+    re.IGNORECASE,
 )
+
+
+def _join_conditions(text: str) -> Iterator[str]:
+    """The condition of each ``JOIN ... ON <condition>`` clause, in order.
+
+    Left to right in linear time (#1009). The regex it replaces,
+    ``\\bjoin\\b.*?\\bon\\b\\s*(?P<cond>.*?)(?=<keyword>\\b|$)`` with DOTALL, retried its
+    gap from every ``JOIN``, so repeated ``JOIN`` with no ``ON`` was quadratic. A
+    ``JOIN`` with no ``ON`` after it means no later ``JOIN`` has one either; and
+    each clause ends at its first end keyword, where the next search for a ``JOIN``
+    starts.
+    """
+    pos = 0
+    while (join := _JOIN_WORD_RE.search(text, pos)) is not None:
+        on = _ON_WORD_RE.search(text, join.end())
+        if on is None:
+            return
+        start = _SPACE_RE.match(text, on.end()).end()  # type: ignore[union-attr]
+        end = _JOIN_CONDITION_END_RE.search(text, start)
+        stop = end.start() if end else len(text)  # the end of the text always matches
+        yield text[start:stop]
+        pos = stop
+
+
 # A column reference -- optionally quoted, optionally table-qualified -- on
 # one side of the comparison: "users"."username_lower" or users.username_lower
 # or just id. Starting on a letter/underscore (optionally behind a opening
@@ -1259,10 +1286,7 @@ def timestamp_column_trace(collector_output: Mapping) -> dict:
 
 
 def _has_computed_join_key(text: str) -> bool:
-    return any(
-        _COMPUTED_EXPR_IN_CONDITION_RE.search(m.group("cond"))
-        for m in _JOIN_ON_CLAUSE_RE.finditer(text)
-    )
+    return any(_COMPUTED_EXPR_IN_CONDITION_RE.search(cond) for cond in _join_conditions(text))
 
 
 # Covers the 20,000-query ingestion default (``ingestion_limits``) twice
