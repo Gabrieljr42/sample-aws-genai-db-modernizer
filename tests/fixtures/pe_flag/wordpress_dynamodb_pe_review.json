@@ -1,0 +1,20 @@
+{
+  "_comment": "A recorded DynamoDB PE review of the wordpress sample's DynamoDB design (#740), the answer a reviewer gives when it judges one query unservable on DynamoDB: the wp_options autoload read filters on a low-cardinality, non-key column, so DynamoDB serves it only with a scan (or a GSI whose few partitions run hot). It is a PEReviewResult (src/contracts/dynamodb_pe_review.py) with one routing flag; tests/unit/orchestrator/test_pe_flag_fixture_wordpress.py replays it in place of the model as every design group's review. A query id here is the start of the sample's 64-character digest id (the full id is not committed: it reads as a high-entropy string to the secret scanner); the replay expands it to the one full id of the assignment's queries that starts with it. The expected outcome is in tests/fixtures/pe_flag/README.md.",
+  "verdict": "APPROVED",
+  "summary": "The single-table design serves the key lookups and item collections. One query cannot be served without a scan: the autoload read of wp_options filters only on a low-cardinality column.",
+  "change_requests": [],
+  "strengths": [
+    "Key lookups and item collections map to the base table and its sort keys."
+  ],
+  "pe_notes": [],
+  "routing_flags": [
+    {
+      "query_ids": [
+        "413c99e4"
+      ],
+      "flagged_engine": "dynamodb",
+      "reason_category": "full_scan",
+      "explanation": "Filters wp_options on autoload only, a low-cardinality non-key column: a scan or a hot GSI."
+    }
+  ]
+}
