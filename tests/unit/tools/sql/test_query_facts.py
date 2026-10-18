@@ -529,3 +529,56 @@ def test_long_queries_cost_the_steps_that_skip_documentdb_no_more_than_before():
     assert_cost_ratio(
         lambda: _run_steps_on(long_texts), lambda: _run_steps_on(short_texts), MAX_LONG_TO_SHORT
     )
+
+
+class TestLocateColumn:
+    """#942: the one resolution of a column to its collected table, shared by the
+    timestamp-column fact and the leading-wildcard LIKE fact."""
+
+    HOLDS = {("a", "x"), ("b", "x"), ("c", "y")}
+
+    @classmethod
+    def _locate(cls, use, known=("a", "b", "c")):
+        from src.tools.sql.query_facts import locate_column
+
+        return locate_column(
+            use,
+            lambda ref: ref.name if ref.name in known else None,
+            lambda table, name: (table, name) in cls.HOLDS,
+        )
+
+    def test_the_one_table_that_holds_it(self):
+        from src.tools.sql.facade import ColumnUse, TableRef
+
+        use = ColumnUse("Y", ((TableRef("a"), TableRef("c")),))
+        assert self._locate(use) == ("c", "")
+
+    def test_two_holders_are_ambiguous_and_an_outer_scope_is_not_tried(self):
+        from src.tools.sql.facade import ColumnUse, TableRef
+
+        use = ColumnUse("x", ((TableRef("a"), TableRef("b")), (TableRef("c"),)))
+        assert self._locate(use) == (None, "ambiguous: a, b")
+
+    def test_the_inner_scope_wins_and_an_empty_one_falls_outward(self):
+        from src.tools.sql.facade import ColumnUse, TableRef
+
+        use = ColumnUse("y", ((TableRef("a"),), (TableRef("c"),)))
+        assert self._locate(use) == ("c", "")
+
+    def test_a_table_the_collection_lacks_and_no_holder_say_why(self):
+        from src.tools.sql.facade import ColumnUse, TableRef
+
+        assert self._locate(ColumnUse("x", ((TableRef("ghost"),),))) == (
+            None,
+            "no collected table ghost",
+        )
+        assert self._locate(ColumnUse("zzz", ((TableRef("a"),),)), known=("a",)) == (
+            None,
+            "no collected table holds it",
+        )
+        assert self._locate(ColumnUse("x", ())) == (None, "no collected table holds it")
+
+    def test_a_regex_read_column_has_no_table(self):
+        from src.tools.sql.facade import ColumnUse
+
+        assert self._locate(ColumnUse("x", from_regex=True)) == (None, "statement not parsed")

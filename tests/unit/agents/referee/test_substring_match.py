@@ -304,3 +304,189 @@ class TestEveryStringPassesTheCustomerWordingGuard:
         assert texts
         for text in texts:
             assert scan_text(text, strict_reason_codes=False) == [], text
+
+
+def _schema_collector(
+    text: str,
+    *,
+    tables: list[tuple[str, int | None, list[tuple[str, str]]]],
+    accessed: list[str] | None = None,
+    cps: float | None = None,
+    source: str = "mysql",
+) -> dict:
+    """A collection of the given ``(name, rows, [(column, type)])`` tables and one query,
+    ``q1``, that reads ``accessed`` (every table by default)."""
+    t = _threshold()
+    return {
+        "job_id": "t",
+        "metadata": {"source_database": {"engine": source}},
+        "database_schema": {
+            "tables": [
+                {
+                    "table_id": f"app.{name}",
+                    "table_name": name,
+                    "row_count": rows,
+                    "columns": [{"column_name": c, "data_type": ty} for c, ty in columns],
+                }
+                for name, rows, columns in tables
+            ]
+        },
+        "queries": {
+            "query_patterns": [
+                {
+                    "query_id": "q1",
+                    "query_text": text,
+                    "query_type": "SELECT",
+                    "tables_accessed": [f"app.{n}" for n in (accessed or [x[0] for x in tables])],
+                    "calls_per_second": t.min_calls_per_second if cps is None else cps,
+                }
+            ]
+        },
+    }
+
+
+BIG = _threshold().min_table_rows * 10
+SMALL = 50
+JOIN_TABLES = [
+    ("orders", BIG, [("id", "bigint"), ("note", "text"), ("code", "varchar(20)")]),
+    ("tags", SMALL, [("id", "bigint"), ("label", "varchar(40)"), ("code", "int")]),
+]
+JOIN = "SELECT * FROM orders o JOIN tags t ON t.id = o.id WHERE {} LIKE '%x.y'"
+
+
+class TestTheScannedTableAndColumnAreRead:
+    """#942: the row count is the table that holds the LIKE column, and the column's type
+    is read from the collected schema, not the largest table or a guess."""
+
+    def _match(self, collector: dict):
+        return substring_matches(collector)["q1"]
+
+    def test_a_search_of_a_small_table_joined_to_a_large_one_does_not_scan_the_large_one(
+        self,
+    ) -> None:
+        match = self._match(_schema_collector(JOIN.format("t.label"), tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters, match.approximations) == (SMALL, False, ())
+        penalties, _ = scan_adjustments(
+            _schema_collector(JOIN.format("t.label"), tables=JOIN_TABLES)
+        )
+        assert penalties == {}
+
+    def test_a_search_of_the_large_table_is_a_scan_that_matters(self) -> None:
+        match = self._match(_schema_collector(JOIN.format("o.note"), tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters, match.approximations) == (BIG, True, ())
+
+    def test_an_unqualified_column_is_found_in_the_one_table_that_holds_it(self) -> None:
+        match = self._match(_schema_collector(JOIN.format("label"), tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters, match.approximations) == (SMALL, False, ())
+
+    def test_the_alias_names_the_table_not_the_table_name_order(self) -> None:
+        text = "SELECT * FROM tags o JOIN orders t ON t.id = o.id WHERE o.label LIKE '%x.y'"
+        match = self._match(_schema_collector(text, tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters) == (SMALL, False)
+
+    def test_the_type_is_the_type_of_the_table_that_holds_the_column(self) -> None:
+        """``code`` is text in orders and an integer in tags: a word pattern on tags.code
+        is a substring match, on orders.code a word search."""
+        word = "SELECT * FROM orders o JOIN tags t ON t.id = o.id WHERE {}.code LIKE '%42%'"
+        tags = self._match(_schema_collector(word.format("t"), tables=JOIN_TABLES))
+        orders = self._match(_schema_collector(word.format("o"), tables=JOIN_TABLES))
+        assert (tags.word_search, orders.word_search) == (False, True)
+        # The older reading took the first query table that has a column of that name.
+        assert tags.approximations == () and orders.approximations == ()
+
+    def test_a_function_of_the_column_names_its_table_and_reads_the_type_as_text(self) -> None:
+        text = "SELECT * FROM orders o JOIN tags t ON t.id = o.id WHERE lower(t.label) LIKE '%x.y'"
+        match = self._match(_schema_collector(text, tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters) == (SMALL, False)
+        word = text.replace("%x.y", "%word%")
+        wrapped = self._match(_schema_collector(word, tables=JOIN_TABLES))
+        assert wrapped.word_search is True
+        assert any("wraps column label" in n for n in wrapped.approximations)
+
+    def test_a_column_with_no_collected_type_is_read_as_text_and_says_so(self) -> None:
+        tables = [("tags", SMALL, [("id", "bigint"), ("label", "")])]
+        match = self._match(
+            _schema_collector("SELECT 1 FROM tags WHERE label LIKE '%word%'", tables=tables)
+        )
+        assert match.word_search is True
+        assert any("label has no collected type" in n for n in match.approximations)
+
+    def test_a_traced_table_with_no_row_count_says_the_scan_cannot_be_sized(self) -> None:
+        tables: list[tuple[str, int | None, list[tuple[str, str]]]] = [
+            ("tags", None, [("id", "bigint"), ("label", "varchar(40)")])
+        ]
+        text = "SELECT 1 FROM tags WHERE label LIKE '%x.y'"
+        collector = _schema_collector(text, tables=tables)
+        match = self._match(collector)
+        assert (match.table_rows, match.scan_matters) == (None, False)
+        assert "table tags has no collected row count" in match.approximations[0]
+        _, notes = scan_adjustments(collector)
+        assert (
+            "Read approximately: table tags has no collected row count"
+            in notes[("q1", "aurora_mysql")]
+        )
+
+    def test_an_ambiguous_column_keeps_the_older_reading_and_says_so(self) -> None:
+        match = self._match(_schema_collector(JOIN.format("id"), tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters) == (BIG, True)
+        (note,) = match.approximations
+        assert "column id was not traced to one collected table (ambiguous" in note
+        assert "largest table the query reads counts" in note
+
+    def test_a_column_of_a_derived_table_keeps_the_older_reading_and_says_so(self) -> None:
+        text = "SELECT * FROM (SELECT note AS n FROM orders) d WHERE d.n LIKE '%x.y'"
+        match = self._match(_schema_collector(text, tables=JOIN_TABLES, accessed=["orders"]))
+        assert (match.table_rows, match.scan_matters) == (BIG, True)
+        assert len(match.approximations) == 1
+
+    def test_a_table_the_collector_did_not_describe_keeps_the_older_reading(self) -> None:
+        text = "SELECT * FROM ghosts WHERE name LIKE '%x.y'"
+        match = self._match(_schema_collector(text, tables=JOIN_TABLES, accessed=["orders"]))
+        assert (match.table_rows, match.approximations != ()) == (BIG, True)
+
+    def test_an_expression_over_two_columns_keeps_the_older_reading(self) -> None:
+        text = "SELECT * FROM orders o JOIN tags t ON t.id = o.id WHERE concat(o.note, t.label) LIKE '%x.y'"
+        match = self._match(_schema_collector(text, tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters) == (BIG, True)
+        assert "names no single column" in match.approximations[0]
+
+    def test_a_statement_the_parser_cannot_read_keeps_the_older_reading(self) -> None:
+        text = "SELECT * FROM orders WHERE note LIKE '%x.y' AND ((("
+        match = self._match(_schema_collector(text, tables=JOIN_TABLES, accessed=["orders"]))
+        assert (match.table_rows, match.scan_matters) == (BIG, True)
+        assert match.approximations
+
+    def test_each_predicate_is_read_on_its_own_table(self) -> None:
+        both = (
+            "SELECT * FROM orders o JOIN tags t ON t.id = o.id "
+            "WHERE t.label LIKE '%x.y' AND o.note LIKE '%word%'"
+        )
+        match = self._match(_schema_collector(both, tables=JOIN_TABLES))
+        # The suffix match is on the small table; the word search on the large one is a
+        # word search: nothing scans a large table.
+        assert (match.word_search, match.table_rows, match.scan_matters) == (False, SMALL, False)
+        swapped = both.replace("t.label LIKE '%x.y'", "t.label LIKE '%word%'").replace(
+            "o.note LIKE '%word%'", "o.note LIKE '%x.y'"
+        )
+        match = self._match(_schema_collector(swapped, tables=JOIN_TABLES))
+        assert (match.table_rows, match.scan_matters) == (BIG, True)
+
+    def test_the_decision_trace_states_the_approximation_and_a_clean_reading_does_not(
+        self,
+    ) -> None:
+        ambiguous = _schema_collector(JOIN.format("id"), tables=JOIN_TABLES)
+        _, notes = scan_adjustments(ambiguous)
+        assert "Read approximately: column id was not traced" in notes[("q1", "aurora_mysql")]
+        assert "Read approximately" in notes[("q1", "aurora_postgresql")]
+        _, clean = scan_adjustments(_schema_collector(JOIN.format("o.note"), tables=JOIN_TABLES))
+        assert all("Read approximately" not in n for n in clean.values())
+
+    def test_the_trace_text_passes_the_customer_wording_guard(self) -> None:
+        from src.tools.validation.customer_text_guard import scan_text
+
+        for text in (JOIN.format("id"), "SELECT * FROM ghosts WHERE name LIKE '%x.y'"):
+            _, notes = scan_adjustments(
+                _schema_collector(text, tables=JOIN_TABLES, accessed=["orders"])
+            )
+            for note in notes.values():
+                assert scan_text(note, strict_reason_codes=False) == [], note

@@ -53,13 +53,14 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Literal
 
 import sqlglot
 from sqlglot import exp
 
 from src.tools.sql.normalize import normalize_digest_text, quoted_mask
+from src.tools.sql.refs import ColumnUse, TableRef
 from src.tools.sql.regex_facts import (
     TIMESTAMP_COLUMN_NAME_RE,
     WORDS_RE,
@@ -165,32 +166,6 @@ FallbackReason = Literal[
 
 
 @dataclass(frozen=True)
-class TableRef:
-    """One table reference as written: ``[catalog.][schema.]name``.
-
-    ``quoted`` says the name itself was a quoted identifier (``"Topics"``,
-    ``[Orders]``), which keeps its case in PostgreSQL, Oracle and DB2. It is
-    not part of the reference's identity: ``"topics"`` and ``topics`` are one
-    reference (the first one seen is kept). A regex-fallback reference is
-    never marked quoted.
-    """
-
-    name: str
-    schema: str | None = None
-    catalog: str | None = None
-    quoted: bool = field(default=False, compare=False)
-
-    @property
-    def qualifiers(self) -> list[str]:
-        """``[catalog, schema]`` without the empty parts (what the resolver takes)."""
-        return [q for q in (self.catalog, self.schema) if q]
-
-    @property
-    def written(self) -> str:
-        return ".".join([*self.qualifiers, self.name])
-
-
-@dataclass(frozen=True)
 class TableReferences:
     """The table references in one piece of SQL text.
 
@@ -212,30 +187,6 @@ class TableReferences:
     fallback_reason: FallbackReason | None
     dialect: str
     truncated: bool
-
-
-@dataclass(frozen=True)
-class ColumnUse:
-    """A column the statement reads or writes, and the stored tables it can belong to
-    (#935: the timestamp-column fact looks the column's type up in the collection).
-
-    ``name`` is the column's name as written. ``scopes`` are the candidate tables,
-    one tuple per enclosing scope, innermost first: a qualified column has one,
-    holding the table its qualifier names (an alias or a table name, looked up from
-    its own scope outward), or none when the qualifier names a derived table, a CTE
-    or a table function; an unqualified column has every scope's stored tables, so
-    the caller takes the innermost scope in which one table holds a column of that
-    name, the way SQL resolves it; an ``INSERT`` column list's is the target table.
-    ``from_regex``: the facade fell back to the regex, so the text was not parsed, the
-    column's tables are unknown (``scopes`` is empty) and only the timestamp names
-    (``regex_facts.TIMESTAMP_COLUMN_NAMES``) are read. A flag rather than a ``None``
-    scope, so the stored form (``stored_facts``, which leaves empty values out) tells
-    "not parsed" from "parsed, no stored table" (#935).
-    """
-
-    name: str
-    scopes: tuple[tuple[TableRef, ...], ...] = ()
-    from_regex: bool = False
 
 
 @dataclass(frozen=True)
@@ -710,11 +661,7 @@ def _facts_from_statements(
     group_by = any(isinstance(node, exp.Group) for node in nodes)
     aggregate_function_count = sum(1 for node in nodes if _is_aggregate_function(node))
     kinds = {_text_search_kind(node) for node in nodes}
-    likes = tuple(
-        _wildcard_like(node)
-        for node in nodes
-        if isinstance(node, _LIKE_NODES) and _like_kind(node) == "leading_wildcard"
-    )
+    likes = tuple(like for statement in statements for like in _wildcard_likes(statement))
     windows = [node.this for node in nodes if isinstance(node, exp.Window)]
     return SqlFacts(
         join_count=join_count,
@@ -1304,9 +1251,23 @@ def _string_value(node: exp.Expr) -> str | None:
     return None
 
 
-def _wildcard_like(node: exp.Expr) -> WildcardLike:
-    """One leading-wildcard ``LIKE``: its column and whether it is a word search
-    (:class:`~src.tools.sql.regex_facts.WildcardLike`)."""
+def _wildcard_likes(statement: exp.Expr) -> list[WildcardLike]:
+    """Each leading-wildcard ``LIKE`` of a statement, with the column it tests and that
+    column's candidate tables (:class:`~src.tools.sql.regex_facts.WildcardLike`)."""
+    ctes = {c.alias_or_name.lower(): -1 for c in statement.find_all(exp.CTE)}
+    levels: dict[int, _ColumnScope | None] = {}
+    return [
+        _wildcard_like(node, levels, ctes)
+        for node in statement.walk()
+        if isinstance(node, _LIKE_NODES) and _like_kind(node) == "leading_wildcard"
+    ]
+
+
+def _wildcard_like(
+    node: exp.Expr, levels: dict[int, _ColumnScope | None], ctes: dict[str, int]
+) -> WildcardLike:
+    """One leading-wildcard ``LIKE``: its column, whether it is a word search and the
+    column's candidate tables (:class:`~src.tools.sql.regex_facts.WildcardLike`)."""
     column = node.this.name.lower() if isinstance(node.this, exp.Column) else None
     pieces = _pattern_pieces(node.expression)
     values = [_string_value(p) for p in pieces]
@@ -1315,7 +1276,14 @@ def _wildcard_like(node: exp.Expr) -> WildcardLike:
         word = len(value) > 2 and value.endswith("%") and bool(WORDS_RE.match(value[1:-1]))
     else:
         word = len(pieces) == 3 and values[0] == "%" and _is_bind(pieces[1]) and values[2] == "%"
-    return WildcardLike(column=column, word_search=word)
+    # The one column the predicate tests: the bare column, or the only column inside a
+    # function of it (``lower(title)``); an expression over several names none.
+    tested = {id(c): c for c in node.this.find_all(exp.Column) if c.name and not _is_bind(c)}
+    use = None
+    if len(tested) == 1:
+        (only,) = tested.values()
+        use = ColumnUse(only.name, _column_scopes(only, levels, ctes))
+    return WildcardLike(column=column, word_search=word, use=use)
 
 
 LikeKind = Literal["leading_wildcard", "prefix", "parameter", "other"]

@@ -69,6 +69,8 @@ import re
 from bisect import bisect_left
 from dataclasses import dataclass
 
+from src.tools.sql.refs import ColumnUse
+
 _JOIN_WORD_RE = re.compile(r"\bjoin\b", re.IGNORECASE)
 _AGGREGATION_WORD_RE = re.compile(
     r"\b(count|sum|avg|min|max|group_concat|string_agg|array_agg|group\s+by)\b", re.IGNORECASE
@@ -213,10 +215,17 @@ class WildcardLike:
     parameter (``'%' + @t + '%'``, ``CONCAT('%', ?, '%')``): an engine's word index
     can serve it after a rewrite. Any other shape (``'%.com'``, ``'%a_b%'``) is a
     substring match (#493).
+
+    ``use``: the column the predicate tests (the bare column, or the only column inside
+    a function of it such as ``lower(title)``) with the tables it can belong to, so a
+    reader can look up the scanned table's rows and the column's collected type (#942).
+    None when the parser could not name one column (an expression over several, a
+    constant), and for every regex-fallback fact, which never knows the tables.
     """
 
     column: str | None
     word_search: bool
+    use: ColumnUse | None = None
 
 
 def _literal_value(part: str) -> str | None:
