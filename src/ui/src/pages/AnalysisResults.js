@@ -43,6 +43,7 @@ import QueryDecisionTrace from "../components/QueryDecisionTrace";
 import QueryRoutingTable from "../components/QueryRoutingTable";
 import CloseCallCallout from "../components/CloseCallCallout";
 import UnservableQueriesCallout from "../components/UnservableQueriesCallout";
+import UnreviewedMovesNote from "../components/UnreviewedMovesNote";
 import MigrationWavePlan from "../components/MigrationWavePlan";
 import ExecutiveSummaryStats from "../components/ExecutiveSummaryStats";
 import DeliverablesPanel from "../components/DeliverablesPanel";
@@ -2027,6 +2028,9 @@ const AnalysisResultsPage = memo(() => {
             {/* Migration roadmap (#957): report.json's waves, the same ones the
                 PDF and the engineering report show. */}
             <MigrationWavePlan synthesis={synthesis} t={t} />
+
+            {/* Reality-check moves no model reviewed (#746): one line when any. */}
+            <UnreviewedMovesNote synthesis={resultsData?.synthesis} t={t} />
 
             {/* Queries on a fallback engine (#729): where each landed and why,
                 its gates, a redesign hint and the assignment review that

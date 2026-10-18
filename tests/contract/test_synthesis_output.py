@@ -404,7 +404,8 @@ class TestSynthesisOutputContract:
         output = SynthesisOutputContract.model_validate(valid_synthesis_data)
         # #1020: facts.in_scope_query_count, facts.moving_query_count and
         # facts.resolved_risks_by_severity added
-        assert output.contract_version == "1.28"
+        # #746: facts.unreviewed_move_count added
+        assert output.contract_version == "1.31"
 
     def test_summary_input_budget_is_optional(self, valid_synthesis_data):
         assert (

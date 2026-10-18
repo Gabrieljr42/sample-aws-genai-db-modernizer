@@ -443,6 +443,17 @@ def _bedrock_case(n: int) -> tuple[list[dict], list[dict], dict, list[dict]]:
     return original, revised, query_map, consolidations
 
 
+def _tool_answer(answer: object, name: str = "RealityCheckModelResponse") -> dict:
+    """A boto3 ``converse`` response whose answer is one tool use (#746 item 5)."""
+    return {
+        "output": {
+            "message": {
+                "content": [{"toolUse": {"toolUseId": "t1", "name": name, "input": answer}}]
+            }
+        }
+    }
+
+
 def _flag(qids: list[str], engine: str = "dynamodb") -> ModelFlag:
     return ModelFlag.model_validate(
         {
@@ -482,9 +493,9 @@ class TestUntrustedQueryData:
 
         assert SYSTEM_PROMPT_DATA_DIRECTIVE in cv.VALIDATOR_SYSTEM_PROMPT
         with patch("boto3.client") as client:
-            client.return_value.converse.return_value = {
-                "output": {"message": {"content": [{"text": '{"consolidation_corrections": []}'}]}}
-            }
+            client.return_value.converse.return_value = _tool_answer(
+                {"consolidation_corrections": []}
+            )
             assert cv._try_boto3_validator("documentdb", "dynamodb", []) == []
         kwargs = client.return_value.converse.call_args.kwargs
         assert kwargs["system"] == [{"text": cv.VALIDATOR_SYSTEM_PROMPT}]
@@ -542,6 +553,60 @@ class TestFailedBatches:
             with pytest.raises(cv.ValidationFailed):
                 cv._try_boto3_validator("documentdb", "dynamodb", [])
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            # A text answer, even one in the contract's shape, is never parsed (#746).
+            [{"text": json.dumps({"consolidation_corrections": []})}],
+            # A tool use of some other tool is not the answer.
+            _tool_answer({"consolidation_corrections": []}, name="other")["output"]["message"][
+                "content"
+            ],
+            # The answer tool with an input off the contract.
+            _tool_answer({"flags": []})["output"]["message"]["content"],
+        ],
+        ids=["text", "other-tool", "off-contract"],
+    )
+    def test_no_structured_answer_counts_as_failed(self, content):
+        from src.agents.referee import consolidation_validator as cv
+
+        with patch("boto3.client") as client:
+            client.return_value.converse.return_value = {
+                "output": {"message": {"content": content}}
+            }
+            with pytest.raises(cv.ValidationFailed, match="no structured answer"):
+                cv._try_boto3_validator("documentdb", "dynamodb", [])
+
+    def test_the_strands_answer_is_its_structured_output_only(self):
+        """A Strands result without structured output fails the batch; its text
+        (even the contract's JSON) is never parsed (#746 item 5)."""
+        import sys
+        import types
+
+        from src.agents.referee import consolidation_validator as cv
+        from src.contracts.reality_check_model_response import RealityCheckModelResponse
+
+        class _Result:
+            def __init__(self, structured):
+                self.structured_output = structured
+
+            def __str__(self) -> str:
+                return json.dumps({"consolidation_corrections": []})
+
+        def run(structured):
+            fake = types.ModuleType("strands")
+            fake.Agent = lambda **kw: (lambda prompt: _Result(structured))  # type: ignore[attr-defined]
+            with (
+                patch.dict(sys.modules, {"strands": fake}),
+                patch.object(cv, "build_bedrock_model", return_value=object()),
+            ):
+                return cv._try_strands_validator("documentdb", "dynamodb", [])
+
+        built = RealityCheckModelResponse(consolidation_corrections=[_flag(["q1"]).model_dump()])
+        assert run(built) == [_flag(["q1"]).model_dump()]
+        with pytest.raises(cv.ValidationFailed, match="no structured answer"):
+            run(None)
+
     def test_no_llm_at_all_counts_as_failed(self):
         from src.agents.referee import consolidation_validator as cv
 
@@ -588,15 +653,14 @@ class TestBedrockMatchesHeadlessOnInvalidEntries:
         original, revised, query_map, consolidations = _bedrock_case(3)
         good = _flag(["q1"]).model_dump(mode="json")
         bad = {**_flag(["q2"]).model_dump(mode="json"), "target_engine": "documentdb"}
-        text = json.dumps({"consolidation_corrections": [good, bad]})
         rejected: list[str] = []
         with (
             patch.object(cv, "_try_strands_validator", return_value=None),
             patch("boto3.client") as client,
         ):
-            client.return_value.converse.return_value = {
-                "output": {"message": {"content": [{"text": text}]}}
-            }
+            client.return_value.converse.return_value = _tool_answer(
+                {"consolidation_corrections": [good, bad]}
+            )
             flags = validate_consolidations(
                 consolidations, revised, query_map, {}, original, rejected=rejected
             )
@@ -827,3 +891,70 @@ class TestRequestRecords:
         rec = moved_query_record("q", {"q": {"query_text": '"\x01' * 400}}, {})
         assert len(json.dumps(rec["sql"], ensure_ascii=False)) <= SQL_JSON_CHARS
         assert rec["sql_chars"] == 800
+
+
+class TestTheValidatorAnswersThroughOneTool:
+    """#746 item 5: the boto3 validator asks for its answer as a call of the
+    RealityCheckModelResponse tool, forced where the model family accepts a
+    forced choice (the rule the Strands path follows, ``profile_for``)."""
+
+    @pytest.mark.parametrize(
+        ("model", "choice", "thinking_off"),
+        [
+            ("us.anthropic.claude-sonnet-5-5", {"auto": {}}, False),
+            ("us.anthropic.claude-opus-5-5", {"auto": {}}, False),
+            (
+                "us.anthropic.claude-haiku-5-5",
+                {"tool": {"name": "RealityCheckModelResponse"}},
+                False,
+            ),
+            (
+                "us.anthropic.claude-sonnet-4-6",
+                {"tool": {"name": "RealityCheckModelResponse"}},
+                False,
+            ),
+            ("us.anthropic.claude-sonnet-5", {"tool": {"name": "RealityCheckModelResponse"}}, True),
+            (
+                "arn:aws:bedrock:us-east-1:111122223333:application-inference-profile/x",
+                {"auto": {}},
+                False,
+            ),
+        ],
+        ids=["sonnet-5.5", "opus-5.5", "haiku-5.5", "sonnet-4.6", "sonnet-5", "unknown"],
+    )
+    def test_the_tool_choice_follows_the_family(self, monkeypatch, model, choice, thinking_off):
+        from src.agents.referee import consolidation_validator as cv
+        from src.contracts.reality_check_model_response import RealityCheckModelResponse
+
+        monkeypatch.setenv("VALIDATOR_MODEL_ID", model)
+        with patch("boto3.client") as client:
+            client.return_value.converse.return_value = _tool_answer(
+                {"consolidation_corrections": []}
+            )
+            assert cv._try_boto3_validator("documentdb", "dynamodb", []) == []
+        kwargs = client.return_value.converse.call_args.kwargs
+        [tool] = kwargs["toolConfig"]["tools"]
+        assert tool["toolSpec"]["name"] == "RealityCheckModelResponse"
+        assert tool["toolSpec"]["inputSchema"]["json"] == (
+            RealityCheckModelResponse.model_json_schema()
+        )
+        assert kwargs["toolConfig"]["toolChoice"] == choice
+        # Strict exactly where the choice is auto (#746 review).
+        assert tool["toolSpec"].get("strict", False) is (choice == {"auto": {}})
+        thinking = (kwargs.get("additionalModelRequestFields") or {}).get("thinking")
+        assert (thinking == {"type": "disabled"}) is thinking_off
+
+    def test_the_prompts_ask_for_the_tool_never_for_json_text(self):
+        from src.agents.referee import consolidation_validator as cv
+
+        prompt = cv._build_validation_prompt("documentdb", "dynamodb", [])
+        system = cv.validator_system_prompt()
+        assert "calling the RealityCheckModelResponse tool" in prompt
+        assert "calling the RealityCheckModelResponse tool, never in text" in system
+        for old in (
+            "Respond with ONLY",
+            "compact JSON",
+            "JSON response:",
+            "Respond with JSON only",
+        ):
+            assert old not in prompt and old not in system

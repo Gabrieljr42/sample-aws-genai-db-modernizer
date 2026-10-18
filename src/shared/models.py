@@ -161,13 +161,18 @@ ROLE_SPECS: dict[Role, RoleSpec] = {
         legacy_temperature=0.2,
         effort="low",
     ),
-    # Consolidation validator (a JSON array verdict per moved query batch).
+    # Consolidation validator: one RealityCheckModelResponse tool call per moved
+    # query batch (#746). Strict tools where a forced choice is rejected, so the
+    # tool input matches the schema on the first try (Bedrock accepted the
+    # schema in strict mode on Sonnet 5.5, both paths, 2026-10-18).
     Role.VALIDATOR: RoleSpec(
         env_vars=("VALIDATOR_MODEL_ID", "SUMMARY_MODEL_ID"),
         default_model=MODEL_IDS["sonnet-5.5"],
         max_tokens=4096,
         legacy_temperature=0.0,
         effort="medium",
+        structured_output=True,
+        strict_tools=True,
     ),
     # Free-text answer check (yes/no).
     Role.LIGHT_CHECK: RoleSpec(
@@ -429,8 +434,17 @@ def bedrock_model_kwargs(
     return kwargs
 
 
-def converse_request_fields(role: Role, *, model_id: str | None = None) -> dict[str, Any]:
-    """``modelId``, ``inferenceConfig`` and model fields for a boto3 ``converse`` call."""
+def converse_request_fields(
+    role: Role,
+    *,
+    model_id: str | None = None,
+    extra_model_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """``modelId``, ``inferenceConfig`` and model fields for a boto3 ``converse`` call.
+
+    ``extra_model_fields`` merge over the role's ``additionalModelRequestFields``
+    (the validator's tool request disables thinking for a forced tool choice).
+    """
     spec = ROLE_SPECS[role]
     model_id = model_id or resolve_model_id(role)
     profile = profile_for(model_id)
@@ -443,7 +457,7 @@ def converse_request_fields(role: Role, *, model_id: str | None = None) -> dict[
         inference["temperature"] = temperature
     request: dict[str, Any] = {"modelId": model_id, "inferenceConfig": inference}
     request.update(converse_guardrail_fields())
-    fields = _model_fields(spec, profile)
+    fields = {**_model_fields(spec, profile), **(extra_model_fields or {})}
     if fields:
         request["additionalModelRequestFields"] = fields
     return request
