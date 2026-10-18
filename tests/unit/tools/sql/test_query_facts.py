@@ -212,6 +212,11 @@ class TestFacts:
             ("SELECT * FROM t FETCH FIRST 5 ROWS ONLY", "row_limit"),
             ("SELECT TOP 5 * FROM t", "row_limit"),
             ("SELECT * FROM t WHERE id IN (1, 2)", "in_list"),
+            ("SELECT * FROM t WHERE id IN\n(1, 2)", "in_list"),  # newline before ( (#1010)
+            ("SELECT * FROM t WHERE id IN\t(1, 2)", "in_list"),
+            ("SELECT * FROM t WHERE id in  (1, 2)", "in_list"),
+            ("SELECT * FROM t WHERE (id)IN(1, 2)", "in_list"),  # no space before IN
+            ("SELECT * FROM t WHERE id NOT IN (1, 2)", "in_list"),
             ("SELECT JSON_EXTRACT(doc, '$.a') FROM t", "json_access"),
             ("SELECT doc->'a' FROM t", "json_access"),
             ("INSERT INTO t VALUES (1) ON DUPLICATE KEY UPDATE a = 1", "duplicate_key_upsert"),
@@ -302,6 +307,9 @@ class TestFacts:
             ("SELECT * FROM t -- GROUP BY a", "group_by"),
             ("SELECT count FROM t", "aggregation"),  # a column named count
             ("SELECT * FROM t WHERE a = 'x'", "in_list"),
+            ("SELECT * FROM t WHERE a IN", "in_list"),  # no list
+            ("SELECT lookup_in (x) FROM t", "in_list"),  # IN ends a longer name
+            ("SELECT * FROM t WHERE min (a) > 1", "in_list"),  # IN inside a word
             ("SELECT fooWITH RECURSIVE", "recursive_cte"),
             ("SELECT * FROM t WHERE note = 'lateral (x)'", "lateral_join"),  # a value (#985)
             ("SELECT * FROM t WHERE a <> 1", "range_predicate"),

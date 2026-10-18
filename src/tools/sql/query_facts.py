@@ -64,6 +64,7 @@ from src.shared.unsupported_pattern import is_dedup_only_group_by, strip_comment
 from src.tools.sql.facade import AccessFacts, ColumnUse, SqlFacts, TableRef, query_readings
 from src.tools.sql.regex_facts import (
     EXISTS_CONDITION_RE,
+    IN_LIST_RE,
     SELECT_WORD_RE,
     TIMESTAMP_COLUMN_NAME_RE,
     WildcardLike,
@@ -247,11 +248,6 @@ _WRITE_WORD_RE = re.compile(r"\b(?:INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 # EXISTS (subquery) or NOT EXISTS (subquery) is ``regex_facts.EXISTS_CONDITION_RE``, the
 # condition the transaction shape blanks too (#930); IN (SELECT ...) is this one.
 _IN_SUBQUERY_RE = re.compile(r"\bIN\s*\(\s*SELECT\b", re.IGNORECASE)
-
-IN_LIST_KEYWORDS: tuple[str, ...] = (
-    " in (",
-    " in(",
-)
 
 # ---------------------------------------------------------------------------
 # MySQL syntax (the Aurora MySQL analysis's detectors, moved here from
@@ -932,8 +928,9 @@ class QueryFacts:
 
     @cached_property
     def in_list(self) -> bool:
-        """`` in (`` or `` in(``."""
-        return _contains_any(self._lower, IN_LIST_KEYWORDS)
+        """An ``IN (`` list: ``regex_facts.IN_LIST_RE``, the one definition the key
+        predicate and the transaction shape read too (#1010)."""
+        return bool(IN_LIST_RE.search(self._text))
 
     @cached_property
     def duplicate_key_upsert(self) -> bool:

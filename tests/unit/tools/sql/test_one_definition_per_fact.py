@@ -28,9 +28,10 @@ from pathlib import Path
 import pytest
 
 from src.tools.database.offline_parser import detect_source_engine, parse_offline_collection
+from src.tools.sql import query_facts as query_facts_module
 from src.tools.sql.facade import SqlFacts, access_facts, sql_facts
 from src.tools.sql.query_facts import QueryFacts, query_facts, read_timestamp_column
-from src.tools.sql.regex_facts import regex_range_predicate
+from src.tools.sql.regex_facts import IN_LIST_RE, regex_range_predicate
 from tests.unit.tools.sql.table_refs_snapshot import SAMPLES, load_sample
 
 _REPO = Path(__file__).resolve().parents[4]
@@ -322,6 +323,50 @@ def test_the_exists_condition_is_one_definition():
     compiled, imported = _compiled_and_imported("src/tools/sql/query_facts.py")
     assert "EXISTS_CONDITION_RE" in imported
     assert not any("EXISTS" in name for name in compiled)
+
+
+def test_the_in_list_is_one_definition():
+    """The ``in_list`` fact reads ``regex_facts.IN_LIST_RE``, as the key predicate and
+    the transaction shape do (#1010): no second IN-list test in query_facts."""
+    compiled, imported = _compiled_and_imported("src/tools/sql/query_facts.py")
+    assert "IN_LIST_RE" in imported
+    assert not any("IN_LIST" in name for name in compiled)
+    assert not hasattr(query_facts_module, "IN_LIST_KEYWORDS")
+    # Whatever it is named, no substring test: the fact's body reads IN_LIST_RE and
+    # holds no string constant (a ' in (' fragment) or helper call besides it.
+    tree = ast.parse(_QUERY_FACTS.read_text(encoding="utf-8"))
+    method = next(
+        node
+        for cls in tree.body
+        if isinstance(cls, ast.ClassDef) and cls.name == "QueryFacts"
+        for node in cls.body
+        if isinstance(node, ast.FunctionDef) and node.name == "in_list"
+    )
+    body = method.body[1:] if ast.get_docstring(method) else method.body
+    nodes = [n for stmt in body for n in ast.walk(stmt)]
+    assert any(isinstance(n, ast.Name) and n.id == "IN_LIST_RE" for n in nodes)
+    assert not any(isinstance(n, ast.Constant) and isinstance(n.value, str) for n in nodes)
+    assert not any(isinstance(n, ast.Name) and n.id in {"_contains_any", "_has"} for n in nodes)
+    assert not any(isinstance(n, ast.Attribute) and n.attr in {"_has", "_lower"} for n in nodes)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SELECT * FROM t WHERE id IN\n(\n SELECT x FROM u)",
+        "SELECT * FROM t WHERE id IN\t(1)",
+        "SELECT * FROM t WHERE id in(1)",
+        "SELECT * FROM t WHERE id in (1)",
+        "SELECT * FROM t WHERE (a)IN(1)",
+        "IN (1)",
+        "SELECT * FROM t WHERE id IN",
+        "SELECT * FROM t WHERE margin (1)",
+        "SELECT lookup_in (1)",
+        "",
+    ],
+)
+def test_the_in_list_fact_agrees_with_the_shared_regex(text):
+    assert QueryFacts(text).in_list is bool(IN_LIST_RE.search(text))
 
 
 @pytest.mark.parametrize(
