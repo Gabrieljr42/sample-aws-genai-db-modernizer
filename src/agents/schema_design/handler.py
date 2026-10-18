@@ -1,7 +1,7 @@
 """Schema Design agent handler — dispatches to target-specific schema design agents.
 
 Reads collector output and analysis output via ArtifactStore, writes them to local
-temp files, sets COLLECTOR_OUTPUT_PATH and ANALYSIS_OUTPUT_PATH env vars, invokes
+temp files, passes their paths to the target-specific agent (#1054), invokes
 the target-specific Strands agent, and writes the output contract back via ArtifactStore.
 
 Artifact paths (versioned when assignment_version > 0):
@@ -702,7 +702,6 @@ def run_schema_design(
             trace_tmp.write(trace_raw)
             trace_tmp.close()
             trace_tmp_path = trace_tmp.name
-            os.environ["DECISION_TRACE_PATH"] = trace_tmp_path
             print(f"[schema-design/{target_type}] Loaded decision trace")
         except Exception as exc:
             print(f"[schema-design/{target_type}] Decision trace not found: {exc}")
@@ -712,13 +711,13 @@ def run_schema_design(
             target_type,
             collector_path=collector_tmp.name,
             analysis_path=analysis_tmp.name,
+            decision_trace_path=trace_tmp_path,
         )
     finally:
         os.unlink(collector_tmp.name)
         os.unlink(analysis_tmp.name)
         if trace_tmp_path:
             os.unlink(trace_tmp_path)
-            os.environ.pop("DECISION_TRACE_PATH", None)
 
     # --- Write output via ArtifactStore ---
     output_data = json.loads(output_json)
@@ -1117,8 +1116,8 @@ def run_schema_design_auto(
             f"[schema-design/{target_type}] Group {idx} done ({group['group_name']}, {n_q} queries)"
         )
 
-    # Run groups in parallel — paths are passed as params so there's no
-    # process-global env var contention between threads. The cap is tunable via
+    # Run groups in parallel — paths are passed as params all the way to the
+    # agent's input tool (#1054), so the threads share no path state. The cap is tunable via
     # SCHEMA_GROUP_CONCURRENCY (default 5): under a small shared Bedrock quota,
     # every engine's group workers compete for the same rate limit, so the useful
     # ceiling is bounded by quota, not threads. Lower it to reduce throttling;
@@ -1236,7 +1235,6 @@ def run_schema_design_with_injected(
             trace_tmp.write(trace_raw)
             trace_tmp.close()
             trace_tmp_path = trace_tmp.name
-            os.environ["DECISION_TRACE_PATH"] = trace_tmp_path
         except Exception:  # noqa: B110
             pass  # nosec B110
 
@@ -1245,13 +1243,13 @@ def run_schema_design_with_injected(
             target_type,
             collector_path=collector_tmp.name,
             analysis_path=analysis_tmp.name,
+            decision_trace_path=trace_tmp_path,
         )
     finally:
         os.unlink(collector_tmp.name)
         os.unlink(analysis_tmp.name)
         if trace_tmp_path:
             os.unlink(trace_tmp_path)
-            os.environ.pop("DECISION_TRACE_PATH", None)
 
     # Write output — append to existing schema output (merge unsupported + access patterns)
     output_data = json.loads(output_json)
@@ -1313,14 +1311,20 @@ def _dispatch_schema_agent(
     collector_path: str | None = None,
     analysis_path: str | None = None,
     revision_context_path: str | None = None,
+    decision_trace_path: str | None = None,
 ) -> tuple[str, str | None]:
     """Route to the correct schema design agent. Returns (output_json, trace_json).
+
+    Every path goes to the agent as an argument (#1054): no environment
+    variable or module state carries them, so concurrent calls (the groups of
+    one engine) each read only their own files.
 
     Args:
         target_type: Engine type (dynamodb, opensearch, documentdb).
         collector_path: Path to collector output JSON (preferred over env var).
         analysis_path: Path to analysis output JSON (preferred over env var).
         revision_context_path: Optional path to revision context JSON.
+        decision_trace_path: Optional path to the analysis decision trace JSON.
     """
     # The cases below are the implemented designers; keep them in sync with
     # core.IMPLEMENTED_SCHEMA_DESIGNERS (the orchestrator skips engines absent
@@ -1334,6 +1338,7 @@ def _dispatch_schema_agent(
                 collector_path=collector_path,
                 analysis_path=analysis_path,
                 revision_context_path=revision_context_path,
+                decision_trace_path=decision_trace_path,
             )
             return result.model_dump_json(indent=2), json.dumps(trace, indent=2)
 
@@ -1344,6 +1349,7 @@ def _dispatch_schema_agent(
                 collector_path=collector_path,
                 analysis_path=analysis_path,
                 revision_context_path=revision_context_path,
+                decision_trace_path=decision_trace_path,
             )
             return docdb_result.model_dump_json(indent=2), json.dumps(docdb_trace, indent=2)
 
@@ -1354,6 +1360,7 @@ def _dispatch_schema_agent(
                 collector_path=collector_path,
                 analysis_path=analysis_path,
                 revision_context_path=revision_context_path,
+                decision_trace_path=decision_trace_path,
             )
             return os_result.model_dump_json(indent=2), json.dumps(os_trace, indent=2)
 
@@ -1364,6 +1371,7 @@ def _dispatch_schema_agent(
                 collector_path=collector_path,
                 analysis_path=analysis_path,
                 revision_context_path=revision_context_path,
+                decision_trace_path=decision_trace_path,
             )
             return ec_result.model_dump_json(indent=2), json.dumps(ec_trace, indent=2)
 
@@ -1376,6 +1384,7 @@ def _dispatch_schema_agent(
                 collector_path=collector_path,
                 analysis_path=analysis_path,
                 revision_context_path=revision_context_path,
+                decision_trace_path=decision_trace_path,
             )
             return pg_result.model_dump_json(indent=2), json.dumps(pg_trace, indent=2)
 
@@ -1386,6 +1395,7 @@ def _dispatch_schema_agent(
                 collector_path=collector_path,
                 analysis_path=analysis_path,
                 revision_context_path=revision_context_path,
+                decision_trace_path=decision_trace_path,
             )
             return mysql_result.model_dump_json(indent=2), json.dumps(mysql_trace, indent=2)
 

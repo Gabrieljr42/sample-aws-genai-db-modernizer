@@ -37,16 +37,9 @@ from src.tools.schema.aurora_common.bedrock_delta import (
     pe_review_prompt,
     prepare_delta_design,
 )
-from src.tools.schema.base_schema_agent import SchemaDesignRunner
+from src.tools.schema.base_schema_agent import AgentInputPaths, SchemaDesignRunner
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Module-level path variables (set by run_aurora_postgresql_schema_agent, read by tools)
-# ---------------------------------------------------------------------------
-_collector_path: str | None = None
-_analysis_path: str | None = None
-_revision_context_path: str | None = None
 
 DEFAULT_SKILL_PATH = str(
     Path(__file__).resolve().parent.parent.parent / "skills" / "aurora_postgresql-data-modeling.md"
@@ -122,15 +115,15 @@ def _build_model() -> RoleBedrockModel:
     )
 
 
-def load_agent_input() -> dict:
+def load_agent_input(paths: AgentInputPaths | None = None) -> dict:
     """Load collector + analysis + decision trace for the schema designer.
 
-    Reads from paths set by run_aurora_postgresql_schema_agent (preferred) or
+    Reads the files given to run_aurora_postgresql_schema_agent (preferred) or
     env vars (fallback).
     """
-    collector_path = _collector_path or os.environ.get("COLLECTOR_OUTPUT_PATH")
-    analysis_path = _analysis_path or os.environ.get("ANALYSIS_OUTPUT_PATH")
-    trace_path = os.environ.get("DECISION_TRACE_PATH")
+    paths = paths or AgentInputPaths.resolve()
+    collector_path, analysis_path = paths.collector, paths.analysis
+    trace_path = paths.decision_trace
 
     if not collector_path or not analysis_path:
         raise ValueError(
@@ -234,6 +227,7 @@ def run_aurora_postgresql_schema_agent(
     collector_path: str | None = None,
     analysis_path: str | None = None,
     revision_context_path: str | None = None,
+    decision_trace_path: str | None = None,
 ) -> tuple[AuroraPostgresqlModelOutputContract, dict]:
     """Run the Aurora PostgreSQL schema design agent with PE review loop.
 
@@ -254,10 +248,11 @@ def run_aurora_postgresql_schema_agent(
     Returns:
         Tuple of (validated output, trace dict for S3 artifact).
     """
-    global _collector_path, _analysis_path, _revision_context_path
-    _collector_path = collector_path
-    _analysis_path = analysis_path
-    _revision_context_path = revision_context_path
+    # This call's own files (#1054): never module state, so concurrent group
+    # designs cannot read each other's input.
+    paths = AgentInputPaths.resolve(
+        collector_path, analysis_path, decision_trace_path, revision_context_path
+    )
 
     model = _build_model()
     system_prompt = (
@@ -266,7 +261,7 @@ def run_aurora_postgresql_schema_agent(
 
     # Load input eagerly — don't rely on LLM calling the tool.
     print("[schema-design/aurora_postgresql] Loading agent input...")
-    agent_input = load_agent_input()
+    agent_input = load_agent_input(paths)
 
     # Issue #273: the designer sees a compact view of the deterministic draft
     # and returns only a delta; the full contract is merged deterministically.
@@ -293,8 +288,8 @@ def run_aurora_postgresql_schema_agent(
     designer_prompt = build_designer_prompt("aurora_postgresql", view)
 
     # Inject revision context if this is a revision-triggered redesign
-    if _revision_context_path:
-        revision_ctx = json.loads(Path(_revision_context_path).read_text(encoding="utf-8"))
+    if paths.revision_context:
+        revision_ctx = json.loads(Path(paths.revision_context).read_text(encoding="utf-8"))
         revision_sections = []
         if revision_ctx.get("exclusion_instructions"):
             revision_sections.append(

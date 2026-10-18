@@ -1,7 +1,7 @@
 """
 DynamoDB Schema Design Agent — uses SchemaDesignRunner for PE review loop.
 
-Reads CollectorOutputContract and AnalysisOutputContract from paths set by
+Reads CollectorOutputContract and AnalysisOutputContract from the paths passed by
 the handler, projects them through the schema_design_input contract models
 (validation gate), and produces a DynamoDBModelOutputContract.
 
@@ -19,9 +19,9 @@ Invoked by src/agents/schema_design/handler.py when target_type="dynamodb".
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
+from typing import Any
 
 from strands import Agent, tool
 
@@ -38,7 +38,7 @@ from src.contracts.schema_design_input import project_schema_design_input
 from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
 from src.shared.role_bedrock_model import RoleBedrockModel
-from src.tools.schema.base_schema_agent import SchemaDesignRunner
+from src.tools.schema.base_schema_agent import AgentInputPaths, SchemaDesignRunner
 from src.tools.schema.design_metrics import (
     check_design_numbers,
     design_metrics_from_projection,
@@ -47,13 +47,6 @@ from src.tools.schema.design_metrics import (
 from src.tools.schema.dynamodb_cost_check import compute_performances_and_costs_entries
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Module-level path variables (set by run_dynamodb_schema_agent, read by tools)
-# ---------------------------------------------------------------------------
-_collector_path: str | None = None
-_analysis_path: str | None = None
-_revision_context_path: str | None = None
 
 # ---------------------------------------------------------------------------
 # Skill loader
@@ -92,24 +85,46 @@ def load_skill(skill_path: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool
-def load_agent_input() -> dict:
+def load_agent_input(paths: AgentInputPaths | None = None) -> dict:
     """Load collector + analysis outputs and project into validated input.
 
-    Reads from paths set by run_dynamodb_schema_agent (preferred) or
+    Reads the files given to run_dynamodb_schema_agent (preferred) or
     env vars COLLECTOR_OUTPUT_PATH/ANALYSIS_OUTPUT_PATH (fallback).
 
     Returns a dict with 'collector', 'analysis', 'context' and 'design_metrics'
     (the pipeline-computed design_rps, item sizes, coverage and partition
     limits) keys.
     """
-    return _project_input()
+    return _project_input(paths)
 
 
-def _project_input() -> dict:
+def _input_tool(paths: AgentInputPaths) -> Any:
+    """The designer's ``load_agent_input`` tool, bound to this call's files (#1054).
+
+    Built per call so a group's designer reads its own group's input, never the
+    input of another group designed at the same time.
+    """
+
+    @tool
+    def load_agent_input() -> dict:
+        """Load collector + analysis outputs and project into validated input.
+
+        Reads the files given to run_dynamodb_schema_agent (preferred) or
+        env vars COLLECTOR_OUTPUT_PATH/ANALYSIS_OUTPUT_PATH (fallback).
+
+        Returns a dict with 'collector', 'analysis', 'context' and 'design_metrics'
+        (the pipeline-computed design_rps, item sizes, coverage and partition
+        limits) keys.
+        """
+        return _project_input(paths)
+
+    return load_agent_input
+
+
+def _project_input(paths: AgentInputPaths | None = None) -> dict:
     """The ``load_agent_input`` result (a plain function, so the runner can reuse it)."""
-    collector_path = _collector_path or os.environ.get("COLLECTOR_OUTPUT_PATH")
-    analysis_path = _analysis_path or os.environ.get("ANALYSIS_OUTPUT_PATH")
+    paths = paths or AgentInputPaths.resolve()
+    collector_path, analysis_path = paths.collector, paths.analysis
 
     if not collector_path or not analysis_path:
         raise ValueError(
@@ -381,6 +396,7 @@ def run_dynamodb_schema_agent(
     collector_path: str | None = None,
     analysis_path: str | None = None,
     revision_context_path: str | None = None,
+    decision_trace_path: str | None = None,
 ) -> tuple[DynamoDBModelOutputContract, dict]:
     """Run the DynamoDB schema design agent with PE review loop.
 
@@ -395,10 +411,11 @@ def run_dynamodb_schema_agent(
     Returns:
         Tuple of (validated output, trace dict for S3 artifact)
     """
-    global _collector_path, _analysis_path, _revision_context_path
-    _collector_path = collector_path
-    _analysis_path = analysis_path
-    _revision_context_path = revision_context_path
+    # This call's own files (#1054): never module state, so concurrent group
+    # designs cannot read each other's input.
+    paths = AgentInputPaths.resolve(
+        collector_path, analysis_path, decision_trace_path, revision_context_path
+    )
 
     model = _build_model()
     # R1: reinforce from the system turn that customer content (including the
@@ -408,7 +425,7 @@ def run_dynamodb_schema_agent(
     designer = Agent(
         model=model,
         system_prompt=system_prompt,
-        tools=[load_agent_input, compute_performances_and_costs],
+        tools=[_input_tool(paths), compute_performances_and_costs],
         structured_output_model=DynamoDBModelOutputContract,
         callback_handler=None,
     )
@@ -427,11 +444,11 @@ def run_dynamodb_schema_agent(
     )
 
     # Inject revision context if this is a revision-triggered redesign
-    if _revision_context_path:
+    if paths.revision_context:
         import json as _json
         from pathlib import Path as _Path
 
-        revision_ctx = _json.loads(_Path(_revision_context_path).read_text(encoding="utf-8"))
+        revision_ctx = _json.loads(_Path(paths.revision_context).read_text(encoding="utf-8"))
         revision_sections = []
         if revision_ctx.get("exclusion_instructions"):
             revision_sections.append(
@@ -450,10 +467,9 @@ def run_dynamodb_schema_agent(
                 "\n\n".join(revision_sections)
             )
 
-    try:
-        metrics: dict | None = _project_input()["design_metrics"]
-    except (ValueError, OSError):  # no readable input: only the hot-partition arithmetic
-        metrics = None
+    # The numbers check reads this call's own input (#1054). An unreadable input
+    # is an error here, never a silently skipped check.
+    metrics: dict | None = _project_input(paths)["design_metrics"]
     runner = SchemaDesignRunner(
         target_type="dynamodb",
         output_model=DynamoDBModelOutputContract,

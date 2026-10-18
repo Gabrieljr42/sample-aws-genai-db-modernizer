@@ -94,7 +94,7 @@ def _stub(monkeypatch, mod, agent_input: dict, deltas: list[dict], captured: dic
 
     monkeypatch.setattr(mod.SchemaDesignRunner, "run", fake_run)
     monkeypatch.setattr(mod.SchemaDesignRunner, "_invoke_designer", fake_invoke)
-    monkeypatch.setattr(mod, "load_agent_input", lambda: agent_input)
+    monkeypatch.setattr(mod, "load_agent_input", lambda paths=None: agent_input)
     monkeypatch.setattr(mod, "_build_model", lambda: object())
 
     def fake_agent(**kwargs):

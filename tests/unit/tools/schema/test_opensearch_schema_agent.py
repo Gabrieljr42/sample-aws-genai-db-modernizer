@@ -4,6 +4,8 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.contracts.opensearch_model_output import (
     CustomAnalyzer,
     DataStreamConfig,
@@ -825,6 +827,15 @@ class TestFormatPeFeedback:
 class TestRunOpensearchSchemaAgent:
     """Integration-style tests for run_opensearch_schema_agent with all LLM calls mocked."""
 
+    @pytest.fixture(autouse=True)
+    def _no_input_files(self, monkeypatch):
+        """These tests give the agent no input files; the numbers check reads the
+        call's input (#1054), so it gets a projection with no metrics."""
+        monkeypatch.setattr(
+            "src.tools.schema.opensearch_schema_agent._project_input",
+            lambda paths=None: {"design_metrics": None},
+        )
+
     def _make_approved_review(self):
         from src.tools.schema.opensearch_schema_agent import PEReviewResult, ReviewVerdict
 
@@ -853,6 +864,34 @@ class TestRunOpensearchSchemaAgent:
             pe_notes=["remember replication factor"],
             summary="needs shard fix",
         )
+
+    @patch("src.tools.schema.opensearch_schema_agent._invoke_pe_reviewer")
+    @patch("src.tools.schema.opensearch_schema_agent._invoke_designer")
+    @patch("src.tools.schema.opensearch_schema_agent.Agent")
+    @patch("src.tools.schema.opensearch_schema_agent._load_skill")
+    @patch("src.tools.schema.opensearch_schema_agent._build_model")
+    def test_the_numbers_check_reads_this_calls_input(
+        self, mock_build, mock_load, mock_agent_cls, mock_designer, mock_pe, monkeypatch
+    ):
+        """#1054 review: the numbers check's projection gets the call's own paths."""
+        from src.tools.schema import opensearch_schema_agent as mod
+
+        seen: list = []
+
+        def spy(paths=None):
+            seen.append(paths)
+            return {"design_metrics": None}
+
+        monkeypatch.setattr(mod, "_project_input", spy)
+        mock_build.return_value = MagicMock()
+        mock_load.return_value = "skill text"
+        mock_agent_cls.return_value = MagicMock()
+        mock_designer.return_value = _minimal_output()
+        mock_pe.return_value = self._make_approved_review()
+
+        mod.run_opensearch_schema_agent(collector_path="c.json", analysis_path="a.json")
+
+        assert seen and all(p is not None and p.collector == "c.json" for p in seen)
 
     @patch("src.tools.schema.opensearch_schema_agent._invoke_pe_reviewer")
     @patch("src.tools.schema.opensearch_schema_agent._invoke_designer")
@@ -1779,6 +1818,10 @@ class TestRobustness:
     # 10. run_opensearch_schema_agent with designer producing non-empty designs
     # ------------------------------------------------------------------
 
+    @patch(
+        "src.tools.schema.opensearch_schema_agent._project_input",
+        lambda paths=None: {"design_metrics": None},
+    )
     @patch("src.tools.schema.opensearch_schema_agent._invoke_pe_reviewer")
     @patch("src.tools.schema.opensearch_schema_agent._invoke_designer")
     @patch("src.tools.schema.opensearch_schema_agent.Agent")

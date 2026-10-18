@@ -31,7 +31,7 @@ from src.contracts.schema_design_input import project_schema_design_input
 from src.shared.contract_versioning import load_contract
 from src.shared.models import Role, build_bedrock_model
 from src.shared.role_bedrock_model import RoleBedrockModel
-from src.tools.schema.base_schema_agent import SchemaDesignRunner
+from src.tools.schema.base_schema_agent import AgentInputPaths, SchemaDesignRunner
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,6 @@ DEFAULT_SKILL_PATH = str(
 DEFAULT_PE_SKILL_PATH = str(
     Path(__file__).resolve().parent.parent.parent / "skills" / "elasticache-pe-review.md"
 )
-
-# Module-level path variables set by run_elasticache_schema_agent (preferred over env vars)
-_collector_path: str | None = None
-_analysis_path: str | None = None
-_revision_context_path: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -115,14 +110,17 @@ def _build_model() -> RoleBedrockModel:
     )
 
 
-def load_agent_input() -> dict:
+def load_agent_input(paths: AgentInputPaths | None = None) -> dict:
     """Load collector + analysis + decision trace for the schema designer."""
-    collector_path = _collector_path or os.environ.get("COLLECTOR_OUTPUT_PATH")
-    analysis_path = _analysis_path or os.environ.get("ANALYSIS_OUTPUT_PATH")
-    trace_path = os.environ.get("DECISION_TRACE_PATH")
+    paths = paths or AgentInputPaths.resolve()
+    collector_path, analysis_path = paths.collector, paths.analysis
+    trace_path = paths.decision_trace
 
     if not collector_path or not analysis_path:
-        raise ValueError("COLLECTOR_OUTPUT_PATH and ANALYSIS_OUTPUT_PATH must be set")
+        raise ValueError(
+            "Collector/analysis paths must be set via run_elasticache_schema_agent() "
+            "or COLLECTOR_OUTPUT_PATH/ANALYSIS_OUTPUT_PATH env vars"
+        )
 
     with open(collector_path, encoding="utf-8") as f:
         raw_collector = json.load(f)
@@ -268,6 +266,7 @@ def run_elasticache_schema_agent(
     collector_path: str | None = None,
     analysis_path: str | None = None,
     revision_context_path: str | None = None,
+    decision_trace_path: str | None = None,
 ) -> tuple[ElastiCacheModelOutputContract, dict]:
     """Run the ElastiCache/Redis schema design agent with PE review loop.
 
@@ -282,10 +281,11 @@ def run_elasticache_schema_agent(
     Returns:
         Tuple of (validated output, trace dict for S3 artifact).
     """
-    global _collector_path, _analysis_path, _revision_context_path
-    _collector_path = collector_path
-    _analysis_path = analysis_path
-    _revision_context_path = revision_context_path
+    # This call's own files (#1054): never module state, so concurrent group
+    # designs cannot read each other's input.
+    paths = AgentInputPaths.resolve(
+        collector_path, analysis_path, decision_trace_path, revision_context_path
+    )
 
     model = _build_model()
     system_prompt = (
@@ -293,7 +293,7 @@ def run_elasticache_schema_agent(
     )
 
     print("[schema-design/elasticache] Loading agent input...")
-    agent_input = load_agent_input()
+    agent_input = load_agent_input(paths)
 
     _compact_agent_input(agent_input)
     input_json = json.dumps(agent_input, indent=2, default=str)
@@ -319,8 +319,8 @@ def run_elasticache_schema_agent(
         "Return the complete ElastiCacheModelOutputContract."
     )
 
-    if _revision_context_path:
-        revision_ctx = json.loads(Path(_revision_context_path).read_text(encoding="utf-8"))
+    if paths.revision_context:
+        revision_ctx = json.loads(Path(paths.revision_context).read_text(encoding="utf-8"))
         revision_sections = []
         if revision_ctx.get("exclusion_instructions"):
             revision_sections.append(
