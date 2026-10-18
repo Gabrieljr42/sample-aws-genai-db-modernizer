@@ -11,7 +11,9 @@ here too: Oracle positional binds (``:1``) are renamed (``:b1``), a space is
 added after a PostgreSQL ``$1`` placeholder written flush against the next
 token (``$1=$2``, never inside an identifier such as ``price$1usd``), and
 T-SQL's ``DELETE``/``UPDATE``/``INSERT TOP (n)`` row limit is dropped when it
-is a number, ``@variable`` or ``?``. Each rewrite runs only outside string
+is a number, ``@variable`` or ``?``, and a MySQL ``REPLACE INTO`` is read as the
+``INSERT INTO`` it is for access (sqlglot reads ``REPLACE`` only as a generic
+command; #986). Each rewrite runs only outside string
 literals, quoted identifiers and comments, and none can add, remove or
 rename a table name (tests pin each case).
 
@@ -59,7 +61,7 @@ from typing import Literal
 import sqlglot
 from sqlglot import exp
 
-from src.tools.sql.normalize import normalize_digest_text, quoted_mask
+from src.tools.sql.normalize import NormalizedQuery, normalize_digest_text, quoted_mask
 from src.tools.sql.refs import ColumnUse, TableRef
 from src.tools.sql.regex_facts import (
     TIMESTAMP_COLUMN_NAME_RE,
@@ -139,6 +141,20 @@ _TSQL_DML_TOP_RE = re.compile(
     r"\b(DELETE|UPDATE|INSERT)\s+TOP\s*\(\s*(?:\d+|@\w+|\?)\s*\)(?:\s*PERCENT\b)?",
     re.IGNORECASE,
 )
+
+# MySQL ``REPLACE [LOW_PRIORITY | DELAYED] INTO t ...`` writes rows by key like
+# ``INSERT ... ON DUPLICATE KEY UPDATE`` (it deletes a row with the same key, then
+# inserts), but sqlglot reads it only as a generic command. The facade parses it as
+# the ``INSERT`` it is for access; the priority modifier, which names no table, is
+# dropped. The pattern is anchored at the start of the text, so a ``REPLACE(...)``
+# function call never matches (#986).
+_MYSQL_REPLACE_RE = re.compile(
+    r"\A(\s*)REPLACE(?:\s+(?:LOW_PRIORITY|DELAYED))?(?=\s+INTO\b)", re.IGNORECASE
+)
+
+# How many ``AND``/``OR`` cut points the repair of a cut-short digest tries, last first.
+_MAX_REPAIR_CUTS = 40
+_AND_OR_RE = re.compile(r"\b(?:AND|OR)\b", re.IGNORECASE)
 
 # A parsed statement must be one of these; anything else (a stray expression
 # sqlglot read out of garbage text) is not a statement.
@@ -377,6 +393,28 @@ class _Parsed:
     # A T-SQL ``DELETE``/``UPDATE``/``INSERT TOP (n)`` the bridge dropped before
     # parsing: a row limit the tree no longer shows (``SqlFacts.row_limit``).
     dml_top_dropped: bool = False
+    # The digest was cut short and does not parse, but its prefix up to the last
+    # complete predicate does (:func:`_repair_truncated`); only the access facts
+    # read it (#986). Empty when there is none.
+    repaired: tuple[exp.Expr, ...] = ()
+
+
+# MySQL's default ``performance_schema_max_digest_length``: a digest this long was cut at
+# the cap, whatever its last token is.
+_MYSQL_DIGEST_CAP = 1024
+
+
+def _cut_short(sql: str, normalized: NormalizedQuery, source_engine: str) -> bool:
+    """Whether the collector really cut ``sql`` short, so its prefix may be read (#986): the
+    normalizer flags it truncated, and the collector's own signal agrees: it ends on a
+    token that cannot end a statement, or (MySQL) it is as long as the digest cap. An
+    unterminated quote alone is not enough: a scanner can misread a dialect's string
+    syntax, and a complete statement must never be repaired."""
+    if not normalized.truncated:
+        return False
+    if normalized.ends_incomplete:
+        return True
+    return (source_engine or "").lower() in ("mysql", "mariadb") and len(sql) >= _MYSQL_DIGEST_CAP
 
 
 def _parse(sql: str, source_engine: str) -> _Parsed:
@@ -388,7 +426,12 @@ def _parse(sql: str, source_engine: str) -> _Parsed:
     normalized = normalize_digest_text(sql, source_engine or "")
 
     def fallback(reason: FallbackReason) -> _Parsed:
-        return _Parsed(sql, dialect, truncated=normalized.truncated, fallback_reason=reason)
+        repaired: tuple[exp.Expr, ...] = ()
+        if reason == "parse_error" and _cut_short(sql, normalized, source_engine):
+            repaired = _repair_truncated(text, dialect, source_engine)
+        return _Parsed(
+            sql, dialect, truncated=normalized.truncated, fallback_reason=reason, repaired=repaired
+        )
 
     if not normalized.text.strip():
         return fallback("empty")
@@ -401,6 +444,8 @@ def _parse(sql: str, source_engine: str) -> _Parsed:
     elif dialect == "tsql":
         bridged = _sub_outside_quotes(_TSQL_DML_TOP_RE, r"\1", text, source_engine)
         dml_top_dropped, text = bridged != text, bridged
+    elif dialect == "mysql":
+        text = _MYSQL_REPLACE_RE.sub(r"\1INSERT", text, count=1)
     try:
         statements = [s for s in sqlglot.parse(text, read=dialect or None) if s]
     except Exception:  # noqa: BLE001 -- any parser failure falls back, by contract
@@ -418,6 +463,50 @@ def _parse(sql: str, source_engine: str) -> _Parsed:
         statements=tuple(statements),
         dml_top_dropped=dml_top_dropped,
     )
+
+
+def _parse_or_none(text: str, dialect: str) -> list[exp.Expr] | None:
+    """sqlglot's statements for ``text``, or None when it raises (a cut that does not
+    parse is just not the one)."""
+    try:
+        return [s for s in sqlglot.parse(text, read=dialect or None) if s]
+    except Exception:  # noqa: BLE001 -- any parser failure is None, by contract
+        return None
+
+
+def _repair_truncated(text: str, dialect: str, source_engine: str) -> tuple[exp.Expr, ...]:
+    """The statements of a digest the collector cut short, read up to its last complete
+    predicate, or ``()``.
+
+    A long query digest is cut at a length cap, often in the middle of a ``WHERE`` or a
+    join's ``ON``. The text is cut back to just before the last ``AND``/``OR`` that
+    leaves a statement sqlglot reads (open parentheses closed), trying each from the
+    end. A prefix has lost its later predicates, so it shows less than the query does:
+    the caller says so wherever it uses it (#986). Text with no table in the prefix
+    is not repaired.
+    """
+    mask = quoted_mask(text, source_engine or "")
+    cuts = [m.start() for m in _AND_OR_RE.finditer(text) if not any(mask[m.start() : m.end()])]
+    for cut in reversed(cuts[-_MAX_REPAIR_CUTS:]):
+        head = text[:cut].rstrip()
+        if not head:
+            continue
+        opened = sum(
+            (ch == "(") - (ch == ")")
+            for ch, quoted in zip(text[: len(head)], mask, strict=False)
+            if not quoted
+        )
+        if opened < 0:
+            continue
+        statements = _parse_or_none(head + ")" * opened, dialect)
+        if (
+            statements
+            and all(isinstance(s, _STATEMENT_TYPES) for s in statements)
+            and not any(isinstance(n, exp.Command) for s in statements for n in s.walk())
+            and any(isinstance(n, exp.Table) for s in statements for n in s.walk())
+        ):
+            return tuple(statements)
+    return ()
 
 
 def _tables(parsed: _Parsed) -> TableReferences:
@@ -1084,7 +1173,10 @@ class AccessFacts:
     combine nothing, so alone they are not one (the ``has_aggregation``
     definition of :class:`SqlFacts`). ``window_function``: any function over a
     window, ranking ones included (``SqlFacts.window_function``). When the facade falls back, ``parsed_by``
-    is ``"regex"`` and ``scopes`` is empty: no fact is guessed from the text.
+    is ``"regex"`` and ``scopes`` is empty: no fact is guessed from the text, except
+    for a digest the collector cut short: ``truncated_read`` is True when the facts
+    are those of its text up to the last complete predicate (#986); they show less than
+    the query does, so a reader says so.
     """
 
     kind: StatementKind
@@ -1094,6 +1186,7 @@ class AccessFacts:
     parsed_by: ParsedBy
     fallback_reason: FallbackReason | None
     window_function: bool = False
+    truncated_read: bool = False
 
 
 def query_readings(sql: str, source_engine: str) -> tuple[SqlFacts, AccessFacts]:
@@ -1115,6 +1208,10 @@ def access_facts(sql: str, source_engine: str) -> AccessFacts:
 
 def _access(parsed: _Parsed) -> AccessFacts:
     reason = parsed.fallback_reason
+    if reason is not None and parsed.repaired:
+        repaired = _read_access(parsed.repaired, truncated_read=True)
+        if repaired is not None:
+            return repaired
     if reason is not None:
         return AccessFacts(
             kind="other" if reason == "command" else "select",
@@ -1124,10 +1221,20 @@ def _access(parsed: _Parsed) -> AccessFacts:
             parsed_by="regex",
             fallback_reason=reason,
         )
+    read = _read_access(parsed.statements)
+    return read or AccessFacts("select", (), False, False, "regex", "parse_error")
+
+
+def _read_access(
+    statements: Iterable[exp.Expr], truncated_read: bool = False
+) -> AccessFacts | None:
+    """The access facts of parsed statements, or None for a tree the walk does not
+    expect (the caller falls back)."""
     try:
-        return _access_facts(list(parsed.statements))
+        facts = _access_facts(list(statements))
     except Exception:  # noqa: BLE001 -- a tree the walk does not expect falls back too
-        return AccessFacts("select", (), False, False, "regex", "parse_error")
+        return None
+    return replace(facts, truncated_read=True) if truncated_read else facts
 
 
 def _statement_kind(statement: exp.Expr) -> StatementKind:

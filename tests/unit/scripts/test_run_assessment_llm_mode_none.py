@@ -188,10 +188,12 @@ def test_run_assessment_all_with_llm_mode_none_makes_no_model_calls(
     # DocumentDB never lands on DynamoDB). 68% after #1002 (73 of 107): every engine
     # weights cost the same 10%, so DynamoDB loses its 5-point cost bonus and three
     # key-scoped reads (``68b75de2`` and the ``wp_terms`` joins ``4f9d2751`` and
-    # ``966f5a33``) end on Aurora MySQL instead of DynamoDB.
+    # ``966f5a33``) end on Aurora MySQL instead of DynamoDB. 67% after #986 (72 of 107):
+    # ``REPLACE INTO wp_wc_product_meta_lookup`` is read as the insert by key it is
+    # (key lookup), which DynamoDB rates best, so it leaves Aurora MySQL.
     assert arch["rationale"] == (
         "Hybrid architecture: Aurora MySQL retained as the relational core "
-        "(68% of queries); DynamoDB for key-value access; ElastiCache for "
+        "(67% of queries); DynamoDB for key-value access; ElastiCache for "
         "caching hot data. Schema design was not run, so no tables are "
         "allocated yet."
     )

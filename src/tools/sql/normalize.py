@@ -87,11 +87,17 @@ class NormalizedQuery:
             by rule (``"paren_ellipsis"``, ``"list_ellipsis"``,
             ``"bare_placeholder"``). Empty when nothing was substituted,
             including for every non-MySQL-family dialect.
+        ends_incomplete: The text ends on a token that can never end a
+            statement (a trailing ``AND``, a comma, an operator, an open
+            parenthesis, a dangling ``.``): the collector's own cut-off
+            signal, which an unterminated quote is not (a quote scanner can
+            misread a dialect's string syntax; #986).
     """
 
     text: str
     truncated: bool
     substitutions: tuple[str, ...] = ()
+    ends_incomplete: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +114,18 @@ _MYSQL_FAMILY_DIALECTS = frozenset({"mysql", "mariadb"})
 # ---------------------------------------------------------------------------
 
 _QUOTE_CHARS = ("'", '"', "`")
+
+_POSTGRES_DIALECTS = frozenset({"postgresql", "postgres"})
+# Oracle alternative quoting: q'[...]', q'(...)', q'{...}', q'<...>' or q'!...!' (and the
+# national nq'...' form); the text runs until the closing delimiter and a quote.
+_ORACLE_Q_QUOTE_RE = re.compile(r"(?:[nN])?[qQ]'(?P<d>[^\s])")
+_Q_CLOSERS = {"[": "]", "(": ")", "{": "}", "<": ">"}
+
+
+def _starts_token(text: str, i: int) -> bool:
+    """Whether ``text[i]`` begins a token (is not inside an identifier like ``name'``)."""
+    return i == 0 or not (text[i - 1].isalnum() or text[i - 1] in "_$#")
+
 
 # PostgreSQL dollar-quoting: $$...$$ or $tag$...$tag$. A tag, if present,
 # follows identifier rules (starts with a letter or underscore), which is
@@ -155,6 +173,8 @@ def _scan(text: str, dialect: str) -> _Scan:
     truncation signal, the same way an unterminated quote does.
     """
     is_mysql = dialect.lower() in _MYSQL_FAMILY_DIALECTS
+    is_oracle = dialect.lower() == "oracle"
+    is_pg = dialect.lower() in _POSTGRES_DIALECTS
     nests = block_comments_nest(dialect)
     comment_depth = 0
     n = len(text)
@@ -186,6 +206,19 @@ def _scan(text: str, dialect: str) -> _Scan:
                 comment_depth = 1
                 mask[i] = mask[i + 1] = True
                 comment_mask[i] = comment_mask[i + 1] = True
+                i += 2
+                continue
+            if is_oracle and (m := _ORACLE_Q_QUOTE_RE.match(text, i)) and _starts_token(text, i):
+                # q'[...]' / nq'{...}': ends at the closing delimiter then a quote.
+                state = "q" + _Q_CLOSERS.get(m.group("d"), m.group("d")) + "'"
+                for j in range(i, m.end()):
+                    mask[j] = True
+                i = m.end()
+                continue
+            if is_pg and ch in "eE" and text[i + 1 : i + 2] == "'" and _starts_token(text, i):
+                # E'...': a backslash escapes the next character.
+                state = "E'"
+                mask[i] = mask[i + 1] = True
                 i += 2
                 continue
             if ch in _QUOTE_CHARS:
@@ -246,6 +279,29 @@ def _scan(text: str, dialect: str) -> _Scan:
                 state = None
                 i += len(delim)
                 continue
+            i += 1
+            continue
+
+        if state[0] == "q" and len(state) == 3:
+            if text[i : i + 2] == state[1:]:
+                mask[i + 1] = True
+                state = None
+                i += 2
+                continue
+            i += 1
+            continue
+
+        if state == "E'":
+            if ch == "\\" and i + 1 < n:
+                mask[i + 1] = True
+                i += 2
+                continue
+            if ch == "'":
+                if text[i + 1 : i + 2] == "'":
+                    mask[i + 1] = True
+                    i += 2
+                    continue
+                state = None
             i += 1
             continue
 
@@ -380,7 +436,11 @@ def _strip_comments(text: str, comment_mask: list[bool]) -> str:
 def _is_truncated(text: str, scan: _Scan) -> bool:
     if scan.unterminated_quote or scan.unterminated_comment or scan.paren_depth != 0:
         return True
+    return _ends_incomplete(text, scan)
 
+
+def _ends_incomplete(text: str, scan: _Scan) -> bool:
+    """The text, with comments removed, ends on a token that can never end a statement."""
     stripped = _strip_comments(text, scan.comment_mask).rstrip()
     if not stripped:
         return False
@@ -493,9 +553,10 @@ def normalize_digest_text(query_text: str, dialect: str) -> NormalizedQuery:
     """
     scan = _scan(query_text, dialect)
     truncated = _is_truncated(query_text, scan)
+    incomplete = _ends_incomplete(query_text, scan)
 
     if dialect.lower() not in _MYSQL_FAMILY_DIALECTS:
-        return NormalizedQuery(text=query_text, truncated=truncated, substitutions=())
+        return NormalizedQuery(query_text, truncated, (), incomplete)
 
     text, mask = query_text, scan.mask
     substitutions: list[str] = []
@@ -509,4 +570,4 @@ def normalize_digest_text(query_text: str, dialect: str) -> NormalizedQuery:
     text, mask, applied = _apply_rule(text, mask, _PLACEHOLDER_RE, "bare_placeholder", "NULL")
     substitutions.extend(applied)
 
-    return NormalizedQuery(text=text, truncated=truncated, substitutions=tuple(substitutions))
+    return NormalizedQuery(text, truncated, tuple(substitutions), incomplete)

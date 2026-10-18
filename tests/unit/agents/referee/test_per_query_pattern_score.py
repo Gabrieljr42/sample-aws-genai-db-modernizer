@@ -499,10 +499,8 @@ class TestTheQueryScoresItsOwnPattern:
         assert _score(query, "aurora_postgresql", {"aurora_postgresql": analysis}) == mean
 
     def test_an_unparsed_statement_keeps_its_tables_score(self):
-        """MySQL ``REPLACE INTO`` is a write the SQL facade cannot read (``unparsed``)."""
-        replace_into = _query(
-            "rep", "REPLACE INTO topics (id, title) VALUES (?, ?)", ["topics"], "INSERT"
-        )
+        """A data statement the SQL facade cannot read is ``unparsed``."""
+        replace_into = _query("rep", "UPDATE topics SET title = (((", ["topics"], "UPDATE")
         collector = {
             **_collector(replace_into),
             "metadata": {"source_database": {"engine": "mysql"}},

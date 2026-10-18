@@ -24,11 +24,13 @@ from src.agents.referee.access_pattern import (
     SCORED_CLASSES,
     SMALL_TABLE_MAX_ROWS,
     TEXT_SEARCH,
+    TRUNCATED_NOTE,
     UNANCHORED_JOIN,
     UNPARSED,
     UTILITY,
     SchemaKeys,
     classify_query,
+    query_access,
 )
 from src.agents.referee.query_shape import is_primary_key_first_row_read
 
@@ -212,8 +214,7 @@ class TestKeyScopedOneToMany:
             "SELECT COUNT(*) FROM order_items WHERE order_id = $1",
             "SELECT * FROM order_items WHERE order_id IN ($1, $2)",
             # A ranking window function combines nothing (the #875 definition).
-            "SELECT id, row_number() OVER (ORDER BY created_at) FROM orders "
-            "WHERE customer_id = $1",
+            "SELECT id, row_number() OVER (ORDER BY created_at) FROM orders WHERE customer_id = $1",
         ],
     )
     def test_rows_addressed_by_a_non_unique_key(self, sql):
@@ -222,8 +223,7 @@ class TestKeyScopedOneToMany:
     @pytest.mark.parametrize(
         "sql",
         [
-            "SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id = o.id "
-            "WHERE o.id = $1",
+            "SELECT COUNT(*) FROM orders o JOIN order_items i ON i.order_id = o.id WHERE o.id = $1",
             "SELECT SUM(i.qty) FROM orders o JOIN order_items i ON i.order_id = o.id "
             "WHERE o.customer_id = $1",
         ],
@@ -274,8 +274,7 @@ class TestKeyScopedOneToMany:
             "SELECT o.*, i.* FROM orders o LEFT JOIN order_items i ON o.id = i.order_id "
             "WHERE o.id = $1",
             # Anchored on the child side, reaching the parent by its key.
-            "SELECT * FROM order_items i JOIN orders o ON o.id = i.order_id "
-            "WHERE i.order_id = $1",
+            "SELECT * FROM order_items i JOIN orders o ON o.id = i.order_id WHERE i.order_id = $1",
             # A comma join anchored the same way.
             "SELECT * FROM orders o, order_items i WHERE i.order_id = o.id AND o.id = $1",
             # Three tables, every one reachable by key from the anchor.
@@ -518,7 +517,7 @@ class TestUnanchoredJoin:
     @pytest.mark.parametrize(
         "sql",
         [
-            "SELECT * FROM orders o JOIN order_items i ON i.order_id = o.id " "WHERE o.status = $1",
+            "SELECT * FROM orders o JOIN order_items i ON i.order_id = o.id WHERE o.status = $1",
             "SELECT * FROM orders o JOIN customers c ON c.id = o.customer_id",
             # The anchor reaches orders, but customers joins on non-key columns.
             "SELECT * FROM orders o JOIN customers c ON c.name = o.status WHERE o.id = $1",
@@ -542,8 +541,7 @@ class TestAggregation:
             "SELECT SUM(total) FROM orders WHERE created_at > $1",
             "SELECT customer_id, SUM(total) FROM orders WHERE customer_id = $1 "
             "GROUP BY customer_id",
-            "SELECT id, SUM(total) OVER (ORDER BY created_at) FROM orders "
-            "WHERE customer_id = $1",
+            "SELECT id, SUM(total) OVER (ORDER BY created_at) FROM orders WHERE customer_id = $1",
             "SELECT o.status, COUNT(*) FROM orders o JOIN order_items i "
             "ON i.order_id = o.id GROUP BY o.status",
             "SELECT status FROM orders GROUP BY status HAVING COUNT(*) > 1",
@@ -636,9 +634,7 @@ class TestTextSearch:
 
 class TestPrecedence:
     def test_the_most_demanding_shape_in_any_part_of_the_statement_wins(self):
-        sql = (
-            "SELECT * FROM orders WHERE id = $1 UNION ALL " "SELECT * FROM orders WHERE status = $2"
-        )
+        sql = "SELECT * FROM orders WHERE id = $1 UNION ALL SELECT * FROM orders WHERE status = $2"
         _assert_class(AD_HOC_FILTER, sql)
 
     def test_a_subquery_with_its_own_aggregation_makes_the_statement_aggregation(self):
@@ -709,8 +705,132 @@ class TestNotAnAccessPattern:
     def test_text_the_parser_cannot_read_is_unparsed_not_guessed(self):
         _assert_class(UNPARSED, "SELECT * FROM orders WHERE ((( id = ")
 
-    def test_a_write_sqlglot_reads_as_a_generic_command_is_unparsed_not_utility(self):
-        _assert_class(UNPARSED, "REPLACE INTO `settings` (`name`, `value`) VALUES (?, ?)", "mysql")
+    def test_a_write_the_parser_cannot_read_is_unparsed_not_utility(self):
+        """A data statement the facade cannot read is never ``utility`` (#986)."""
+        _assert_class(UNPARSED, "UPDATE settings SET value = (((", "mysql")
+        assert _classify("UPDATE settings SET value = (((", "mysql", "UPDATE") == UNPARSED
+
+
+class TestMysqlReplaceInto:
+    """#986: MySQL ``REPLACE INTO`` writes rows by key, like ``INSERT ... ON DUPLICATE KEY
+    UPDATE``; sqlglot reads it only as a generic command, so the facade reads it as
+    the ``INSERT`` it is."""
+
+    @pytest.mark.parametrize("engine", ["mysql", "mariadb"])
+    def test_is_a_write_by_key_like_an_insert_upsert(self, engine):
+        replace = "REPLACE INTO `settings` (`name`, `value`) VALUES (?, ?)"
+        upsert = (
+            "INSERT INTO `settings` (`name`, `value`) VALUES (?, ?) "
+            "ON DUPLICATE KEY UPDATE `value` = ?"
+        )
+        assert _classify(replace, engine) == KEY_LOOKUP
+        assert _classify(replace, engine) == _classify(upsert, engine)
+
+    def test_low_priority_and_lower_case_and_leading_space(self):
+        for sql in (
+            "REPLACE LOW_PRIORITY INTO settings (name, value) VALUES (?, ?)",
+            "  replace into settings (name, value) VALUES (?, ?)",
+        ):
+            _assert_class(KEY_LOOKUP, sql, "mysql")
+
+    def test_replace_select_is_a_write_too(self):
+        assert _classify(
+            "REPLACE INTO settings (name, value) SELECT name, 1 FROM flags", "mysql"
+        ) == _classify("INSERT INTO settings (name, value) SELECT name, 1 FROM flags", "mysql")
+
+    def test_only_mysql_reads_it_so(self):
+        """PostgreSQL and SQL Server have no ``REPLACE INTO``: not guessed."""
+        for engine in ("postgresql", "sqlserver"):
+            _assert_class(UNPARSED, "REPLACE INTO settings (name, value) VALUES (?, ?)", engine)
+
+    def test_a_replace_the_keyword_does_not_lead_is_left_alone(self):
+        """A comment first, or ``REPLACE t`` with no ``INTO``, falls back (a safe default)."""
+        sql = "/* x */ REPLACE INTO settings (name) VALUES (?)"
+        assert _classify(sql, "mysql", "INSERT") == UNPARSED
+        _assert_class(UNPARSED, "REPLACE settings (name) VALUES (?)", "mysql")
+
+    def test_the_replace_function_is_not_a_statement_keyword(self):
+        """``REPLACE(...)`` in a select list or a string stays what it was."""
+        _assert_class(
+            KEY_LOOKUP, "SELECT REPLACE(value, 'a', 'b') FROM settings WHERE name = ?", "mysql"
+        )
+        _assert_class(
+            AD_HOC_FILTER, "SELECT * FROM settings WHERE value = 'REPLACE INTO x'", "mysql"
+        )
+
+
+class TestACutShortDigest:
+    """#986: the collector cuts a long digest at a length cap, often mid-predicate. The
+    facade reads it up to its last complete predicate, and the class is never an anchor
+    the cut-off predicates could not show."""
+
+    ORDERS = "SELECT * FROM orders WHERE id = ? AND status = ? AND"
+
+    def _result(self, sql, engine="mysql"):
+        query = {"query_id": "q", "query_text": sql, "query_type": sql.split(None, 1)[0].upper()}
+        return classify_query(query, KEYS, engine)
+
+    def test_is_classified_not_unparsed_and_says_so(self):
+        result = self._result(self.ORDERS)
+        assert result.name != UNPARSED
+        assert result.reason.endswith(TRUNCATED_NOTE)
+
+    def test_the_same_statement_complete_keeps_its_key_anchor(self):
+        complete = self._result("SELECT * FROM orders WHERE id = ? AND status = ?")
+        assert complete.name == KEY_LOOKUP
+        assert TRUNCATED_NOTE not in complete.reason
+
+    def test_a_cut_short_prefix_is_never_key_anchored(self):
+        """The prefix pins the key, but the unseen tail is no evidence of an anchor."""
+        assert self._result(self.ORDERS).name == AD_HOC_FILTER
+
+    def test_a_cut_short_join_is_an_unanchored_join(self):
+        sql = (
+            "SELECT o.id FROM orders o JOIN order_items i ON ( o.id = i.order_id ) "
+            "WHERE o.id = ? AND i.qty > ? AND ( o.status = ? AND"
+        )
+        assert self._result(sql).name == UNANCHORED_JOIN
+
+    def test_a_cut_short_aggregate_is_an_aggregation(self):
+        sql = "SELECT SUM(total) FROM orders WHERE customer_id = ? AND created_at >= ? AND"
+        assert self._result(sql).name == AGGREGATION
+
+    def test_a_prefix_already_text_search_keeps_it(self):
+        sql = "SELECT * FROM products WHERE title LIKE '%x%' AND price > ? AND"
+        assert self._result(sql).name == TEXT_SEARCH
+
+    def test_text_cut_where_no_predicate_is_complete_stays_unparsed(self):
+        for sql in ("SELECT * FROM orders WHERE", "SELECT * FROM orders WHERE ((( id = "):
+            assert self._result(sql).name == UNPARSED, sql
+
+    def test_a_cut_inside_a_quoted_and_is_not_a_cut_point(self):
+        sql = "SELECT * FROM orders WHERE status = 'a AND b' AND"
+        result = self._result(sql)
+        assert result.name == AD_HOC_FILTER
+        assert result.reason.endswith(TRUNCATED_NOTE)
+
+    def test_a_complete_oracle_statement_with_an_alternative_quote_stays_unparsed(self):
+        """Review of #986: a complete statement is never read as a cut-short prefix."""
+        sql = "SELECT * FROM orders o WHERE o.id = :1 AND o.note = q'[don't AND stop]'"
+        result = self._result(sql, "oracle")
+        assert result.name == UNPARSED and TRUNCATED_NOTE not in result.reason
+
+    def test_a_cut_short_write_is_classed_without_its_outer_where(self):
+        sql = "UPDATE orders SET total = ( SELECT max(qty) FROM order_items WHERE order_id = orders.id AND"
+        result = self._result(sql, "postgresql")
+        assert result.name != UNPARSED and result.reason.endswith(TRUNCATED_NOTE)
+
+    def test_postgresql_digests_are_repaired_in_their_dialect(self):
+        sql = "SELECT * FROM orders WHERE customer_id = $1 AND status = $2 AND"
+        assert self._result(sql, "postgresql").name == AD_HOC_FILTER
+
+    def test_the_columns_it_pins_are_not_handed_to_the_analyses(self):
+        """The key-access and attribute analyses read the columns a query pins; a cut-short
+        digest's tail may pin others."""
+        query = {"query_id": "q", "query_text": self.ORDERS, "query_type": "SELECT"}
+        assert query_access(query, KEYS, "mysql").scopes == ()
+        full = dict(query, query_text="SELECT * FROM orders WHERE id = ? AND status = ?")
+        assert query_access(full, KEYS, "mysql").scopes != ()
 
     def test_a_digest_the_facade_falls_back_on_is_unparsed(self):
         """The digest step turns ``AGAINST (?)`` into ``AGAINST (NULL)``, which sqlglot
@@ -787,3 +907,19 @@ class TestWhichIndexColumnsAreKeys:
     def test_a_primary_or_foreign_key_needs_no_statistics(self):
         query = {"query_id": "q", "query_text": "SELECT * FROM order_items WHERE order_id = $1"}
         assert "cardinality" not in classify_query(query, KEYS, "postgresql").reason
+
+
+def test_no_bundled_sample_query_is_unparsed():
+    """#986: ADR-031 Decision 14 Amendment 7 says no bundled-sample statement keeps the
+    pre-switch rule for want of a parse. The committed routing snapshot records each
+    query's class (``k``)."""
+    import json
+    from pathlib import Path
+
+    baseline = Path(__file__).resolve().parents[3] / "e2e" / "baselines" / "routing_snapshot.json"
+    samples = json.loads(baseline.read_text())["samples"]
+    assert samples
+    for name, sample in samples.items():
+        classes = {row.get("k") for row in sample["queries"].values()}
+        assert UNPARSED not in classes, name
+        assert classes - {UTILITY, None}, name

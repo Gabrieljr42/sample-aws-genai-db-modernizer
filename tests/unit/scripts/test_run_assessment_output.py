@@ -408,9 +408,12 @@ def test_reality_check_status_line_has_the_distribution_for_the_approval_gate(
     # and goes to it as the source-compatible engine, a wp_options read now ties DocumentDB
     # and DynamoDB (placeholder DynamoDB), and two wp_terms joins leave a DynamoDB tie for
     # DocumentDB: dynamodb -1, aurora_mysql +1 (every moved query is in the #1002 PR).
+    # #986: ``REPLACE INTO wp_wc_product_meta_lookup`` (``d72966f8...``) is read as the
+    # insert by key it is (key lookup), which DynamoDB rates best: dynamodb +1,
+    # aurora_mysql -1.
     assert rc["before_distribution"] == {
-        "dynamodb": 31,
-        "aurora_mysql": 47,
+        "dynamodb": 32,
+        "aurora_mysql": 46,
         "documentdb": 28,
         "opensearch": 1,
     }

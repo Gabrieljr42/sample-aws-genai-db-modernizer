@@ -49,9 +49,13 @@ shows several shapes, in different scopes or in one, the later class wins):
 Two labels are not access patterns and take no class score: ``utility`` (a
 statement that reads or writes no table: ``SET``, ``SHOW``, transaction control,
 DDL, ``SELECT 1``, ``SELECT to_tsvector($1)``) and ``unparsed`` (a data statement
-the facade cannot parse, such as MySQL ``REPLACE INTO``, which sqlglot reads only
-as a generic command; no shape is guessed from it). A statement the facade cannot
-parse is ``utility`` when the collector did not type it as a data statement.
+the facade cannot parse; no shape is guessed from it). A statement the facade cannot
+parse is ``utility`` when the collector did not type it as a data statement. MySQL
+``REPLACE INTO`` is read as the ``INSERT`` it is (a write by key), and a digest the
+collector cut short is read up to its last complete predicate (the facade's
+``truncated_read``), but never as key-anchored: the cut-off predicates are not
+evidence of an anchor, so it is classed as the least anchored class its shape allows
+(``_cut_short_class``), and the reason says so (#986).
 
 A key column is a primary-key column, a foreign-key column, a unique index's
 leading column, or the leading column of a non-unique, non-text index unless the
@@ -430,6 +434,12 @@ def _reached(scope: _ScopeTables, facts: ScopeFacts, anchored: set[str]) -> set[
     return reached
 
 
+# Appended to the reason of a class read from a digest the collector cut short (#986).
+TRUNCATED_NOTE = (
+    " (read from a digest the collector cut short, up to its last complete predicate;"
+    " later predicates are not seen)"
+)
+_ANCHORED_CLASSES = frozenset({KEY_LOOKUP, KEY_SCOPED, REFERENCE_READ, KEY_RANGE})
 _DATA_QUERY_TYPES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE", "MERGE"})
 _WRITE_KINDS = frozenset({"insert", "update", "delete", "merge"})
 
@@ -474,7 +484,30 @@ def classify_facts(
     name, reason = max(found, key=lambda item: _SEVERITY[item[0]])
     if name == AD_HOC_FILTER and any(s.like_parameter and not s.text_search for s in facts.scopes):
         reason += " (its LIKE pattern is a bind parameter, so no text search is visible, #912)"
+    if facts.truncated_read:
+        name, reason = _cut_short_class(facts, name, reason)
     return AccessClassification(name, reason, _class_facts(facts, keys))
+
+
+def _cut_short_class(facts: AccessFacts, name: str, reason: str) -> tuple[str, str]:
+    """The class of a digest the collector cut short, from the prefix the facade read.
+
+    The unseen predicates are not evidence of a key anchor, and a key anchor is not a
+    harmless guess: a key-anchored join is not join participation, so one query read as
+    anchored can lift the relational evidence off a whole table (``aurora-anti-05``).
+    So a prefix that reads as anchored is classed as the least anchored class its shape
+    allows, an aggregation (it combines values), an unanchored join (more than one
+    table) or an ad hoc filter (one table); a prefix already in one of those classes,
+    or in ``text_search``, keeps it (#986).
+    """
+    if name not in _ANCHORED_CLASSES:
+        return name, reason + TRUNCATED_NOTE
+    scopes = facts.scopes
+    if any(s.aggregate for s in scopes):
+        return AGGREGATION, "aggregates rows no visible key anchors" + TRUNCATED_NOTE
+    if any(sum(1 for src in s.sources if not src.function) > 1 for s in scopes):
+        return UNANCHORED_JOIN, "joins tables with no visible key path" + TRUNCATED_NOTE
+    return AD_HOC_FILTER, "filters rows with no visible key anchor" + TRUNCATED_NOTE
 
 
 # The facade's text-search kinds, by the query-fact name a class score reads
@@ -614,4 +647,9 @@ def query_access(query: Mapping, keys: SchemaKeys, source_engine: str | None) ->
     facts = query_facts(text, source_engine).access_facts()
     classification = classify_facts(facts, keys, str(query.get("query_type") or ""))
     classification = _with_feature_facts(classification, text, source_engine)
+    if facts.truncated_read:
+        # A cut-short digest's class is read from its prefix, but the columns it pins
+        # are not evidence for the key-access and attribute analyses: the predicates
+        # that were cut off may pin others (#986).
+        return QueryAccess(classification, ())
     return QueryAccess(classification, tuple(_scope_columns(s, keys) for s in facts.scopes))

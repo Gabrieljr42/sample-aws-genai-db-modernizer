@@ -1842,7 +1842,7 @@
     "d1671227c280b76415519d9cd822726dceea9ec18daa5ef501d9a51b7a82e588": {"agrees": true, "fallback": "command", "parsed_by": "regex", "tables": ["wordpress.wp_wc_reserved_stock"]},
     "d4bf16d6ce4eb63d541be4f9536e2550869dcdb758b0b7a847c5dc63f832ed3c": {"agrees": true, "fallback": null, "parsed_by": "sqlglot", "tables": ["wordpress.wp_posts"]},
     "d5ae7abb4fb5271f15a4193c025bb6c2bd745ff7e0806d140f89069876cd7ee7": {"agrees": true, "fallback": null, "parsed_by": "sqlglot", "tables": ["wordpress.wp_terms", "wordpress.wp_term_taxonomy", "wordpress.wp_term_relationships"]},
-    "d72966f83d952df8a90f3fe081c626f33c8722f24535a4522b54f2528d12918d": {"agrees": true, "fallback": "command", "parsed_by": "regex", "tables": ["wordpress.wp_wc_product_meta_lookup"]},
+    "d72966f83d952df8a90f3fe081c626f33c8722f24535a4522b54f2528d12918d": {"agrees": true, "fallback": null, "parsed_by": "sqlglot", "tables": ["wordpress.wp_wc_product_meta_lookup"]},
     "d8ba7aa10cff6283c53efd73611a20ce4602f7d95d3aeda0c024df5fdd792223": {"agrees": true, "fallback": null, "parsed_by": "sqlglot", "tables": ["wordpress.wp_posts"]},
     "d99618ea3724cae0b2ef0dda96a021dda2c50c6b3ba3847b9ccf307ad044ec67": {"agrees": true, "fallback": null, "parsed_by": "sqlglot", "tables": ["wordpress.wp_posts"]},
     "de9a7ba3598eaa8b41839c2fce3889985e5636fc7489653be3b59378bf4779da": {"agrees": true, "fallback": null, "parsed_by": "sqlglot", "tables": ["wordpress.wp_comments"]},
