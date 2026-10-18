@@ -32,6 +32,7 @@ from src.agents.referee.summary_input_budget import (
     headless_text,
     table_query_weights,
 )
+from src.agents.referee.summary_input_slim import slim_summary_input
 from src.agents.referee.synthesis_handler import prepare_synthesis_llm_input
 
 ENGINES = ("aurora_postgresql", "dynamodb", "documentdb", "opensearch")
@@ -357,12 +358,13 @@ class TestQuotedFiguresSurvive:
         whole = _uncapped(det)
         for key in ("risks", "resolved_risks"):
             got = payload["risk_assessment"][key]
-            full = whole["risk_assessment"][key]
-            assert len(got) == len(full)
+            full = det["risk_assessment"][key]
+            assert len(got) == len(full) == len(whole["risk_assessment"][key])
             for capped, entry in zip(got, full, strict=True):
                 assert capped["severity"] == entry["severity"]
                 assert capped["description"] == entry["description"]
-                assert capped["query_ids_total"] == len(entry["query_ids"])
+                assert capped["query_count"] == len(entry["query_ids"])
+                assert "query_ids" not in capped
                 assert capped["affected_tables_total"] == len(entry["affected_tables"])
         assert (
             payload["risk_assessment"]["overall_risk_level"]
@@ -481,7 +483,7 @@ class TestTableRanking:
         assert weights == {"a": 2, "b": 1}
 
 
-def test_query_ids_are_cut_in_sorted_order_whatever_the_input_order(large):
+def test_the_request_does_not_depend_on_the_order_of_query_ids(large):
     det, payload = large
     shuffled = copy.deepcopy(det)
     rng = random.Random(3)
@@ -505,3 +507,96 @@ def test_every_total_field_is_an_internal_name(name):
 
     (finding,) = check_summary_internal_leaks(f"The {name} says there are more.")
     assert finding["high_confidence"]
+
+
+# --- The fixed part (#1064) --------------------------------------------------
+
+# Fields a model-designed run carries that the summary never reads, in the sizes
+# a wordpress run with schema designs produced.
+_SCORE_FIELDS = {
+    "confidence_score": 50,
+    "analysis_confidence": 50,
+    "routed_confidence": 73,
+    "weight": 0.397,
+    "monthly_cost_usd": 318.8,
+    "tables_analyzed": 50,
+    "tables_highly_suitable": 12,
+    "tables_suitable": 7,
+    "tables_marginal": 3,
+    "tables_not_suitable": 28,
+    "patterns_detected": 8,
+    "anti_patterns_detected": 3,
+    "migration_complexity_avg": "LOW",
+    "routed_confidence_basis": "owned_queries",
+    "routed_lead": "key_value_lookups",
+    "routed_confidence_evidence": "partial",
+    "rationale": "73% mean fit across 70 queries (20 rated tables), pinned by a utility or DDL "
+    "statement, aggregation, full-text or pattern search and multi-table joins. estimated $318.80/month.",
+}
+
+
+def _model_run_det() -> dict:
+    """A small workload whose designs were written by a model: many trade-offs and
+    mappings, scoring-rich ranking entries, long wave prose, 64-hex query IDs."""
+    det = _synthetic_det(n_queries=400, n_tables=60, n_groups=40)
+    for r in det["ranking"]:
+        r.update(_SCORE_FIELDS)
+        r["assignment_reason_summary"] = ["utility statement kept on the relational engine " * 4]
+    qids = [qa["query_id"] for qa in det["data"].assignment["query_assignments"]]
+    tables = sorted({t for e in det["effective_architecture"]["engines"] for t in e["tables"]})
+    det["trade_offs"] = [
+        {
+            "description": f"Statement {i} filters on a non-key column, so it becomes a Query "
+            "on a global secondary index followed by one write per returned item.",
+            "impact": "A single SQL statement becomes a Query plus a batch of item writes, "
+            "which are not atomic across items; a failed run is retried by repeating it.",
+            "source_tables": [f"shop.{t}" for t in tables[i % 50 : i % 50 + 2]],
+            "target_tables": tables[i % 50 : i % 50 + 2],
+            "query_ids": qids[i : i + 6],
+            "engine": ENGINES[i % 4],
+        }
+        for i in range(120)
+    ]
+    for m in det["table_mappings"]:
+        m["alternatives"] = [
+            {"database": e, "target_table": m["target_table"], "confidence_score": 80}
+            for e in ENGINES[:3]
+        ]
+    for w in det["migration_waves"]:
+        w["rationale"] = "The whole source database moves one to one, same engine family. " * 6
+        w["gate"] = "Schema and data parity validated against the source before cutover. " * 3
+    return det
+
+
+def _fixed_part_tokens(payload: dict) -> int:
+    payload = {k: v for k, v in payload.items() if k != "input_budget"}
+    emptied, _ = budget_mod._cap(payload, 0, budget_mod._group_weights(payload["query_groups"]))
+    return estimate_tokens(emptied)
+
+
+class TestFixedPart:
+    def test_a_model_run_fits_with_its_list_detail_kept(self):
+        payload = prepare_synthesis_llm_input(_model_run_det())
+        assert estimate_tokens(payload) <= SUMMARY_INPUT_TOKEN_BUDGET
+        status = payload.get("input_budget")
+        assert status is None or (status["within_budget"] and status["list_limit"] >= 12)
+
+    def test_the_fixed_part_leaves_room_for_the_lists(self):
+        assert _fixed_part_tokens(prepare_synthesis_llm_input(_model_run_det())) <= (
+            SUMMARY_INPUT_TOKEN_BUDGET // 2
+        )
+
+    def test_trade_offs_are_cut_with_their_total_and_the_widest_stay(self):
+        det = _model_run_det()
+        det["trade_offs"][7]["query_ids"] = [f"{n:064x}" for n in range(50)]
+        slim = slim_summary_input({k: v for k, v in det.items() if k != "data"})
+        capped, lists = budget_mod._cap(slim, 5, {})
+        assert len(capped["trade_offs"]) == 5
+        assert capped["trade_offs_total"] == 120
+        assert capped["trade_offs"][0]["query_count"] == 50
+        assert any(entry["path"] == "trade_offs" for entry in lists)
+
+    def test_a_list_within_the_limit_is_not_cut_and_has_no_total(self):
+        det = _small_det()
+        payload = prepare_synthesis_llm_input(det)
+        assert "trade_offs_total" not in payload
