@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.tools.sql.facade import ColumnFact, access_facts
+from src.tools.sql.facade import ColumnFact, access_facts, sql_facts, table_references
 
 
 def _scope(sql, engine="postgresql", index=0):
@@ -230,3 +230,125 @@ class TestTimeBucket:
     )
     def test_anything_else_is_not_a_time_bucket(self, sql):
         assert not any(s.time_bucket for s in access_facts(sql, "postgresql").scopes)
+
+
+class TestMysqlReplaceInto:
+    """#986: ``REPLACE INTO`` is read as the ``INSERT`` it is, in MySQL's dialect only."""
+
+    SQL = "REPLACE INTO `wp_lookup` ( `product_id` , `sku` ) VALUES (...)"
+
+    def test_is_an_insert_of_values(self):
+        facts = access_facts(self.SQL, "mysql")
+        assert (facts.parsed_by, facts.kind, facts.inserts_values) == ("sqlglot", "insert", True)
+        assert facts.fallback_reason is None
+
+    def test_the_table_is_the_same_one_the_regex_found(self):
+        refs = table_references(self.SQL, "mysql")
+        assert refs.parsed_by == "sqlglot"
+        assert [r.name for r in refs.tables] == ["wp_lookup"]
+
+    def test_other_dialects_do_not_read_it(self):
+        assert access_facts(self.SQL, "postgresql").parsed_by == "regex"
+
+    def test_a_replace_function_call_is_untouched(self):
+        facts = access_facts("SELECT REPLACE(sku, 'a', 'b') FROM t WHERE id = ?", "mysql")
+        assert facts.kind == "select" and not facts.truncated_read
+
+
+class TestACutShortDigest:
+    """#986: a digest cut mid-predicate is read up to its last complete predicate by the
+    access facts only; the table references and the query-shape facts still fall back."""
+
+    CUT = "SELECT a FROM t JOIN u ON ( t.id = u.t_id AND u.k = ? ) WHERE t.x = ? AND t ."
+
+    def test_the_access_facts_read_the_prefix_and_say_so(self):
+        facts = access_facts(self.CUT, "mysql")
+        assert (facts.parsed_by, facts.truncated_read) == ("sqlglot", True)
+        assert [s.alias for s in facts.scopes[0].sources] == ["t", "u"]
+        assert set(facts.scopes[0].equalities) == {ColumnFact("t", "x"), ColumnFact("u", "k")}
+
+    def test_a_complete_statement_is_not_marked(self):
+        assert not access_facts("SELECT a FROM t WHERE x = ?", "mysql").truncated_read
+
+    def test_the_other_readers_still_fall_back(self):
+        assert table_references(self.CUT, "mysql").parsed_by == "regex"
+        assert sql_facts(self.CUT, "mysql").parsed_by == "regex"
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM t WHERE",
+            "SELECT * FROM t WHERE (((",
+            "AND AND",
+            "SELECT 1 WHERE x = ? AND",
+        ],
+    )
+    def test_nothing_to_cut_back_to_stays_unreadable(self, sql):
+        facts = access_facts(sql, "mysql")
+        assert facts.parsed_by == "regex" and not facts.truncated_read and not facts.scopes
+
+    def test_an_unterminated_string_alone_is_not_a_cut(self):
+        """No cut-off signal (the text ends inside a string, not on a dangling token): the
+        quote scanner may have misread it, so nothing is repaired."""
+        facts = access_facts("SELECT * FROM t WHERE a = ? AND b = 'x AND y", "mysql")
+        assert not facts.truncated_read and not facts.scopes
+
+    def test_a_non_truncated_syntax_error_is_not_repaired(self):
+        """Only a digest the normalizer flags as cut short is repaired."""
+        facts = access_facts("SELECT * FROM t WHERE a = ? AND b = = ? AND c = ?", "mysql")
+        assert facts.parsed_by == "regex" and not facts.truncated_read
+
+
+class TestOnlyARealCutIsRepaired:
+    """#986 review: the repair needs the collector's own cut-off signal (the text ends on a
+    token that cannot end a statement, or a MySQL digest is at its length cap), not just an
+    unterminated quote, and the quote scanner knows Oracle ``q'[...]'`` and PostgreSQL
+    ``E'...'`` strings."""
+
+    ORACLE = "SELECT * FROM orders o WHERE o.id = :1 AND o.note = q'[don't AND stop]'"
+
+    def test_an_oracle_alternative_quote_is_a_string_not_a_cut(self):
+        from src.tools.sql.normalize import normalize_digest_text
+
+        assert not normalize_digest_text(self.ORACLE, "oracle").truncated
+        facts = access_facts(self.ORACLE, "oracle")
+        # sqlglot cannot read it either: it stays unparsed, as on main, never a prefix.
+        assert not facts.truncated_read and not facts.scopes
+
+    @pytest.mark.parametrize("closer", ["[ ]", "( )", "{ }", "< >", "! !"])
+    def test_every_oracle_delimiter_and_the_national_form(self, closer):
+        from src.tools.sql.normalize import normalize_digest_text
+
+        a, b = closer.split()
+        for prefix in ("q", "nq"):
+            sql = f"SELECT 1 FROM t WHERE a = {prefix}'{a}it's AND ({b}' AND b = 1"
+            assert not normalize_digest_text(sql, "oracle").truncated, sql
+
+    def test_an_unknown_quote_form_alone_is_never_repaired(self):
+        """A string the scanner misreads as unterminated, on a dialect it does not know the
+        form for, still ends on a quote: no cut-off signal, so not repaired."""
+        sql = "SELECT * FROM t WHERE a = ? AND b = q'[x AND y]'"
+        facts = access_facts(sql, "mysql")
+        assert not facts.truncated_read and facts.parsed_by == "regex"
+
+    def test_a_postgresql_escape_string_is_a_string(self):
+        from src.tools.sql.normalize import normalize_digest_text
+
+        sql = r"SELECT * FROM t WHERE a = $1 AND b = E'it\'s AND more'"
+        assert not normalize_digest_text(sql, "postgresql").truncated
+        assert normalize_digest_text(sql + " AND", "postgresql").truncated
+        assert not access_facts(sql, "postgresql").truncated_read
+
+    def test_an_identifier_ending_in_q_or_e_is_not_a_string_prefix(self):
+        from src.tools.sql.normalize import normalize_digest_text
+
+        assert normalize_digest_text("SELECT 1 FROM t WHERE nameq'x", "oracle").truncated
+        assert normalize_digest_text("SELECT 1 FROM t WHERE name_e'x", "postgresql").truncated
+
+    def test_a_cut_digest_ending_on_a_token_is_still_repaired(self):
+        assert access_facts("SELECT a FROM t WHERE x = ? AND y = ? AND", "oracle").truncated_read
+
+    def test_a_mysql_digest_at_its_cap_is_repaired_without_a_dangling_token(self):
+        padded = "SELECT a FROM t WHERE x = ? AND y = 'q AND z" + "w" * 1100
+        assert access_facts(padded, "mysql").truncated_read
+        assert not access_facts(padded[:900], "mysql").truncated_read
